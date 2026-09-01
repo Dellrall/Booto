@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 
 project(booto
-    VERSION 0.3.5
+    VERSION 0.4.0
     DESCRIPTION "Debian-Based Tails-Inspired Live Linux Forensic Rootkit & Bootkit Detection Suite"
     LANGUAGES C
 )
@@ -64,6 +64,9 @@ set(BOOT_LIB_SOURCES
     src/elf_analyzer.c
     src/kernel_inspector.c
     src/uefi_analyzer.c
+    src/initramfs_auditor.c
+    src/preload_scanner.c
+    src/ext4_diff.c
     src/disk_mount.c
     src/tui/terminal.c
     src/tui/wm.c
@@ -103,6 +106,18 @@ add_test(NAME test_elf_analyzer COMMAND test_elf_analyzer)
 add_executable(test_uefi_analyzer tests/test_uefi_analyzer.c)
 target_link_libraries(test_uefi_analyzer PRIVATE booto_core)
 add_test(NAME test_uefi_analyzer COMMAND test_uefi_analyzer)
+
+add_executable(test_initramfs_auditor tests/test_initramfs_auditor.c)
+target_link_libraries(test_initramfs_auditor PRIVATE booto_core)
+add_test(NAME test_initramfs_auditor COMMAND test_initramfs_auditor)
+
+add_executable(test_preload_scanner tests/test_preload_scanner.c)
+target_link_libraries(test_preload_scanner PRIVATE booto_core)
+add_test(NAME test_preload_scanner COMMAND test_preload_scanner)
+
+add_executable(test_ext4_diff tests/test_ext4_diff.c)
+target_link_libraries(test_ext4_diff PRIVATE booto_core)
+add_test(NAME test_ext4_diff COMMAND test_ext4_diff)
 
 # Custom Target for ISO generation
 add_custom_target(iso

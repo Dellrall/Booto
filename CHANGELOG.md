@@ -7,14 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.4.0-beta] - 2026-09-01
+
+### Added
+- **Full Modular Forensic Detection Engines Suite (Stage 4 Complete)**:
+  - **In-Memory Initramfs Decompressor & Script Auditor (`include/initramfs_auditor.h`, `src/initramfs_auditor.c`)**:
+    - Zero-dependency CPIO archive parser extracting `/boot/initrd.img*` in memory without host disk extraction.
+    - Early-boot script audit engine flagging reverse shells (`/dev/tcp/`, `bash -i`, `nc -e`, `mkfifo`), silent payload downloaders (`curl -s`, `wget -q`), and ramdisk LKM injections.
+    - Unit tests in `tests/test_initramfs_auditor.c`.
+  - **Userland `LD_PRELOAD` & PAM Interceptor Scanner (`include/preload_scanner.h`, `src/preload_scanner.c`)**:
+    - Scans target `/etc/ld.so.preload` and dynamic linker search paths in `/etc/ld.so.conf.d/*.conf` for active userland shared library hooks (e.g. Azazel, Jynx, libprocesshider).
+    - Computes SHA-256 signatures of referenced shared objects.
+    - Unit tests in `tests/test_preload_scanner.c`.
+  - **Raw Ext4 Inode vs VFS Cross-View Differential Engine (`include/ext4_diff.h`, `src/ext4_diff.c`)**:
+    - Direct byte-level parser for Ext4 superblocks (`0xEF53`) and inode tables.
+    - Performs cross-view differential analysis between raw physical disk inodes and mounted VFS directory trees to discover unlinked or hidden rootkit inodes.
+    - Unit tests in `tests/test_ext4_diff.c`.
+
+---
+
 ## [0.3.5-beta] - 2026-09-01
 
 ### Added
 - **UEFI & ESP Bootkit Analyzer (Sub-Stage 4B)**:
-  - PE32+ (PE/COFF) binary parser (`include/uefi_analyzer.h`, `src/uefi_analyzer.c`) extracting DOS headers, COFF machine architecture, entry points, and optional header data directories.
-  - Authenticode Certificate Directory extractor verifying whether `.efi` bootloaders possess valid embedded digital signatures.
-  - Secure Boot DBX Revocation List matching engine (detecting BlackLotus CVE-2022-21894/CVE-2023-24932 revoked Windows bootloaders, BootHole CVE-2020-10713 vulnerable GRUB2 shims, ESPecter, and MoonBounce stage-2 loaders).
-  - ESP directory scanner recursively auditing `/boot/efi/EFI/` and flagging unsigned/revoked binaries.
+  - PE32+ (PE/COFF) binary parser (`include/uefi_analyzer.h`, `src/uefi_analyzer.c`).
+  - Authenticode Certificate Directory extractor verifying digital signatures on `.efi` loaders.
+  - Secure Boot DBX Revocation List matching engine (BlackLotus, BootHole, ESPecter, MoonBounce).
   - Unit test suite in `tests/test_uefi_analyzer.c`.
 
 ---
