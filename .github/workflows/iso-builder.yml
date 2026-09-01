@@ -13,6 +13,10 @@ jobs:
   build-live-iso:
     name: Compile Debian Live ISO & Publish
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      discussions: write
+      packages: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -53,6 +57,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
+          token: ${{ secrets.GITHUB_TOKEN }}
           files: |
             dist/booto-live-amd64.iso
             dist/booto-live-amd64.iso.sha256
