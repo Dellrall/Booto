@@ -1,0 +1,25 @@
+{
+  "updated_at": "2026-09-01T00:00:00Z",
+  "signatures": [
+    {
+      "name": "Diamorphine LKM",
+      "symbols": ["diamorphine_init", "diamorphine_cleanup", "hacked_kill", "module_hidden", "sys_call_table"],
+      "severity": "CRITICAL"
+    },
+    {
+      "name": "Reptile Kernel Rootkit",
+      "symbols": ["reptile_init", "khook_init", "r_hide_proc", "reptile_listen"],
+      "severity": "CRITICAL"
+    },
+    {
+      "name": "Suterusu Rootkit",
+      "symbols": ["suterusu_init", "suterusu_read_hook", "suterusu_write_hook"],
+      "severity": "CRITICAL"
+    },
+    {
+      "name": "Azazel Userland Preload",
+      "patterns": ["libazazel.so", "unhide_tcp", "unhide_udp"],
+      "severity": "HIGH"
+    }
+  ]
+}

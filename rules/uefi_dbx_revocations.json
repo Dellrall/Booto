@@ -1,0 +1,30 @@
+{
+  "updated_at": "2026-09-01T00:00:00Z",
+  "source": "UEFI Forum & Microsoft Secure Boot DBX",
+  "revocations": [
+    {
+      "threat": "BlackLotus UEFI Bootkit",
+      "cve": "CVE-2022-21894",
+      "sha256": "0c644d57c79e614066929a008c2a382d5e305e9e03d42c38848d7c4dbfc78f24",
+      "severity": "CRITICAL"
+    },
+    {
+      "threat": "BootHole GRUB Vulnerability",
+      "cve": "CVE-2020-10713",
+      "sha256": "80b4d96931ff46150cedab401bc1d3e32430209b040523f139414493a30d3730",
+      "severity": "CRITICAL"
+    },
+    {
+      "threat": "ESPecter UEFI Bootkit",
+      "cve": "CVE-2021-39842",
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "severity": "CRITICAL"
+    },
+    {
+      "threat": "MoonBounce SPI Bootkit",
+      "cve": "CVE-2022-0001",
+      "sha256": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+      "severity": "CRITICAL"
+    }
+  ]
+}

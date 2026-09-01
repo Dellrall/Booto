@@ -55,6 +55,7 @@ static void print_help(const char *prog_name) {
     printf("  -m, --mock-drives          Inject virtual mock drives for TUI testing\n");
     printf("  -s, --scan-dir <path>      Specify local rootfs path to inspect\n");
     printf("  -p, --persistence-dir <dir>Specify directory for encrypted reports\n");
+    printf("  -u, --update-rules         Fetch latest DBX revocations & rootkit signatures\n");
     printf("  -V, --verbose              Enable verbose/debug logging\n\n");
 }
 
@@ -70,13 +71,14 @@ int main(int argc, char *argv[]) {
         {"mock-drives",     no_argument,       0, 'm'},
         {"scan-dir",        required_argument, 0, 's'},
         {"persistence-dir", required_argument, 0, 'p'},
+        {"update-rules",    no_argument,       0, 'u'},
         {"verbose",         no_argument,       0, 'V'},
         {0, 0, 0, 0}
     };
 
     int opt;
     int option_index = 0;
-    while ((opt = getopt_long(argc, argv, "hvcdms:p:V", long_options, &option_index)) != -1) {
+    while ((opt = getopt_long(argc, argv, "hvcdms:p:uV", long_options, &option_index)) != -1) {
         switch (opt) {
             case 'h':
                 print_help(argv[0]);
@@ -84,6 +86,13 @@ int main(int argc, char *argv[]) {
             case 'v':
                 printf("Booto version %s (commit %s, built %s)\n",
                        BOOTO_VERSION_STRING, BOOTO_GIT_HASH, BOOTO_BUILD_TIMESTAMP);
+                return 0;
+            case 'u':
+                logger_init(LOG_LEVEL_INFO, NULL);
+                LOG_INFO("Triggering Booto forensic rules and DBX updater...");
+                int res = system("./scripts/update_rules.sh");
+                (void)res;
+                logger_shutdown();
                 return 0;
             case 'c':
                 ctx.mode = BOOTO_MODE_CLI;

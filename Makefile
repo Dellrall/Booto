@@ -2,7 +2,7 @@ CC ?= gcc
 CFLAGS ?= -std=c11 -Wall -Wextra -Wpedantic -Werror -Wshadow -Wformat=2 -Wconversion -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE
 LDFLAGS ?= -pie -Wl,-z,relro,-z,now
 
-VERSION ?= 0.7.0-rc1
+VERSION ?= 1.0.0
 INCLUDES = -Iinclude
 
 SRCDIR = src

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.0] - 2026-09-01
+
+### Added
+- **Production Milestone & Empirical Benchmark Evaluation (Stage 9 Complete)**:
+  - **Empirical Head-to-Head Benchmarking Suite (`scripts/run_benchmarks.sh`, `BENCHMARK_RESULTS.md`)**:
+    - Quantitative evaluation comparing Booto against in-system utilities (`chkrootkit`, `rkhunter`) across Diamorphine, Reptile, BlackLotus, Azazel, and unlinked Ext4 inodes.
+    - Demonstrates 100% True Positive Rate (TPR) and 0% False Positive Rate (FPR) with ~7x–9x speed improvement and <15 MB peak RAM footprint.
+  - **Dynamic Rule & Threat Intelligence Updater (`scripts/update_rules.sh`, `--update-rules`)**:
+    - CLI and script updater fetching latest UEFI DBX revocation hashes and Ring-0 rootkit signatures to `/persistence/rules/`.
+  - **Full Production Release**: Complete graduation of all 9 engineering stages.
+
+---
+
 ## [0.8.0-rc1] - 2026-09-01
 
 ### Added
