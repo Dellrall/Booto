@@ -1,0 +1,17 @@
+# <type>(<scope>): <subject> (Max 50 chars)
+# |<----  Using a Maximum Of 50 Characters  ---->|
+
+# Explain why this change is being made (Max 72 chars per line)
+# |<----   Try To Limit Each Line to a Maximum Of 72 Characters   ---->|
+
+# Provide links or references to issues/stages:
+# Stage: Stage X (vX.Y.Z)
+# Refs: #123
+
+# --- Commit Types ---
+# feat:     A new feature / forensic detection engine / TUI panel
+# fix:      A bug fix or memory leak resolution
+# docs:     Documentation changes, README, or blueprint updates
+# test:     Adding or modifying unit/mock tests
+# refactor: Code change that neither fixes a bug nor adds a feature
+# chore:    Toolchain, CMake, CI/CD, or build script updates
