@@ -45,9 +45,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cppcheck clang-tidy libncurses-dev libblkid-dev
 
+      - name: Generate Version Header
+        run: make version
+
       - name: Run cppcheck
         run: |
-          cppcheck --enable=warning,performance,portability \
+          cppcheck --std=c11 \
+                   --enable=warning,performance,portability \
                    --inline-suppr \
                    --suppress=missingInclude \
                    --suppress=missingIncludeSystem \
