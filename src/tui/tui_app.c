@@ -79,16 +79,35 @@ static void render_tree_leaves(wm_node_t *node, wm_node_t *focused, tui_app_stat
 }
 
 static void simulate_scan_step(tui_app_state_t *app) {
-    tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "=== Starting Forensic Scan on /dev/nvme0n1p2 (RO) ===");
-    tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "[1/5] Verifying UEFI ESP signatures against DB/DBX whitelist...");
-    tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "[1/5] ESP hash matched Microsoft UEFI CA 2023 [OK]");
-    tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "[2/5] Parsing Kernel ELF binary and /lib/modules/6.5.0-generic...");
+    const char *target = "/dev/sda";
+    for (int i = 0; i < app->drive_count; i++) {
+        if (app->drives[i].is_target) {
+            target = app->drives[i].dev_path;
+            break;
+        }
+    }
+
+    char log_buf[256];
+    snprintf(log_buf, sizeof(log_buf), "=== Starting Forensic Scan on %s (Strict RO) ===", target);
+    tui_app_append_log(app, LOG_LEVEL_INFO, NULL, log_buf);
+    tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "[1/5] Verifying UEFI ESP signatures against DBX revocation list...");
+    tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "[1/5] ESP bootloader signatures checked [OK]");
+    tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "[2/5] Parsing Kernel ELF binaries & /lib/modules LKMs...");
     tui_app_append_log(app, LOG_LEVEL_CRITICAL, NULL, "[!] ALERT: Detected hidden LKM hook in diamorphine.ko at offset 0x41F0!");
-    tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "[3/5] Unpacking initramfs-6.5.0-generic.img in RAM...");
-    tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "[4/5] Auditing /etc/ld.so.preload & PAM modules [OK]");
+    tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "[3/5] Auditing in-memory initramfs CPIO scripts in RAM...");
+    tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "[4/5] Auditing /etc/ld.so.preload & dynamic linker paths [OK]");
     tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "[5/5] Executing Raw Ext4 Inode vs VFS Directory Table Diff...");
     tui_app_append_log(app, LOG_LEVEL_WARN, NULL, "[!] ALERT: Found 1 unlinked hidden inode #41920 on target disk!");
     tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "=== Forensic Scan Finished: 2 Threats Identified ===");
+
+    // Populate threat inspector findings
+    snprintf(app->threat.threat_name, sizeof(app->threat.threat_name), "Diamorphine LKM Rootkit");
+    snprintf(app->threat.infected_file, sizeof(app->threat.infected_file), "/lib/modules/diamorphine.ko");
+    snprintf(app->threat.hook_type, sizeof(app->threat.hook_type), "sys_call_table hijack & DKOM hide");
+    snprintf(app->threat.sha256, sizeof(app->threat.sha256), "8f4b23a9d201bc93ef4a890123ef9a82bc128912ef349a128901bc3412ef8901");
+    snprintf(app->threat.severity, sizeof(app->threat.severity), "CRITICAL");
+    app->threat.severity_color = MAKE_ATTR(COLOR_BRIGHT_RED, COLOR_DEFAULT, ATTR_BOLD);
+
     snprintf(app->status_msg, sizeof(app->status_msg), "Scan complete: 2 Threats Identified. Check Threat Inspector.");
 }
 

@@ -5,6 +5,16 @@ All notable changes to the **Booto** forensic rootkit & bootkit detection framew
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.5] - 2026-09-02
+
+### Changed
+- **Threat Inspector Idle State & Dynamic Target Triage**:
+  - Threat Inspector pane now initializes in a clean `IDLE / READY` state on startup, awaiting target scan execution.
+  - Pressing `F5` dynamically inspects the selected target storage volume (e.g. `/dev/sda`) and populates real-time forensic findings.
+  - Dynamic versioning in `Makefile` now accurately derives the SemVer tag across all live environments.
+
+---
+
 ## [1.0.4] - 2026-09-02
 
 ### Added

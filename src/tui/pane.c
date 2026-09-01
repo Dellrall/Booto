@@ -75,23 +75,20 @@ void tui_app_state_init(tui_app_state_t *app, booto_context_t *ctx) {
     snprintf(app->modules[4].status_text, sizeof(app->modules[4].status_text), "READY");
     app->modules[4].status_color = MAKE_ATTR(COLOR_GREEN, COLOR_DEFAULT, ATTR_BOLD);
 
-    // Initial mock threat finding
-    snprintf(app->threat.threat_name, sizeof(app->threat.threat_name), "Diamorphine LKM Rootkit");
-    snprintf(app->threat.infected_file, sizeof(app->threat.infected_file), "/lib/modules/6.5.0-generic/diamorphine.ko");
-    snprintf(app->threat.hook_type, sizeof(app->threat.hook_type), "sys_call_table hijack & DKOM hide");
-    snprintf(app->threat.sha256, sizeof(app->threat.sha256), "8f4b23a9d201bc93ef4a890123ef9a82bc128912ef349a128901bc3412ef8901");
-    snprintf(app->threat.severity, sizeof(app->threat.severity), "CRITICAL");
-    app->threat.severity_color = MAKE_ATTR(COLOR_BRIGHT_RED, COLOR_DEFAULT, ATTR_BOLD);
-    snprintf(app->threat.hex_dump, sizeof(app->threat.hex_dump),
-             "0x0000: 7f 45 4c 46 02 01 01 00  .ELF....\n"
-             "0x0008: 00 00 00 00 00 00 00 00  ........\n"
-             "0x0010: e9 a4 1f 00 00 48 89 e5  .....H..");
+    // Initial clean/idle threat inspector state
+    snprintf(app->threat.threat_name, sizeof(app->threat.threat_name), "None (System Idle)");
+    snprintf(app->threat.infected_file, sizeof(app->threat.infected_file), "Waiting for target scan analysis");
+    snprintf(app->threat.hook_type, sizeof(app->threat.hook_type), "Press F5 to initiate forensic scan");
+    snprintf(app->threat.sha256, sizeof(app->threat.sha256), "0000000000000000000000000000000000000000000000000000000000000000");
+    snprintf(app->threat.severity, sizeof(app->threat.severity), "CLEAN / IDLE");
+    app->threat.severity_color = MAKE_ATTR(COLOR_GREEN, COLOR_DEFAULT, ATTR_BOLD);
+    snprintf(app->threat.hex_dump, sizeof(app->threat.hex_dump), "Ready to inspect host storage for Ring-0/Ring-3 rootkits.");
 
     // Initial logs
-    tui_app_append_log(app, LOG_LEVEL_INFO, "22:50:01", "Booto forensic TUI window manager initialized");
-    tui_app_append_log(app, LOG_LEVEL_INFO, "22:50:02", "Amnesic live operating system verified in RAM (tmpfs)");
-    tui_app_append_log(app, LOG_LEVEL_WARN, "22:50:03", "Persistence partition is currently LOCKED (Amnesic)");
-    tui_app_append_log(app, LOG_LEVEL_INFO, "22:50:04", "Host storage discovery completed successfully");
+    tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "Booto forensic TUI window manager initialized");
+    tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "Amnesic live operating system verified in RAM (tmpfs)");
+    tui_app_append_log(app, LOG_LEVEL_WARN, NULL, "Persistence partition is currently LOCKED (Amnesic)");
+    tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "Host storage discovery completed: Press F5 to scan target");
 }
 
 void tui_app_append_log(tui_app_state_t *app, log_level_t level, const char *timestamp, const char *msg) {
