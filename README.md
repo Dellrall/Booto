@@ -1,7 +1,7 @@
 # Booto
 
 [![CI](https://github.com/Dellrall/Booto/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Dellrall/Booto/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-0.4.0--beta-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.5.0--rc1-blue.svg)](CHANGELOG.md)
 [![Standard](https://img.shields.io/badge/C-11-blue.svg)](https://en.wikipedia.org/wiki/C11_(C_standard_revision))
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -23,6 +23,7 @@ Built with low-level **C11**, Booto operates from a trusted Debian Live USB envi
   - **In-Memory Initramfs Decompressor**: CPIO archive parser and early-boot reverse shell/backdoor script auditor.
   - **Userland Interceptor Scanner**: `/etc/ld.so.preload` and PAM dynamic linker hook detection (Azazel, Jynx).
   - **Raw Ext4 Inode Differential Engine**: Cross-view validation comparing raw disk superblock & inode tables against VFS directory trees.
+- **Cryptographic Case Reporting**: Automated export of signed machine-readable JSON and human-readable Markdown reports to `/persistence/cases/` with SHA-256 hash chains.
 - **Automated ISO Generation (`make iso`)**: Standalone live bootable ISO output ready for USB deployment.
 
 ---
@@ -39,7 +40,7 @@ sudo apt-get install -y build-essential libblkid-dev libudev-dev
 # Build the binary (auto-generates version.h)
 make all
 
-# Run unit test suite (9 test suites)
+# Run unit test suite (11 test suites)
 make test
 
 # Launch Interactive Zellij-Style Movable TUI
@@ -70,6 +71,7 @@ make test
 | `Mouse Click` | **Click to Focus** | Focus pane by clicking inside its border |
 | `F2` | **Toggle LUKS** | Lock / unlock encrypted persistence partition |
 | `F5` | **Start Scan** | Trigger forensic scanning sequence |
+| `F6` | **Export Report** | Export signed JSON & Markdown case reports |
 | `F10` / `q` | **Exit** | Gracefully shutdown TUI and restore terminal |
 
 ---
@@ -82,8 +84,8 @@ make test
 | **Stage 2** | `v0.1.5-alpha` | Zellij-Style Movable TUI Window Manager (`ncurses` BSP Tree) | **Completed** |
 | **Stage 3** | `v0.2.0-alpha` | Target Storage Discovery (`libblkid`) & Safe RO Mounter | **Completed** |
 | **Stage 4** | `v0.4.0-beta`  | Modular Detection Engines (LKM, UEFI, Initrd, Preload, Ext4) | **Completed** |
-| **Stage 5** | `v0.5.0-rc1`   | Tails-Style LUKS2 Persistence & Case Reporting | *Next* |
-| **Stage 6** | `v0.6.0-rc1`   | Dedicated Testing & Fuzzing Harness (Synthetic Disks, ASan) | *Pending* |
+| **Stage 5** | `v0.5.0-rc1`   | Tails-Style LUKS2 Persistence & Case Reporting | **Completed** |
+| **Stage 6** | `v0.6.0-rc1`   | Dedicated Testing & Fuzzing Harness (Synthetic Disks, ASan) | *Next* |
 | **Stage 7** | `v0.7.0-rc1`   | Advanced CI/CD Matrix, Sanitizers & Code Coverage | *Pending* |
 | **Stage 8** | `v0.8.0-rc1`   | Debian Live ISO Packaging (`make iso`) & Automated CD | *Pending* |
 | **Stage 9** | `v1.0.0`       | QEMU Empirical Benchmarking & Capstone Defense Evaluation | *Pending* |

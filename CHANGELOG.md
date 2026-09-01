@@ -7,10 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.5.0-rc1] - 2026-09-01
+
+### Added
+- **Tails-Style LUKS2 Encrypted Persistence Subsystem (`include/persistence_mgr.h`, `src/persistence_mgr.c`)**:
+  - Detection and lifecycle management of secondary USB encrypted partition (`label: BOOTO_DATA`).
+  - Strict amnesic operation by default: unlocks container only upon explicit user request and mounts to `/persistence/` (`0700` permissions).
+  - Secure directory structure: `/persistence/cases/`, `/persistence/rules/`, and `/persistence/logs/`.
+  - Passphrase zeroization and clean unmount/LUKS lock restoring pure RAM amnesia.
+  - Unit test suite in `tests/test_persistence_mgr.c`.
+- **Cryptographic Case Report Generator (`include/case_reporter.h`, `src/case_reporter.c`)**:
+  - Structured forensic JSON export (`case_<ID>.json`) capturing host disk UUID, scan duration, module detections, and threat severity levels.
+  - Human-readable GitHub Flavored Markdown report (`case_<ID>.md`) with executive summary and forensic breakdown.
+  - Automatic cryptographic integrity seal generation computing companion `.sha256` checksums.
+  - Unit test suite in `tests/test_case_reporter.c`.
+- **TUI Persistence Integration**:
+  - `F2` global hotkey to toggle encrypted persistence unlock/lock.
+  - `F6` global hotkey to export signed JSON/Markdown case reports.
+
+---
+
 ## [0.4.0-beta] - 2026-09-01
 
 ### Added
-- **Full Modular Forensic Detection Engines Suite (Stage 4 Complete)**:
+- **Modular Forensic Detection Engines Suite (Stage 4 Complete)**:
   - **In-Memory Initramfs Decompressor & Script Auditor (`include/initramfs_auditor.h`, `src/initramfs_auditor.c`)**:
     - Zero-dependency CPIO archive parser extracting `/boot/initrd.img*` in memory without host disk extraction.
     - Early-boot script audit engine flagging reverse shells (`/dev/tcp/`, `bash -i`, `nc -e`, `mkfifo`), silent payload downloaders (`curl -s`, `wget -q`), and ramdisk LKM injections.

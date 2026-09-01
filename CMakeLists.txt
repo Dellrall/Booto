@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 
 project(booto
-    VERSION 0.4.0
+    VERSION 0.5.0
     DESCRIPTION "Debian-Based Tails-Inspired Live Linux Forensic Rootkit & Bootkit Detection Suite"
     LANGUAGES C
 )
@@ -67,6 +67,8 @@ set(BOOT_LIB_SOURCES
     src/initramfs_auditor.c
     src/preload_scanner.c
     src/ext4_diff.c
+    src/persistence_mgr.c
+    src/case_reporter.c
     src/disk_mount.c
     src/tui/terminal.c
     src/tui/wm.c
@@ -118,6 +120,14 @@ add_test(NAME test_preload_scanner COMMAND test_preload_scanner)
 add_executable(test_ext4_diff tests/test_ext4_diff.c)
 target_link_libraries(test_ext4_diff PRIVATE booto_core)
 add_test(NAME test_ext4_diff COMMAND test_ext4_diff)
+
+add_executable(test_persistence_mgr tests/test_persistence_mgr.c)
+target_link_libraries(test_persistence_mgr PRIVATE booto_core)
+add_test(NAME test_persistence_mgr COMMAND test_persistence_mgr)
+
+add_executable(test_case_reporter tests/test_case_reporter.c)
+target_link_libraries(test_case_reporter PRIVATE booto_core)
+add_test(NAME test_case_reporter COMMAND test_case_reporter)
 
 # Custom Target for ISO generation
 add_custom_target(iso
