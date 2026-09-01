@@ -1,7 +1,7 @@
 # Booto
 
 [![CI](https://github.com/Dellrall/Booto/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Dellrall/Booto/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-0.7.0--rc1-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.8.0--rc1-blue.svg)](CHANGELOG.md)
 [![Coverage](https://img.shields.io/badge/coverage-85%2B%25-brightgreen.svg)](scripts/check_coverage.sh)
 [![Standard](https://img.shields.io/badge/C-11-blue.svg)](https://en.wikipedia.org/wiki/C11_(C_standard_revision))
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
@@ -15,7 +15,8 @@ Built with low-level **C11**, Booto operates from a trusted Debian Live USB envi
 ## Key Features
 
 - **Amnesic Live OS (Debian 12 Base)**: Runs 100% in RAM (`SquashFS` + `OverlayFS`) with zero host disk tampering.
-- **Optional Encrypted Persistence (LUKS2)**: Tails-style secondary encrypted partition to securely preserve forensic logs, case reports, and custom detection rules.
+- **Optional Encrypted Persistence (LUKS2)**: Tails-style secondary encrypted partition (`BOOTO_DATA`) to securely preserve forensic logs, case reports, and custom detection rules.
+- **Dual-Partition USB Setup Utility (`scripts/setup_usb.sh`)**: One-command installer creating the Amnesic Live bootloader partition and LUKS2 persistence volume.
 - **Zellij-Inspired Movable TUI**: Terminal User Interface with a dynamic Binary Space Partitioning (BSP) window manager supporting movable, resizable, and zoomable workspace panes.
 - **Safe Forensic Storage Discovery & Mounter**: Automatic enumeration of NVMe/SATA/USB block devices via `/proc/partitions` and `sysfs`, enforcing strict read-only mounts (`MS_RDONLY | MS_NODEV | MS_NOEXEC | MS_NOSUID` with `noload`).
 - **Low-Level Forensic Detection Modules**:
@@ -54,11 +55,11 @@ make coverage
 # Launch Interactive Zellij-Style Movable TUI
 ./bin/booto
 
-# View help and options
-./bin/booto --help
+# Build Debian Live ISO
+sudo make iso
 
-# Run a dry-run test
-./bin/booto --dry-run -V
+# Install to USB Flash Drive (Dual Partition)
+sudo ./scripts/setup_usb.sh /dev/sdb
 ```
 
 ---
@@ -95,8 +96,8 @@ make coverage
 | **Stage 5** | `v0.5.0-rc1`   | Tails-Style LUKS2 Persistence & Case Reporting | **Completed** |
 | **Stage 6** | `v0.6.0-rc1`   | Dedicated Testing & Fuzzing Harness (Synthetic Disks, ASan) | **Completed** |
 | **Stage 7** | `v0.7.0-rc1`   | Advanced CI/CD Matrix, Sanitizers & Code Coverage | **Completed** |
-| **Stage 8** | `v0.8.0-rc1`   | Debian Live ISO Packaging (`make iso`) & Automated CD | *Next* |
-| **Stage 9** | `v1.0.0`       | QEMU Empirical Benchmarking & Capstone Defense Evaluation | *Pending* |
+| **Stage 8** | `v0.8.0-rc1`   | Debian Live ISO Packaging (`make iso`) & Automated CD | **Completed** |
+| **Stage 9** | `v1.0.0`       | QEMU Empirical Benchmarking & Capstone Defense Evaluation | *Next / Final* |
 
 ---
 

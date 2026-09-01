@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.8.0-rc1] - 2026-09-01
+
+### Added
+- **Debian Live ISO Packaging & Dual-Partition USB Setup Utility (Stage 8 Complete)**:
+  - **Live ISO Builder Engine (`scripts/build_iso.sh`)**:
+    - Automated `debootstrap` Debian 12 (Bookworm) `minbase` construction with dual UEFI (`x86_64-efi`) + BIOS bootloaders.
+    - Systemd autologin directly launching Booto TUI in pure RAM amnesic mode.
+    - SquashFS compression with `xz -Xbcj x86` and hybrid ISO generation via `xorriso`.
+  - **Dual-Partition USB Setup Utility (`scripts/setup_usb.sh`)**:
+    - Automated partitioning of USB drives:
+      - Partition 1 (`BOOTO_LIVE`): FAT32 Amnesic Live OS.
+      - Partition 2 (`BOOTO_DATA`): LUKS2 Encrypted Persistence volume with secure `/persistence/{cases,rules,logs}` directory structure.
+  - **Automated ISO Build & CD Workflow (`.github/workflows/iso-builder.yml`)**:
+    - Automated ISO compilation on GitHub Actions with automatic GitHub Releases publishing.
+
+---
+
 ## [0.7.0-rc1] - 2026-09-01
 
 ### Added
