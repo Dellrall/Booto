@@ -109,19 +109,23 @@ booto_error_t elf_parse_buffer(const uint8_t *buf, size_t len, elf_binary_info_t
         const char *mend = mptr + modinfo_hdr->sh_size;
 
         while (mptr < mend) {
-            size_t slen = strlen(mptr);
+            size_t rem_bytes = (size_t)(mend - mptr);
+            size_t slen = strnlen(mptr, rem_bytes);
+            if (slen == 0 || slen >= rem_bytes) {
+                break;
+            }
             if (strncmp(mptr, "license=", 8) == 0) {
-                snprintf(info->modinfo.license, sizeof(info->modinfo.license), "%s", mptr + 8);
+                snprintf(info->modinfo.license, sizeof(info->modinfo.license), "%.63s", mptr + 8);
             } else if (strncmp(mptr, "author=", 7) == 0) {
-                snprintf(info->modinfo.author, sizeof(info->modinfo.author), "%s", mptr + 7);
+                snprintf(info->modinfo.author, sizeof(info->modinfo.author), "%.127s", mptr + 7);
             } else if (strncmp(mptr, "description=", 12) == 0) {
-                snprintf(info->modinfo.description, sizeof(info->modinfo.description), "%s", mptr + 12);
+                snprintf(info->modinfo.description, sizeof(info->modinfo.description), "%.255s", mptr + 12);
             } else if (strncmp(mptr, "vermagic=", 9) == 0) {
-                snprintf(info->modinfo.vermagic, sizeof(info->modinfo.vermagic), "%s", mptr + 9);
+                snprintf(info->modinfo.vermagic, sizeof(info->modinfo.vermagic), "%.127s", mptr + 9);
             } else if (strncmp(mptr, "srcversion=", 11) == 0) {
-                snprintf(info->modinfo.srcversion, sizeof(info->modinfo.srcversion), "%s", mptr + 11);
+                snprintf(info->modinfo.srcversion, sizeof(info->modinfo.srcversion), "%.63s", mptr + 11);
             } else if (strncmp(mptr, "depends=", 8) == 0) {
-                snprintf(info->modinfo.depends, sizeof(info->modinfo.depends), "%s", mptr + 8);
+                snprintf(info->modinfo.depends, sizeof(info->modinfo.depends), "%.255s", mptr + 8);
             }
             mptr += slen + 1;
         }

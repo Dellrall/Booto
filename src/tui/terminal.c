@@ -314,6 +314,16 @@ bool term_poll_event(input_event_t *event, int timeout_ms) {
             }
         }
 
+        if (seq[1] == 'O') {
+            switch (seq[2]) {
+                case 'P': event->type = KEY_F1; return true;
+                case 'Q': event->type = KEY_F2; return true;
+                case 'R': event->type = KEY_F3; return true;
+                case 'S': event->type = KEY_F4; return true;
+                default: break;
+            }
+        }
+
         if (seq[1] == '[') {
             if (seq[2] == '<') {
                 int btn = 0, mx = 0, my = 0;
@@ -346,6 +356,10 @@ bool term_poll_event(input_event_t *event, int timeout_ms) {
                         }
                     }
                     if (n >= 4 && seq[3] == '~') { event->type = KEY_HOME; return true; }
+                    if (n >= 4 && seq[3] == '5' && seq[4] == '~') { event->type = KEY_F5; return true; }
+                    if (n >= 4 && seq[3] == '7' && seq[4] == '~') { event->type = KEY_F6; return true; }
+                    if (n >= 4 && seq[3] == '8' && seq[4] == '~') { event->type = KEY_F7; return true; }
+                    if (n >= 4 && seq[3] == '9' && seq[4] == '~') { event->type = KEY_F8; return true; }
                     break;
                 case '2':
                     if (n >= 4 && seq[3] == '0' && seq[4] == '~') { event->type = KEY_F9; return true; }
@@ -359,12 +373,6 @@ bool term_poll_event(input_event_t *event, int timeout_ms) {
                     break;
                 case '6':
                     if (n >= 4 && seq[3] == '~') { event->type = KEY_PGDN; return true; }
-                    break;
-                case 'O':
-                    if (seq[2] == 'P') { event->type = KEY_F1; return true; }
-                    if (seq[2] == 'Q') { event->type = KEY_F2; return true; }
-                    if (seq[2] == 'R') { event->type = KEY_F3; return true; }
-                    if (seq[2] == 'S') { event->type = KEY_F4; return true; }
                     break;
                 default: break;
             }

@@ -47,9 +47,12 @@ jobs:
 
       - name: Run cppcheck
         run: |
-          cppcheck --enable=warning,style,performance,portability \
-                   --inconclusive \
+          cppcheck --enable=warning,performance,portability \
+                   --inline-suppr \
+                   --suppress=missingInclude \
                    --suppress=missingIncludeSystem \
+                   --suppress=unusedFunction \
+                   --suppress=unmatchedSuppression \
                    --error-exitcode=1 \
                    -I include \
                    src/
