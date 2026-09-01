@@ -50,10 +50,15 @@ static void update_dimensions(void) {
     }
 
     size_t cells = (size_t)(g_rows * g_cols);
-    g_front_chars = (char *)realloc(g_front_chars, cells);
-    g_front_attrs = (uint32_t *)realloc(g_front_attrs, cells * sizeof(uint32_t));
-    g_back_chars = (char *)realloc(g_back_chars, cells);
-    g_back_attrs = (uint32_t *)realloc(g_back_attrs, cells * sizeof(uint32_t));
+    char *new_fc = (char *)realloc(g_front_chars, cells);
+    uint32_t *new_fa = (uint32_t *)realloc(g_front_attrs, cells * sizeof(uint32_t));
+    char *new_bc = (char *)realloc(g_back_chars, cells);
+    uint32_t *new_ba = (uint32_t *)realloc(g_back_attrs, cells * sizeof(uint32_t));
+
+    if (new_fc) g_front_chars = new_fc;
+    if (new_fa) g_front_attrs = new_fa;
+    if (new_bc) g_back_chars = new_bc;
+    if (new_ba) g_back_attrs = new_ba;
 
     if (g_front_chars && g_front_attrs && g_back_chars && g_back_attrs) {
         memset(g_front_chars, 0, cells);
