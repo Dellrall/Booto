@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.6.0-rc1] - 2026-09-01
+
+### Added
+- **Dedicated Forensic Testing & Fuzzing Harness (Stage 6 Complete)**:
+  - **Defensive Mutation Fuzzing Suite (`tests/test_fuzz.c`)**:
+    - Over 1,500 randomized mutated and edge-case fuzzing iterations across the 64-bit ELF parser, UEFI PE32+ parser, and CPIO in-memory archive unpacker.
+    - Validates defensive handling of truncated buffers, corrupted section headers, out-of-bounds offsets, and cyclic directory tables with 0 segfaults or memory corruptions.
+  - **Synthetic Forensic Test Disk Generator (`scripts/gen_mock_disk.sh`)**:
+    - Creates standalone multi-partition disk images containing mock UEFI ESP bootloaders, Diamorphine LKM modules, `/etc/ld.so.preload` hooks, and reverse shell initramfs scripts.
+  - **Sanitizer Build Targets (`make asan`, `make fuzz`)**:
+    - Added AddressSanitizer and UndefinedBehaviorSanitizer build targets (`-fsanitize=address,undefined -g -fno-omit-frame-pointer`).
+    - Verified 100% clean execution with 0 memory leaks or pointer violations.
+
+---
+
 ## [0.5.0-rc1] - 2026-09-01
 
 ### Added

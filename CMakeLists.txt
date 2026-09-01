@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 
 project(booto
-    VERSION 0.5.0
+    VERSION 0.6.0
     DESCRIPTION "Debian-Based Tails-Inspired Live Linux Forensic Rootkit & Bootkit Detection Suite"
     LANGUAGES C
 )
@@ -128,6 +128,10 @@ add_test(NAME test_persistence_mgr COMMAND test_persistence_mgr)
 add_executable(test_case_reporter tests/test_case_reporter.c)
 target_link_libraries(test_case_reporter PRIVATE booto_core)
 add_test(NAME test_case_reporter COMMAND test_case_reporter)
+
+add_executable(test_fuzz tests/test_fuzz.c)
+target_link_libraries(test_fuzz PRIVATE booto_core)
+add_test(NAME test_fuzz COMMAND test_fuzz)
 
 # Custom Target for ISO generation
 add_custom_target(iso
