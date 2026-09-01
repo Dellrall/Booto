@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 
 project(booto
-    VERSION 0.1.5
+    VERSION 0.2.0
     DESCRIPTION "Debian-Based Tails-Inspired Live Linux Forensic Rootkit & Bootkit Detection Suite"
     LANGUAGES C
 )
@@ -60,6 +60,7 @@ include_directories(
 # Core library sources
 set(BOOT_LIB_SOURCES
     src/logger.c
+    src/disk_mount.c
     src/tui/terminal.c
     src/tui/wm.c
     src/tui/pane.c
@@ -86,6 +87,10 @@ add_test(NAME test_logger COMMAND test_logger)
 add_executable(test_wm_tree tests/test_wm_tree.c)
 target_link_libraries(test_wm_tree PRIVATE booto_core)
 add_test(NAME test_wm_tree COMMAND test_wm_tree)
+
+add_executable(test_disk_discovery tests/test_disk_discovery.c)
+target_link_libraries(test_disk_discovery PRIVATE booto_core)
+add_test(NAME test_disk_discovery COMMAND test_disk_discovery)
 
 # Custom Target for ISO generation
 add_custom_target(iso

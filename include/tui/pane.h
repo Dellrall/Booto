@@ -18,16 +18,16 @@ extern "C" {
 #define MAX_MODULES   8
 
 typedef struct {
-    char name[32];
-    char size[16];
-    char fs_type[16];
-    char label[32];
+    char name[128];
+    char size[32];
+    char fs_type[32];
+    char label[64];
     bool is_target;
     bool is_ro_mounted;
 } drive_item_t;
 
 typedef struct {
-    char name[48];
+    char name[64];
     char target_path[64];
     bool enabled;
     char status_text[24];
@@ -35,16 +35,16 @@ typedef struct {
 } module_item_t;
 
 typedef struct {
-    char timestamp[20];
-    char level[8];
-    char msg[128];
+    char timestamp[24];
+    char level[12];
+    char msg[256];
     uint32_t color;
 } log_entry_t;
 
 typedef struct {
     char threat_name[64];
     char infected_file[128];
-    char hook_type[48];
+    char hook_type[64];
     char sha256[65];
     char severity[16];
     uint32_t severity_color;
@@ -80,7 +80,7 @@ typedef struct {
     char persistence_status[64];
 
     // Status bar message
-    char status_msg[128];
+    char status_msg[256];
 } tui_app_state_t;
 
 /**

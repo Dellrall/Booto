@@ -10,6 +10,7 @@
 #endif
 
 #include "tui/pane.h"
+#include "disk_mount.h"
 #include "logger.h"
 
 #include <stdio.h>
@@ -24,30 +25,21 @@ void tui_app_state_init(tui_app_state_t *app, booto_context_t *ctx) {
     snprintf(app->persistence_status, sizeof(app->persistence_status), "LUKS Locked (Amnesic Mode)");
     snprintf(app->status_msg, sizeof(app->status_msg), "Press F5 to start scan | Alt+M to move/swap | Alt+Z to zoom");
 
-    // Initialize mock drives for Stage 2
-    app->drive_count = 3;
+    // Dynamic Storage Discovery via disk_mount.c
+    disk_discovery_result_t disk_res;
+    disk_discover_partitions(&disk_res, ctx ? ctx->mock_drives : false);
+
+    app->drive_count = (disk_res.count > MAX_DRIVES) ? MAX_DRIVES : disk_res.count;
     app->drive_cursor = 0;
 
-    snprintf(app->drives[0].name, sizeof(app->drives[0].name), "/dev/nvme0n1p2");
-    snprintf(app->drives[0].size, sizeof(app->drives[0].size), "512 GB");
-    snprintf(app->drives[0].fs_type, sizeof(app->drives[0].fs_type), "ext4");
-    snprintf(app->drives[0].label, sizeof(app->drives[0].label), "Target Linux Rootfs");
-    app->drives[0].is_target = true;
-    app->drives[0].is_ro_mounted = false;
-
-    snprintf(app->drives[1].name, sizeof(app->drives[1].name), "/dev/nvme0n1p1");
-    snprintf(app->drives[1].size, sizeof(app->drives[1].size), "512 MB");
-    snprintf(app->drives[1].fs_type, sizeof(app->drives[1].fs_type), "vfat");
-    snprintf(app->drives[1].label, sizeof(app->drives[1].label), "EFI System Partition");
-    app->drives[1].is_target = false;
-    app->drives[1].is_ro_mounted = false;
-
-    snprintf(app->drives[2].name, sizeof(app->drives[2].name), "/dev/sda1");
-    snprintf(app->drives[2].size, sizeof(app->drives[2].size), "1.0 TB");
-    snprintf(app->drives[2].fs_type, sizeof(app->drives[2].fs_type), "ntfs");
-    snprintf(app->drives[2].label, sizeof(app->drives[2].label), "Data Backup");
-    app->drives[2].is_target = false;
-    app->drives[2].is_ro_mounted = false;
+    for (int i = 0; i < app->drive_count; i++) {
+        snprintf(app->drives[i].name, sizeof(app->drives[i].name), "%s", disk_res.partitions[i].dev_path);
+        snprintf(app->drives[i].size, sizeof(app->drives[i].size), "%s", disk_res.partitions[i].size_str);
+        snprintf(app->drives[i].fs_type, sizeof(app->drives[i].fs_type), "%s", disk_res.partitions[i].fs_type);
+        snprintf(app->drives[i].label, sizeof(app->drives[i].label), "%s", disk_res.partitions[i].label);
+        app->drives[i].is_target = disk_res.partitions[i].is_target;
+        app->drives[i].is_ro_mounted = false;
+    }
 
     // Initialize forensic modules
     app->module_count = 5;
@@ -96,10 +88,10 @@ void tui_app_state_init(tui_app_state_t *app, booto_context_t *ctx) {
              "0x0010: e9 a4 1f 00 00 48 89 e5  .....H..");
 
     // Initial logs
-    tui_app_append_log(app, LOG_LEVEL_INFO, "22:40:01", "Booto forensic TUI window manager initialized");
-    tui_app_append_log(app, LOG_LEVEL_INFO, "22:40:02", "Amnesic live operating system verified in RAM (tmpfs)");
-    tui_app_append_log(app, LOG_LEVEL_WARN, "22:40:03", "Persistence partition /dev/sdb2 is currently LOCKED");
-    tui_app_append_log(app, LOG_LEVEL_INFO, "22:40:04", "Discovered 3 storage partitions via libblkid");
+    tui_app_append_log(app, LOG_LEVEL_INFO, "22:50:01", "Booto forensic TUI window manager initialized");
+    tui_app_append_log(app, LOG_LEVEL_INFO, "22:50:02", "Amnesic live operating system verified in RAM (tmpfs)");
+    tui_app_append_log(app, LOG_LEVEL_WARN, "22:50:03", "Persistence partition is currently LOCKED (Amnesic)");
+    tui_app_append_log(app, LOG_LEVEL_INFO, "22:50:04", "Host storage discovery completed successfully");
 }
 
 void tui_app_append_log(tui_app_state_t *app, log_level_t level, const char *timestamp, const char *msg) {
@@ -150,14 +142,14 @@ static void render_storage_pane(wm_node_t *node, bool is_focused, tui_app_state_
     term_draw_box(node->x, node->y, node->w, node->h, " Target Storage Devices ", border_attr, title_attr);
 
     int row = node->y + 1;
-    term_puts(node->x + 2, row++, "Device          FS      Size    Target Status", MAKE_ATTR(COLOR_BRIGHT_YELLOW, COLOR_DEFAULT, ATTR_UNDERLINE));
+    term_puts(node->x + 2, row++, "Device               FS      Size     Target Status", MAKE_ATTR(COLOR_BRIGHT_YELLOW, COLOR_DEFAULT, ATTR_UNDERLINE));
 
     for (int i = 0; i < app->drive_count && row < node->y + node->h - 1; i++) {
-        char line[256];
+        char line[512];
         bool is_cursor = (is_focused && app->drive_cursor == i);
         uint32_t attr = is_cursor ? MAKE_ATTR(COLOR_BLACK, COLOR_CYAN, ATTR_BOLD) : MAKE_ATTR(COLOR_WHITE, COLOR_DEFAULT, ATTR_NONE);
 
-        snprintf(line, sizeof(line), "%c [%c] %-13s %-6s  %-6s  %-16s",
+        snprintf(line, sizeof(line), "%c [%c] %-18.18s %-7.7s %-8.8s %-16.16s",
                  is_cursor ? '>' : ' ',
                  app->drives[i].is_target ? '*' : ' ',
                  app->drives[i].name,
@@ -177,11 +169,11 @@ static void render_modules_pane(wm_node_t *node, bool is_focused, tui_app_state_
 
     int row = node->y + 1;
     for (int i = 0; i < app->module_count && row < node->y + node->h - 1; i++) {
-        char line[256];
+        char line[512];
         bool is_cursor = (is_focused && app->module_cursor == i);
         uint32_t attr = is_cursor ? MAKE_ATTR(COLOR_BLACK, COLOR_CYAN, ATTR_BOLD) : MAKE_ATTR(COLOR_WHITE, COLOR_DEFAULT, ATTR_NONE);
 
-        snprintf(line, sizeof(line), "%c [%c] %-32s",
+        snprintf(line, sizeof(line), "%c [%c] %-32.32s",
                  is_cursor ? '>' : ' ',
                  app->modules[i].enabled ? 'X' : ' ',
                  app->modules[i].name);
@@ -220,7 +212,7 @@ static void render_logs_pane(wm_node_t *node, bool is_focused, tui_app_state_t *
         int p_len = (int)strlen(prefix);
         int max_msg = node->w - 4 - p_len;
         if (max_msg > 0) {
-            char msg_trunc[256];
+            char msg_trunc[512];
             snprintf(msg_trunc, sizeof(msg_trunc), "%s", entry->msg);
             if ((int)strlen(msg_trunc) > max_msg) {
                 msg_trunc[max_msg] = '\0';
@@ -314,15 +306,26 @@ bool pane_handle_input(wm_node_t *node, const input_event_t *event, tui_app_stat
         }
         if (event->type == KEY_CHAR && event->ch == ' ') {
             app->drives[app->drive_cursor].is_target = !app->drives[app->drive_cursor].is_target;
-            snprintf(app->status_msg, sizeof(app->status_msg), "Toggled target flag for %s", app->drives[app->drive_cursor].name);
+            snprintf(app->status_msg, sizeof(app->status_msg), "Toggled target flag for %.200s", app->drives[app->drive_cursor].name);
             return true;
         }
         if (event->type == KEY_ENTER) {
-            app->drives[app->drive_cursor].is_ro_mounted = !app->drives[app->drive_cursor].is_ro_mounted;
-            tui_app_append_log(app, LOG_LEVEL_INFO, NULL,
-                               app->drives[app->drive_cursor].is_ro_mounted ?
-                               "Mounted target storage strictly READ-ONLY (MS_RDONLY, noload)" :
-                               "Unmounted target storage cleanly");
+            if (!app->drives[app->drive_cursor].is_ro_mounted) {
+                booto_error_t err = disk_mount_ro(app->drives[app->drive_cursor].name,
+                                                   DEFAULT_RO_MOUNT_POINT,
+                                                   app->drives[app->drive_cursor].fs_type);
+                if (err == BOOTO_OK) {
+                    app->drives[app->drive_cursor].is_ro_mounted = true;
+                    tui_app_append_log(app, LOG_LEVEL_INFO, NULL,
+                                       "Forensically mounted target storage strictly READ-ONLY (MS_RDONLY, noload)");
+                } else {
+                    tui_app_append_log(app, LOG_LEVEL_ERROR, NULL, "Failed to mount target storage");
+                }
+            } else {
+                disk_unmount(DEFAULT_RO_MOUNT_POINT);
+                app->drives[app->drive_cursor].is_ro_mounted = false;
+                tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "Cleanly unmounted target storage");
+            }
             return true;
         }
     } else if (node->pane_type == PANE_SCANNER_MODULES) {
@@ -336,7 +339,7 @@ bool pane_handle_input(wm_node_t *node, const input_event_t *event, tui_app_stat
         }
         if (event->type == KEY_CHAR && event->ch == ' ') {
             app->modules[app->module_cursor].enabled = !app->modules[app->module_cursor].enabled;
-            snprintf(app->status_msg, sizeof(app->status_msg), "Toggled module: %s", app->modules[app->module_cursor].name);
+            snprintf(app->status_msg, sizeof(app->status_msg), "Toggled module: %.200s", app->modules[app->module_cursor].name);
             return true;
         }
     } else if (node->pane_type == PANE_LIVE_LOGS) {

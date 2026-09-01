@@ -2,7 +2,7 @@ CC ?= gcc
 CFLAGS ?= -std=c11 -Wall -Wextra -Wpedantic -Werror -Wshadow -Wformat=2 -Wconversion -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE
 LDFLAGS ?= -pie -Wl,-z,relro,-z,now
 
-VERSION ?= 0.1.5-alpha
+VERSION ?= 0.2.0-alpha
 INCLUDES = -Iinclude
 
 SRCDIR = src
@@ -11,6 +11,7 @@ BUILDDIR = build
 BINDIR = bin
 
 SOURCES = $(SRCDIR)/logger.c \
+          $(SRCDIR)/disk_mount.c \
           $(SRCDIR)/tui/terminal.c \
           $(SRCDIR)/tui/wm.c \
           $(SRCDIR)/tui/pane.c \
