@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 
 project(booto
-    VERSION 0.3.0
+    VERSION 0.3.5
     DESCRIPTION "Debian-Based Tails-Inspired Live Linux Forensic Rootkit & Bootkit Detection Suite"
     LANGUAGES C
 )
@@ -63,6 +63,7 @@ set(BOOT_LIB_SOURCES
     src/crypto_utils.c
     src/elf_analyzer.c
     src/kernel_inspector.c
+    src/uefi_analyzer.c
     src/disk_mount.c
     src/tui/terminal.c
     src/tui/wm.c
@@ -98,6 +99,10 @@ add_test(NAME test_disk_discovery COMMAND test_disk_discovery)
 add_executable(test_elf_analyzer tests/test_elf_analyzer.c)
 target_link_libraries(test_elf_analyzer PRIVATE booto_core)
 add_test(NAME test_elf_analyzer COMMAND test_elf_analyzer)
+
+add_executable(test_uefi_analyzer tests/test_uefi_analyzer.c)
+target_link_libraries(test_uefi_analyzer PRIVATE booto_core)
+add_test(NAME test_uefi_analyzer COMMAND test_uefi_analyzer)
 
 # Custom Target for ISO generation
 add_custom_target(iso

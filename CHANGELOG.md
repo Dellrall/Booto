@@ -7,19 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.5-beta] - 2026-09-01
+
+### Added
+- **UEFI & ESP Bootkit Analyzer (Sub-Stage 4B)**:
+  - PE32+ (PE/COFF) binary parser (`include/uefi_analyzer.h`, `src/uefi_analyzer.c`) extracting DOS headers, COFF machine architecture, entry points, and optional header data directories.
+  - Authenticode Certificate Directory extractor verifying whether `.efi` bootloaders possess valid embedded digital signatures.
+  - Secure Boot DBX Revocation List matching engine (detecting BlackLotus CVE-2022-21894/CVE-2023-24932 revoked Windows bootloaders, BootHole CVE-2020-10713 vulnerable GRUB2 shims, ESPecter, and MoonBounce stage-2 loaders).
+  - ESP directory scanner recursively auditing `/boot/efi/EFI/` and flagging unsigned/revoked binaries.
+  - Unit test suite in `tests/test_uefi_analyzer.c`.
+
+---
+
 ## [0.3.0-beta] - 2026-09-01
 
 ### Added
 - **ELF Parser & Kernel LKM Rootkit Inspector (Sub-Stage 4A)**:
-  - Zero-dependency standalone FIPS 180-4 SHA-256 cryptographic engine (`include/crypto_utils.h`, `src/crypto_utils.c`) for binary integrity verification.
-  - Defensive 64-bit ELF Parser (`include/elf_analyzer.h`, `src/elf_analyzer.c`) parsing ELF headers, section tables (`.text`, `.rodata`, `.symtab`, `.strtab`, `.modinfo`), symbol tables, and module metadata with strict buffer boundary checks.
-  - Kernel LKM & Rootkit Hooking Engine (`include/kernel_inspector.h`, `src/kernel_inspector.c`):
-    - `sys_call_table` tampering and dynamic symbol lookup (`kallsyms_lookup_name`) detection.
-    - Diamorphine & derivative signatures (`hacked_kill`, `hacked_getdents`, `is_invisible`, `hide_proc`).
-    - Ftrace and Kprobes hijacking (`fh_install_hook`, `khook_init`, `rep_hook`, `suterusu`).
-    - Hidden network port interceptor rules (`tcp4_seq_show`, `udp4_seq_show`).
-    - Recursive directory scanning across target `/lib/modules/` directories.
-  - Unit test suite in `tests/test_elf_analyzer.c` validating SHA-256 test vectors, binary ELF parsing, and synthetic rootkit detection rules.
+  - Standalone FIPS 180-4 SHA-256 cryptographic engine (`include/crypto_utils.h`, `src/crypto_utils.c`).
+  - Defensive 64-bit ELF Parser (`include/elf_analyzer.h`, `src/elf_analyzer.c`).
+  - Kernel LKM & Rootkit Hooking Engine (`include/kernel_inspector.h`, `src/kernel_inspector.c`).
+  - Unit test suite in `tests/test_elf_analyzer.c`.
 
 ---
 

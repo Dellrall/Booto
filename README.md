@@ -1,7 +1,7 @@
 # Booto
 
 [![CI](https://github.com/Dellrall/Booto/actions/workflows/ci.yml/badge.svg)](https://github.com/Dellrall/Booto/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-0.3.0--beta-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.3.5--beta-blue.svg)](CHANGELOG.md)
 [![Standard](https://img.shields.io/badge/C-11-blue.svg)](https://en.wikipedia.org/wiki/C11_(C_standard_revision))
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -19,7 +19,7 @@ Built with low-level **C11**, Booto operates from a trusted Debian Live USB envi
 - **Safe Forensic Storage Discovery & Mounter**: Automatic enumeration of NVMe/SATA/USB block devices via `/proc/partitions` and `sysfs`, enforcing strict read-only mounts (`MS_RDONLY | MS_NODEV | MS_NOEXEC | MS_NOSUID` with `noload`).
 - **Low-Level Forensic Detection Modules**:
   - **Kernel Image & LKM Hook Scanner**: Custom 64-bit ELF parser, symbol table auditing, `sys_call_table` tampering detection, DKOM process/module hiding rules (Diamorphine, Reptile, Suterusu, Khook).
-  - **UEFI & ESP Bootkit Analyzer**: Authenticode, Secure Boot DB/DBX validation.
+  - **UEFI & ESP Bootkit Analyzer**: PE32+ (PE/COFF) binary parser, Authenticode certificate validator, Secure Boot DBX revocation list matcher (BlackLotus, BootHole, ESPecter, MoonBounce).
   - **In-Memory Initramfs Decompressor**: Early-boot script and payload auditor.
   - **Userland Interceptor Scanner**: `LD_PRELOAD` and PAM credential sniffer detection.
   - **Raw Ext4 Inode Differential Engine**: Cross-view validation comparing raw disk metadata against VFS trees.
@@ -39,7 +39,7 @@ sudo apt-get install -y build-essential libblkid-dev libudev-dev
 # Build the binary (auto-generates version.h)
 make all
 
-# Run unit test suite (5 test suites)
+# Run unit test suite (6 test suites)
 make test
 
 # Launch Interactive Zellij-Style Movable TUI
@@ -82,10 +82,13 @@ make test
 | **Stage 2** | `v0.1.5-alpha` | Zellij-Style Movable TUI Window Manager (`ncurses` BSP Tree) | **Completed** |
 | **Stage 3** | `v0.2.0-alpha` | Target Storage Discovery (`libblkid`) & Safe RO Mounter | **Completed** |
 | **Stage 4A** | `v0.3.0-beta`  | Custom ELF Parser & Kernel LKM Rootkit Inspector | **Completed** |
-| **Stage 4B** | `v0.3.5-beta`  | UEFI & ESP Bootkit Analyzer | *Next* |
-| **Stage 4C–E** | `v0.4.0-beta` | Initramfs, `LD_PRELOAD`, & Raw Ext4 Differential Engine | *Pending* |
+| **Stage 4B** | `v0.3.5-beta`  | UEFI & ESP Bootkit Analyzer | **Completed** |
+| **Stage 4C–E** | `v0.4.0-beta` | Initramfs, `LD_PRELOAD`, & Raw Ext4 Differential Engine | *Next* |
 | **Stage 5** | `v0.5.0-rc1`   | Tails-Style LUKS2 Persistence & Case Reporting | *Pending* |
-| **Stage 6** | `v1.0.0`       | Debian Live ISO Packaging (`make iso`) & QEMU Benchmarks | *Pending* |
+| **Stage 6** | `v0.6.0-rc1`   | Dedicated Testing & Fuzzing Harness (Synthetic Disks, ASan) | *Pending* |
+| **Stage 7** | `v0.7.0-rc1`   | Advanced CI/CD Matrix, Sanitizers & Code Coverage | *Pending* |
+| **Stage 8** | `v0.8.0-rc1`   | Debian Live ISO Packaging (`make iso`) & Automated CD | *Pending* |
+| **Stage 9** | `v1.0.0`       | QEMU Empirical Benchmarking & Capstone Defense Evaluation | *Pending* |
 
 ---
 
