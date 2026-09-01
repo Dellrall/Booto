@@ -2,7 +2,7 @@ CC ?= gcc
 CFLAGS ?= -std=c11 -Wall -Wextra -Wpedantic -Werror -Wshadow -Wformat=2 -Wconversion -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE
 LDFLAGS ?= -pie -Wl,-z,relro,-z,now
 
-VERSION ?= 0.6.0-rc1
+VERSION ?= 0.7.0-rc1
 INCLUDES = -Iinclude
 
 SRCDIR = src
@@ -33,7 +33,7 @@ TEST_BINS = $(patsubst $(TESTDIR)/%.c, $(BUILDDIR)/%, $(TEST_SOURCES))
 
 TARGET = $(BINDIR)/booto
 
-.PHONY: all clean test run version iso dry-run asan fuzz
+.PHONY: all clean test run version iso dry-run asan fuzz coverage
 
 all: version $(TARGET)
 
@@ -79,6 +79,12 @@ fuzz: $(BUILDDIR)/test_fuzz
 	@echo "--- Running Defensive Fuzzing Suite ---"
 	$(BUILDDIR)/test_fuzz
 
+coverage: clean
+	@echo "--- Compiling with gcov Code Coverage Profiling ---"
+	$(MAKE) CFLAGS="-std=c11 -Wall -Wextra -Wpedantic -g -O0 --coverage -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE" \
+	        LDFLAGS="--coverage" test
+	@./scripts/check_coverage.sh
+
 run: all
 	./$(TARGET)
 
@@ -89,4 +95,4 @@ iso: all
 	sudo ./scripts/build_iso.sh
 
 clean:
-	rm -rf $(BUILDDIR) $(BINDIR) include/version.h
+	rm -rf $(BUILDDIR) $(BINDIR) include/version.h *.gcda *.gcno

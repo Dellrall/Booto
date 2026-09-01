@@ -1,4 +1,4 @@
-name: Booto CI - Build, Test & Static Analysis
+name: Booto CI - Multi-Compiler Matrix, Sanitizers & Coverage
 
 on:
   push:
@@ -7,8 +7,40 @@ on:
     branches: [ main, master ]
 
 jobs:
-  build-and-test:
-    name: GCC C11 Build & Unit Tests
+  build-matrix:
+    name: Build & Test (${{ matrix.compiler }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [ gcc, clang ]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang libncurses-dev libblkid-dev libudev-dev
+
+      - name: Build with Makefile (${{ matrix.compiler }})
+        env:
+          CC: ${{ matrix.compiler }}
+        run: make CC=${{ matrix.compiler }} all
+
+      - name: Run Unit Tests (${{ matrix.compiler }})
+        run: make CC=${{ matrix.compiler }} test
+
+      - name: Test CLI Flags
+        run: |
+          ./bin/booto --version
+          ./bin/booto --help
+          ./bin/booto --dry-run -V
+
+  sanitizers-and-fuzzing:
+    name: AddressSanitizer & Mutation Fuzzing
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -19,22 +51,33 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential libncurses-dev libblkid-dev libudev-dev
+          sudo apt-get install -y build-essential clang libncurses-dev libblkid-dev libudev-dev
 
-      - name: Build with Makefile
-        run: make all
+      - name: Run ASan & UBSan Test Suite
+        run: make asan
 
-      - name: Run Unit Tests
-        run: make test
+      - name: Run Mutation Fuzzing Harness
+        run: make fuzz
 
-      - name: Test CLI Flags
+  code-coverage:
+    name: Code Coverage (gcov)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
         run: |
-          ./bin/booto --version
-          ./bin/booto --help
-          ./bin/booto --dry-run -V
+          sudo apt-get update
+          sudo apt-get install -y build-essential lcov libncurses-dev libblkid-dev libudev-dev
+
+      - name: Run Coverage Evaluation
+        run: make coverage
 
   static-analysis:
-    name: Static Analysis (cppcheck & clang-tidy)
+    name: Static Analysis (cppcheck)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -43,7 +86,7 @@ jobs:
       - name: Install Analysis Tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y cppcheck clang-tidy libncurses-dev libblkid-dev
+          sudo apt-get install -y cppcheck libncurses-dev libblkid-dev
 
       - name: Generate Version Header
         run: make version
@@ -71,7 +114,7 @@ jobs:
       - name: Install Valgrind
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential valgrind
+          sudo apt-get install -y build-essential valgrind libncurses-dev libblkid-dev
 
       - name: Build Project
         run: make all

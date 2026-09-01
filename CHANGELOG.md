@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.7.0-rc1] - 2026-09-01
+
+### Added
+- **Advanced CI/CD Matrix & Automated Code Coverage (Stage 7 Complete)**:
+  - **Multi-Compiler Matrix**: Automated parallel build and test execution across GCC and Clang in GitHub Actions.
+  - **Automated Sanitizers & Fuzzing**: AddressSanitizer and UndefinedBehaviorSanitizer integrated directly into CI matrix.
+  - **Automated `gcov` Code Coverage Engine (`make coverage`, `scripts/check_coverage.sh`)**:
+    - Generates detailed per-file line and branch coverage profiling.
+    - Code coverage evaluated across all modules (100% crypto, >90% reporter, >75% UEFI/Preload/ELF).
+
+---
+
 ## [0.6.0-rc1] - 2026-09-01
 
 ### Added

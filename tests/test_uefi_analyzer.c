@@ -5,6 +5,8 @@
 #include "test_framework.h"
 #include "uefi_analyzer.h"
 
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static void test_synthetic_pe32_plus_parser(void) {
@@ -55,6 +57,27 @@ static void test_synthetic_pe32_plus_parser(void) {
     ASSERT_INT_EQ(info.subsystem, 10, "Subsystem must be EFI Application");
     ASSERT_TRUE(info.has_authenticode, "Authenticode certificate directory must be detected");
 
+    // Write buffer to temp file to test file parsing
+    system("mkdir -p /tmp/mock_esp_test/EFI/BOOT");
+    FILE *fp = fopen("/tmp/mock_esp_test/EFI/BOOT/BOOTX64.EFI", "wb");
+    if (fp) {
+        fwrite(pe_buf, 1, sizeof(pe_buf), fp);
+        fclose(fp);
+    }
+
+    pe_efi_info_t file_info;
+    booto_error_t f_err = uefi_parse_pe_file("/tmp/mock_esp_test/EFI/BOOT/BOOTX64.EFI", &file_info);
+    ASSERT_INT_EQ(f_err, BOOTO_OK, "File parsing must succeed");
+
+    uefi_scan_result_t s_res;
+    memset(&s_res, 0, sizeof(s_res));
+    uefi_inspect_efi_file("/tmp/mock_esp_test/EFI/BOOT/BOOTX64.EFI", &s_res);
+    uefi_inspect_esp_directory("/tmp/mock_esp_test", &s_res);
+
+    const char *sev = uefi_severity_to_string(UEFI_SEVERITY_CRITICAL);
+    ASSERT_TRUE(sev != NULL, "Severity string must not be NULL");
+
+    system("rm -rf /tmp/mock_esp_test");
     TEST_PASS("test_synthetic_pe32_plus_parser");
 }
 
@@ -74,17 +97,11 @@ static void test_corrupted_pe_rejection(void) {
 static void test_dbx_revocation_matching(void) {
     TEST_START("test_dbx_revocation_matching");
 
-    // Manually test revocation database search
     const char *blacklotus_hash = "0c644d57c79e614066929a008c2a382d5e305e9e03d42c38848d7c4dbfc78f24";
     pe_efi_info_t info;
     memset(&info, 0, sizeof(info));
     snprintf(info.sha256, sizeof(info.sha256), "%s", blacklotus_hash);
 
-    // Call inspection logic on mock result
-    uefi_scan_result_t res;
-    memset(&res, 0, sizeof(res));
-
-    // Verify DBX matching
     ASSERT_STR_EQ(info.sha256, blacklotus_hash, "Hash match test");
     TEST_PASS("test_dbx_revocation_matching");
 }
