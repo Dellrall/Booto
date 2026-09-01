@@ -1,7 +1,7 @@
 # Booto
 
 [![CI](https://github.com/Dellrall/Booto/actions/workflows/ci.yml/badge.svg)](https://github.com/Dellrall/Booto/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-0.2.0--alpha-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.3.0--beta-blue.svg)](CHANGELOG.md)
 [![Standard](https://img.shields.io/badge/C-11-blue.svg)](https://en.wikipedia.org/wiki/C11_(C_standard_revision))
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -18,11 +18,11 @@ Built with low-level **C11**, Booto operates from a trusted Debian Live USB envi
 - **Zellij-Inspired Movable TUI**: Terminal User Interface with a dynamic Binary Space Partitioning (BSP) window manager supporting movable, resizable, and zoomable workspace panes.
 - **Safe Forensic Storage Discovery & Mounter**: Automatic enumeration of NVMe/SATA/USB block devices via `/proc/partitions` and `sysfs`, enforcing strict read-only mounts (`MS_RDONLY | MS_NODEV | MS_NOEXEC | MS_NOSUID` with `noload`).
 - **Low-Level Forensic Detection Modules**:
-  - UEFI & ESP Bootkit Analyzer (Authenticode, Secure Boot DB/DBX validation).
-  - Kernel Image & LKM Hook Scanner (ELF parser, hidden `.ko` modules, exported symbols).
-  - In-Memory Initramfs Decompressor & Script Auditor.
-  - Userland `LD_PRELOAD` and PAM Interceptor Scanner.
-  - Raw Ext4 Inode vs VFS Directory Table Differential Cross-View Scanner.
+  - **Kernel Image & LKM Hook Scanner**: Custom 64-bit ELF parser, symbol table auditing, `sys_call_table` tampering detection, DKOM process/module hiding rules (Diamorphine, Reptile, Suterusu, Khook).
+  - **UEFI & ESP Bootkit Analyzer**: Authenticode, Secure Boot DB/DBX validation.
+  - **In-Memory Initramfs Decompressor**: Early-boot script and payload auditor.
+  - **Userland Interceptor Scanner**: `LD_PRELOAD` and PAM credential sniffer detection.
+  - **Raw Ext4 Inode Differential Engine**: Cross-view validation comparing raw disk metadata against VFS trees.
 - **Automated ISO Generation (`make iso`)**: Standalone live bootable ISO output ready for USB deployment.
 
 ---
@@ -39,7 +39,7 @@ sudo apt-get install -y build-essential libblkid-dev libudev-dev
 # Build the binary (auto-generates version.h)
 make all
 
-# Run unit test suite
+# Run unit test suite (5 test suites)
 make test
 
 # Launch Interactive Zellij-Style Movable TUI
@@ -69,7 +69,7 @@ make test
 | `Enter` | **Mount / Unmount** | Mount target storage strictly READ-ONLY |
 | `Mouse Click` | **Click to Focus** | Focus pane by clicking inside its border |
 | `F2` | **Toggle LUKS** | Lock / unlock encrypted persistence partition |
-| `F5` | **Start Scan** | Trigger simulated forensic scanning sequence |
+| `F5` | **Start Scan** | Trigger forensic scanning sequence |
 | `F10` / `q` | **Exit** | Gracefully shutdown TUI and restore terminal |
 
 ---
@@ -81,7 +81,9 @@ make test
 | **Stage 1** | `v0.1.0-alpha` | Project Foundation, Toolchain, Dynamic Versioning & CI/CD | **Completed** |
 | **Stage 2** | `v0.1.5-alpha` | Zellij-Style Movable TUI Window Manager (`ncurses` BSP Tree) | **Completed** |
 | **Stage 3** | `v0.2.0-alpha` | Target Storage Discovery (`libblkid`) & Safe RO Mounter | **Completed** |
-| **Stage 4** | `v0.3.0-beta`  | Modular Detection Engines (LKM, UEFI, Initrd, Preload, Ext4) | *Next* |
+| **Stage 4A** | `v0.3.0-beta`  | Custom ELF Parser & Kernel LKM Rootkit Inspector | **Completed** |
+| **Stage 4B** | `v0.3.5-beta`  | UEFI & ESP Bootkit Analyzer | *Next* |
+| **Stage 4C–E** | `v0.4.0-beta` | Initramfs, `LD_PRELOAD`, & Raw Ext4 Differential Engine | *Pending* |
 | **Stage 5** | `v0.5.0-rc1`   | Tails-Style LUKS2 Persistence & Case Reporting | *Pending* |
 | **Stage 6** | `v1.0.0`       | Debian Live ISO Packaging (`make iso`) & QEMU Benchmarks | *Pending* |
 
