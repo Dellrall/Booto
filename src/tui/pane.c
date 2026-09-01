@@ -139,17 +139,24 @@ static void render_storage_pane(wm_node_t *node, bool is_focused, tui_app_state_
     term_draw_box(node->x, node->y, node->w, node->h, " Target Storage Devices ", border_attr, title_attr);
 
     int row = node->y + 1;
-    term_puts(node->x + 2, row++, "Device               FS      Size     Target Status", MAKE_ATTR(COLOR_BRIGHT_YELLOW, COLOR_DEFAULT, ATTR_UNDERLINE));
+    char header[512];
+    snprintf(header, sizeof(header), "  %-20.20s %-8.8s %-9.9s %-16.16s",
+             "Device", "FS", "Size", "Target Status");
+    term_puts(node->x + 2, row++, header, MAKE_ATTR(COLOR_BRIGHT_YELLOW, COLOR_DEFAULT, ATTR_UNDERLINE));
 
     for (int i = 0; i < app->drive_count && row < node->y + node->h - 1; i++) {
         char line[512];
         bool is_cursor = (is_focused && app->drive_cursor == i);
         uint32_t attr = is_cursor ? MAKE_ATTR(COLOR_BLACK, COLOR_CYAN, ATTR_BOLD) : MAKE_ATTR(COLOR_WHITE, COLOR_DEFAULT, ATTR_NONE);
 
-        snprintf(line, sizeof(line), "%c [%c] %-18.18s %-7.7s %-8.8s %-16.16s",
-                 is_cursor ? '>' : ' ',
+        char dev_str[64];
+        snprintf(dev_str, sizeof(dev_str), "[%c] %.50s",
                  app->drives[i].is_target ? '*' : ' ',
-                 app->drives[i].name,
+                 app->drives[i].name);
+
+        snprintf(line, sizeof(line), "%c %-20.20s %-8.8s %-9.9s %-16.16s",
+                 is_cursor ? '>' : ' ',
+                 dev_str,
                  app->drives[i].fs_type,
                  app->drives[i].size,
                  app->drives[i].is_ro_mounted ? "MOUNTED (RO)" : app->drives[i].label);
