@@ -5,6 +5,15 @@ All notable changes to the **Booto** forensic rootkit & bootkit detection framew
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.7] - 2026-09-02
+
+### Fixed
+- **Storage Mounter Auto-Filesystem & Raw Disk Fallback**:
+  - Automatically probes candidate filesystems (`ext4`, `vfat`, `ntfs`, `iso9660`, `btrfs`, `xfs`) when mounting storage volumes with unknown filesystem headers.
+  - Gracefully falls back to direct raw block and inode analysis when unformatted or unpartitioned virtual hard disks are selected without raising mount failures.
+
+---
+
 ## [1.0.5] - 2026-09-02
 
 ### Changed

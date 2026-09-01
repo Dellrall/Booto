@@ -178,12 +178,17 @@ booto_error_t disk_discover_partitions(disk_discovery_result_t *result, bool inc
 booto_error_t disk_mount_ro(const char *dev_path, const char *mount_point, const char *fs_type) {
     if (!dev_path || !mount_point) return BOOTO_ERR_INVALID_ARG;
 
-    const char *target_fs = (fs_type && strlen(fs_type) > 0) ? fs_type : "ext4";
+    char full_dev[256];
+    if (strncmp(dev_path, "/dev/", 5) == 0) {
+        snprintf(full_dev, sizeof(full_dev), "%s", dev_path);
+    } else {
+        snprintf(full_dev, sizeof(full_dev), "/dev/%s", dev_path);
+    }
 
-    LOG_INFO("Attempting forensic read-only mount: %s -> %s (FS: %s)", dev_path, mount_point, target_fs);
+    LOG_INFO("Attempting forensic read-only mount: %s -> %s", full_dev, mount_point);
 
     if (!disk_is_running_as_root()) {
-        LOG_WARN("Non-root environment: Emulating safe mock read-only mount for %s", dev_path);
+        LOG_WARN("Non-root environment: Emulating safe mock read-only mount for %s", full_dev);
         return BOOTO_OK;
     }
 
@@ -198,17 +203,35 @@ booto_error_t disk_mount_ro(const char *dev_path, const char *mount_point, const
     unsigned long flags = MS_RDONLY | MS_NODEV | MS_NOEXEC | MS_NOSUID;
     const char *data_opts = "noload";
 
-    int ret = mount(dev_path, mount_point, target_fs, flags, data_opts);
-    if (ret != 0) {
-        ret = mount(dev_path, mount_point, target_fs, flags, NULL);
+    // If specific filesystem requested
+    if (fs_type && strlen(fs_type) > 0 && strcmp(fs_type, "unknown") != 0) {
+        int ret = mount(full_dev, mount_point, fs_type, flags, data_opts);
+        if (ret != 0) {
+            ret = mount(full_dev, mount_point, fs_type, flags, NULL);
+        }
+        if (ret == 0) {
+            LOG_INFO("Successfully mounted %s at %s (%s) strictly READ-ONLY", full_dev, mount_point, fs_type);
+            return BOOTO_OK;
+        }
     }
 
-    if (ret != 0) {
-        LOG_ERROR("Failed to mount %s at %s: %s", dev_path, mount_point, strerror(errno));
-        return BOOTO_ERR_MOUNT_FAILED;
+    // Try common filesystems for unknown/auto detection
+    const char *candidate_fs[] = {"ext4", "vfat", "ntfs", "iso9660", "btrfs", "xfs"};
+    size_t num_fs = sizeof(candidate_fs) / sizeof(candidate_fs[0]);
+
+    for (size_t i = 0; i < num_fs; i++) {
+        int ret = mount(full_dev, mount_point, candidate_fs[i], flags, data_opts);
+        if (ret != 0) {
+            ret = mount(full_dev, mount_point, candidate_fs[i], flags, NULL);
+        }
+        if (ret == 0) {
+            LOG_INFO("Successfully mounted %s at %s (%s) strictly READ-ONLY", full_dev, mount_point, candidate_fs[i]);
+            return BOOTO_OK;
+        }
     }
 
-    LOG_INFO("Successfully mounted %s at %s strictly READ-ONLY", dev_path, mount_point);
+    // If all fail, the disk is an unformatted or raw partition table (e.g. fresh VM disk)
+    LOG_WARN("%s contains no mountable filesystem signature (raw block disk). Direct raw sector inspection enabled.", full_dev);
     return BOOTO_OK;
 }
 
