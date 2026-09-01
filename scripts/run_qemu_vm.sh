@@ -63,7 +63,10 @@ fi
 
 # 5. Locate UEFI firmware (OVMF)
 OVMF_FLAG=""
-if [ -f /usr/share/OVMF/OVMF_CODE.fd ]; then
+if [ -f /usr/share/edk2/ovmf/OVMF_CODE.fd ]; then
+    OVMF_FLAG="-drive if=pflash,format=raw,readonly=on,file=/usr/share/edk2/ovmf/OVMF_CODE.fd"
+    echo "[+] UEFI (Fedora edk2-ovmf) firmware detected."
+elif [ -f /usr/share/OVMF/OVMF_CODE.fd ]; then
     OVMF_FLAG="-drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE.fd"
     echo "[+] UEFI (OVMF) firmware detected."
 elif [ -f /usr/share/ovmf/OVMF.fd ]; then
