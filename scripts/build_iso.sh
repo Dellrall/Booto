@@ -77,19 +77,27 @@ cat << 'EOF_GRUB' > "${CD_DIR}/boot/grub/grub.cfg"
 set default=0
 set timeout=5
 
+insmod part_gpt
+insmod part_msdos
+insmod fat
+insmod iso9660
+insmod search
+insmod search_fs_file
+insmod search_label
+insmod linux
 insmod font
-if loadfont "${prefix}/fonts/unicode.pf2" ; then
-    insmod gfxterm
-    set gfxmode=auto
-    terminal_output gfxterm
-fi
+insmod gfxterm
+
+search --no-floppy --set=root --file /live/vmlinuz
 
 menuentry "Booto - Live Rootkit & Bootkit Forensic System (Amnesic RAM Mode)" {
+    search --no-floppy --set=root --file /live/vmlinuz
     linux  /live/vmlinuz boot=live components quiet splash systemd.show_status=0 loglevel=3
     initrd /live/initrd.img
 }
 
 menuentry "Booto - Live Rootkit & Bootkit Forensic System (Debug Verbose)" {
+    search --no-floppy --set=root --file /live/vmlinuz
     linux  /live/vmlinuz boot=live components verbose
     initrd /live/initrd.img
 }
@@ -100,6 +108,8 @@ mkdir -p "${CD_DIR}/EFI/BOOT" "${CD_DIR}/boot/grub"
 grub-mkstandalone \
     --format=x86_64-efi \
     --output="${CD_DIR}/EFI/BOOT/BOOTX64.EFI" \
+    --install-modules="part_gpt part_msdos fat iso9660 search search_fs_file search_label linux normal font gfxterm all_video" \
+    --modules="part_gpt part_msdos fat iso9660 search search_fs_file search_label linux normal font gfxterm all_video" \
     --locales="" \
     --fonts="" \
     "boot/grub/grub.cfg=${CD_DIR}/boot/grub/grub.cfg"
@@ -118,8 +128,8 @@ if [ -f /usr/lib/grub/i386-pc/cdboot.img ]; then
     grub-mkstandalone \
         --format=i386-pc \
         --output="${WORK_DIR}/core.img" \
-        --install-modules="linux normal iso9660 biosdisk search search_fs_file configfile" \
-        --modules="linux normal iso9660 biosdisk search search_fs_file configfile" \
+        --install-modules="part_gpt part_msdos fat iso9660 biosdisk search search_fs_file search_label linux normal configfile" \
+        --modules="part_gpt part_msdos fat iso9660 biosdisk search search_fs_file search_label linux normal configfile" \
         --locales="" \
         --fonts="" \
         "boot/grub/grub.cfg=${CD_DIR}/boot/grub/grub.cfg"
