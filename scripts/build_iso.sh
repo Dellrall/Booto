@@ -12,7 +12,7 @@ WORK_DIR="/tmp/booto_iso_workspace"
 ROOTFS_DIR="${WORK_DIR}/chroot"
 CD_DIR="${WORK_DIR}/iso_root"
 OUTPUT_DIR="${REPO_ROOT}/dist"
-ISO_NAME="booto-live-amd64.iso"
+ISO_NAME="${1:-booto-live-amd64.iso}"
 DEBIAN_VERSION="bookworm"
 DEBIAN_MIRROR="http://deb.debian.org/debian"
 

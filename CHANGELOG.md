@@ -5,6 +5,15 @@ All notable changes to the **Booto** forensic rootkit & bootkit detection framew
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.4] - 2026-09-02
+
+### Added
+- **Versioned ISO Artifact Naming & Embedded Release Notes**:
+  - Live ISO artifacts and checksums are now dynamically named after their release tag (e.g. `booto-v1.0.4-amd64.iso` and `booto-v1.0.4-amd64.iso.sha256`).
+  - Automated release pipeline extracts the full changelog body directly into GitHub Releases.
+
+---
+
 ## [1.0.2] - 2026-09-02
 
 ### Fixed
