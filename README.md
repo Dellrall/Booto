@@ -1,6 +1,6 @@
 # Booto
 
-[![CI](https://github.com/Dellrall/Booto/actions/workflows/ci.yml/badge.svg)](https://github.com/Dellrall/Booto/actions/workflows/ci.yml)
+[![CI](https://github.com/Dellrall/Booto/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Dellrall/Booto/actions/workflows/ci.yml)
 [![Version](https://img.shields.io/badge/version-0.4.0--beta-blue.svg)](CHANGELOG.md)
 [![Standard](https://img.shields.io/badge/C-11-blue.svg)](https://en.wikipedia.org/wiki/C11_(C_standard_revision))
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
