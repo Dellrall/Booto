@@ -57,6 +57,7 @@ dkms.conf
 # Booto Build Artifacts
 build/
 bin/
+dist/
 *.iso
 *.iso.sha256
 include/version.h
