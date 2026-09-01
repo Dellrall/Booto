@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
 
 project(booto
-    VERSION 0.1.0
-    DESCRIPTION "Tails-Inspired Live Linux Forensic Rootkit and Bootkit Detection Suite"
+    VERSION 0.1.5
+    DESCRIPTION "Debian-Based Tails-Inspired Live Linux Forensic Rootkit & Bootkit Detection Suite"
     LANGUAGES C
 )
 
@@ -22,6 +22,8 @@ add_compile_options(
     -fstack-protector-strong
     -D_FORTIFY_SOURCE=2
     -fPIE
+    -D_POSIX_C_SOURCE=200809L
+    -D_DEFAULT_SOURCE
 )
 
 add_link_options(-pie -Wl,-z,relro,-z,now)
@@ -58,6 +60,10 @@ include_directories(
 # Core library sources
 set(BOOT_LIB_SOURCES
     src/logger.c
+    src/tui/terminal.c
+    src/tui/wm.c
+    src/tui/pane.c
+    src/tui/tui_app.c
 )
 
 add_library(booto_core STATIC ${BOOT_LIB_SOURCES})
@@ -76,6 +82,10 @@ add_test(NAME test_version COMMAND test_version)
 add_executable(test_logger tests/test_logger.c)
 target_link_libraries(test_logger PRIVATE booto_core)
 add_test(NAME test_logger COMMAND test_logger)
+
+add_executable(test_wm_tree tests/test_wm_tree.c)
+target_link_libraries(test_wm_tree PRIVATE booto_core)
+add_test(NAME test_wm_tree COMMAND test_wm_tree)
 
 # Custom Target for ISO generation
 add_custom_target(iso

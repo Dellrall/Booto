@@ -1,7 +1,7 @@
 # Booto
 
 [![CI](https://github.com/Dellrall/Booto/actions/workflows/ci.yml/badge.svg)](https://github.com/Dellrall/Booto/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-0.1.0--alpha-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.1.5--alpha-blue.svg)](CHANGELOG.md)
 [![Standard](https://img.shields.io/badge/C-11-blue.svg)](https://en.wikipedia.org/wiki/C11_(C_standard_revision))
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -40,7 +40,7 @@ Live USB Drive (e.g. /dev/sdb)
 
 ### Dependencies (Debian / Ubuntu)
 ```bash
-sudo apt-get install -y build-essential libncurses-dev libblkid-dev libudev-dev
+sudo apt-get install -y build-essential libblkid-dev libudev-dev
 ```
 
 ### Build & Run
@@ -51,6 +51,9 @@ make all
 # Run unit test suite
 make test
 
+# Launch Interactive Zellij-Style Movable TUI
+./bin/booto
+
 # View help and options
 ./bin/booto --help
 
@@ -60,13 +63,31 @@ make test
 
 ---
 
+## TUI Window Navigation & Shortcuts
+
+| Shortcut | Action | Description |
+| :--- | :--- | :--- |
+| `Alt + Arrow` / `hjkl` | **Spatial Focus** | Move focus to adjacent pane |
+| `Tab` | **Cycle Focus** | Cycle focus through active leaf panes |
+| `Alt + M` | **Move / Swap** | Swap active pane position with adjacent pane |
+| `Alt + Z` | **Zoom / Maximize** | Toggle full-screen on focused pane |
+| `Alt + H` | **Split Horizontal** | Split focused pane into top & bottom |
+| `Alt + V` | **Split Vertical** | Split focused pane into left & right |
+| `Alt + [` / `Alt + ]` | **Resize Split** | Adjust split ratio of the active node |
+| `Mouse Click` | **Click to Focus** | Focus pane by clicking inside its border |
+| `F2` | **Toggle LUKS** | Lock / unlock encrypted persistence partition |
+| `F5` | **Start Scan** | Trigger simulated forensic scanning sequence |
+| `F10` / `q` | **Exit** | Gracefully shutdown TUI and restore terminal |
+
+---
+
 ## Development Milestones
 
 | Stage | Version | Description | Status |
 | :--- | :--- | :--- | :--- |
 | **Stage 1** | `v0.1.0-alpha` | Project Foundation, Toolchain, Dynamic Versioning & CI/CD | **Completed** |
-| **Stage 2** | `v0.1.5-alpha` | Zellij-Style Movable TUI Window Manager (`ncurses` BSP Tree) | *Next* |
-| **Stage 3** | `v0.2.0-alpha` | Target Storage Discovery (`libblkid`) & Safe RO Mounter | *Pending* |
+| **Stage 2** | `v0.1.5-alpha` | Zellij-Style Movable TUI Window Manager (`ncurses` BSP Tree) | **Completed** |
+| **Stage 3** | `v0.2.0-alpha` | Target Storage Discovery (`libblkid`) & Safe RO Mounter | *Next* |
 | **Stage 4** | `v0.3.0-beta`  | Modular Detection Engines (LKM, UEFI, Initrd, Preload, Ext4) | *Pending* |
 | **Stage 5** | `v0.5.0-rc1`   | Tails-Style LUKS2 Persistence & Case Reporting | *Pending* |
 | **Stage 6** | `v1.0.0`       | Debian Live ISO Packaging (`make iso`) & QEMU Benchmarks | *Pending* |

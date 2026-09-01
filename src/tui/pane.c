@@ -1,0 +1,354 @@
+/**
+ * @file pane.c
+ * @brief Implementations of TUI pane renderers and interactive handlers.
+ */
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#endif
+#ifndef _DEFAULT_SOURCE
+#define _DEFAULT_SOURCE
+#endif
+
+#include "tui/pane.h"
+#include "logger.h"
+
+#include <stdio.h>
+#include <string.h>
+
+void tui_app_state_init(tui_app_state_t *app, booto_context_t *ctx) {
+    if (!app) return;
+    memset(app, 0, sizeof(*app));
+    app->ctx = ctx;
+    app->running = true;
+    app->luks_unlocked = false;
+    snprintf(app->persistence_status, sizeof(app->persistence_status), "LUKS Locked (Amnesic Mode)");
+    snprintf(app->status_msg, sizeof(app->status_msg), "Press F5 to start scan | Alt+M to move/swap | Alt+Z to zoom");
+
+    // Initialize mock drives for Stage 2
+    app->drive_count = 3;
+    app->drive_cursor = 0;
+
+    snprintf(app->drives[0].name, sizeof(app->drives[0].name), "/dev/nvme0n1p2");
+    snprintf(app->drives[0].size, sizeof(app->drives[0].size), "512 GB");
+    snprintf(app->drives[0].fs_type, sizeof(app->drives[0].fs_type), "ext4");
+    snprintf(app->drives[0].label, sizeof(app->drives[0].label), "Target Linux Rootfs");
+    app->drives[0].is_target = true;
+    app->drives[0].is_ro_mounted = false;
+
+    snprintf(app->drives[1].name, sizeof(app->drives[1].name), "/dev/nvme0n1p1");
+    snprintf(app->drives[1].size, sizeof(app->drives[1].size), "512 MB");
+    snprintf(app->drives[1].fs_type, sizeof(app->drives[1].fs_type), "vfat");
+    snprintf(app->drives[1].label, sizeof(app->drives[1].label), "EFI System Partition");
+    app->drives[1].is_target = false;
+    app->drives[1].is_ro_mounted = false;
+
+    snprintf(app->drives[2].name, sizeof(app->drives[2].name), "/dev/sda1");
+    snprintf(app->drives[2].size, sizeof(app->drives[2].size), "1.0 TB");
+    snprintf(app->drives[2].fs_type, sizeof(app->drives[2].fs_type), "ntfs");
+    snprintf(app->drives[2].label, sizeof(app->drives[2].label), "Data Backup");
+    app->drives[2].is_target = false;
+    app->drives[2].is_ro_mounted = false;
+
+    // Initialize forensic modules
+    app->module_count = 5;
+    app->module_cursor = 0;
+
+    snprintf(app->modules[0].name, sizeof(app->modules[0].name), "UEFI & ESP Bootkit Analyzer");
+    snprintf(app->modules[0].target_path, sizeof(app->modules[0].target_path), "/boot/efi/EFI/*");
+    app->modules[0].enabled = true;
+    snprintf(app->modules[0].status_text, sizeof(app->modules[0].status_text), "READY");
+    app->modules[0].status_color = MAKE_ATTR(COLOR_GREEN, COLOR_DEFAULT, ATTR_BOLD);
+
+    snprintf(app->modules[1].name, sizeof(app->modules[1].name), "Kernel LKM & Symbol Hook Scanner");
+    snprintf(app->modules[1].target_path, sizeof(app->modules[1].target_path), "/lib/modules, vmlinuz");
+    app->modules[1].enabled = true;
+    snprintf(app->modules[1].status_text, sizeof(app->modules[1].status_text), "READY");
+    app->modules[1].status_color = MAKE_ATTR(COLOR_GREEN, COLOR_DEFAULT, ATTR_BOLD);
+
+    snprintf(app->modules[2].name, sizeof(app->modules[2].name), "In-Memory Initramfs Auditor");
+    snprintf(app->modules[2].target_path, sizeof(app->modules[2].target_path), "/boot/initrd.img*");
+    app->modules[2].enabled = true;
+    snprintf(app->modules[2].status_text, sizeof(app->modules[2].status_text), "READY");
+    app->modules[2].status_color = MAKE_ATTR(COLOR_GREEN, COLOR_DEFAULT, ATTR_BOLD);
+
+    snprintf(app->modules[3].name, sizeof(app->modules[3].name), "LD_PRELOAD & PAM Interceptors");
+    snprintf(app->modules[3].target_path, sizeof(app->modules[3].target_path), "/etc/ld.so.preload");
+    app->modules[3].enabled = true;
+    snprintf(app->modules[3].status_text, sizeof(app->modules[3].status_text), "READY");
+    app->modules[3].status_color = MAKE_ATTR(COLOR_GREEN, COLOR_DEFAULT, ATTR_BOLD);
+
+    snprintf(app->modules[4].name, sizeof(app->modules[4].name), "Raw Ext4 Inode vs VFS Diff");
+    snprintf(app->modules[4].target_path, sizeof(app->modules[4].target_path), "Raw Block Inodes");
+    app->modules[4].enabled = true;
+    snprintf(app->modules[4].status_text, sizeof(app->modules[4].status_text), "READY");
+    app->modules[4].status_color = MAKE_ATTR(COLOR_GREEN, COLOR_DEFAULT, ATTR_BOLD);
+
+    // Initial mock threat finding
+    snprintf(app->threat.threat_name, sizeof(app->threat.threat_name), "Diamorphine LKM Rootkit");
+    snprintf(app->threat.infected_file, sizeof(app->threat.infected_file), "/lib/modules/6.5.0-generic/diamorphine.ko");
+    snprintf(app->threat.hook_type, sizeof(app->threat.hook_type), "sys_call_table hijack & DKOM hide");
+    snprintf(app->threat.sha256, sizeof(app->threat.sha256), "8f4b23a9d201bc93ef4a890123ef9a82bc128912ef349a128901bc3412ef8901");
+    snprintf(app->threat.severity, sizeof(app->threat.severity), "CRITICAL");
+    app->threat.severity_color = MAKE_ATTR(COLOR_BRIGHT_RED, COLOR_DEFAULT, ATTR_BOLD);
+    snprintf(app->threat.hex_dump, sizeof(app->threat.hex_dump),
+             "0x0000: 7f 45 4c 46 02 01 01 00  .ELF....\n"
+             "0x0008: 00 00 00 00 00 00 00 00  ........\n"
+             "0x0010: e9 a4 1f 00 00 48 89 e5  .....H..");
+
+    // Initial logs
+    tui_app_append_log(app, LOG_LEVEL_INFO, "22:40:01", "Booto forensic TUI window manager initialized");
+    tui_app_append_log(app, LOG_LEVEL_INFO, "22:40:02", "Amnesic live operating system verified in RAM (tmpfs)");
+    tui_app_append_log(app, LOG_LEVEL_WARN, "22:40:03", "Persistence partition /dev/sdb2 is currently LOCKED");
+    tui_app_append_log(app, LOG_LEVEL_INFO, "22:40:04", "Discovered 3 storage partitions via libblkid");
+}
+
+void tui_app_append_log(tui_app_state_t *app, log_level_t level, const char *timestamp, const char *msg) {
+    if (!app) return;
+    int idx = (app->log_head + app->log_count) % MAX_LOG_LINES;
+    if (app->log_count == MAX_LOG_LINES) {
+        app->log_head = (app->log_head + 1) % MAX_LOG_LINES;
+    } else {
+        app->log_count++;
+    }
+
+    log_entry_t *entry = &app->log_ring[idx];
+    snprintf(entry->timestamp, sizeof(entry->timestamp), "%s", timestamp ? timestamp : "--:--:--");
+    snprintf(entry->msg, sizeof(entry->msg), "%s", msg ? msg : "");
+
+    switch (level) {
+        case LOG_LEVEL_DEBUG:
+            snprintf(entry->level, sizeof(entry->level), "DEBUG");
+            entry->color = MAKE_ATTR(COLOR_CYAN, COLOR_DEFAULT, ATTR_NONE);
+            break;
+        case LOG_LEVEL_INFO:
+            snprintf(entry->level, sizeof(entry->level), "INFO ");
+            entry->color = MAKE_ATTR(COLOR_GREEN, COLOR_DEFAULT, ATTR_NONE);
+            break;
+        case LOG_LEVEL_WARN:
+            snprintf(entry->level, sizeof(entry->level), "WARN ");
+            entry->color = MAKE_ATTR(COLOR_YELLOW, COLOR_DEFAULT, ATTR_BOLD);
+            break;
+        case LOG_LEVEL_ERROR:
+            snprintf(entry->level, sizeof(entry->level), "ERROR");
+            entry->color = MAKE_ATTR(COLOR_RED, COLOR_DEFAULT, ATTR_BOLD);
+            break;
+        case LOG_LEVEL_CRITICAL:
+            snprintf(entry->level, sizeof(entry->level), "CRIT ");
+            entry->color = MAKE_ATTR(COLOR_BRIGHT_RED, COLOR_DEFAULT, ATTR_BOLD);
+            break;
+        default:
+            snprintf(entry->level, sizeof(entry->level), "LOG  ");
+            entry->color = MAKE_ATTR(COLOR_WHITE, COLOR_DEFAULT, ATTR_NONE);
+            break;
+    }
+}
+
+static void render_storage_pane(wm_node_t *node, bool is_focused, tui_app_state_t *app) {
+    uint32_t border_attr = is_focused ? MAKE_ATTR(COLOR_BRIGHT_CYAN, COLOR_DEFAULT, ATTR_BOLD) : MAKE_ATTR(COLOR_WHITE, COLOR_DEFAULT, ATTR_NONE);
+    uint32_t title_attr = is_focused ? MAKE_ATTR(COLOR_BRIGHT_CYAN, COLOR_DEFAULT, ATTR_BOLD | ATTR_REVERSE) : MAKE_ATTR(COLOR_WHITE, COLOR_DEFAULT, ATTR_BOLD);
+
+    term_draw_box(node->x, node->y, node->w, node->h, " Target Storage Devices ", border_attr, title_attr);
+
+    int row = node->y + 1;
+    term_puts(node->x + 2, row++, "Device          FS      Size    Target Status", MAKE_ATTR(COLOR_BRIGHT_YELLOW, COLOR_DEFAULT, ATTR_UNDERLINE));
+
+    for (int i = 0; i < app->drive_count && row < node->y + node->h - 1; i++) {
+        char line[256];
+        bool is_cursor = (is_focused && app->drive_cursor == i);
+        uint32_t attr = is_cursor ? MAKE_ATTR(COLOR_BLACK, COLOR_CYAN, ATTR_BOLD) : MAKE_ATTR(COLOR_WHITE, COLOR_DEFAULT, ATTR_NONE);
+
+        snprintf(line, sizeof(line), "%c [%c] %-13s %-6s  %-6s  %-16s",
+                 is_cursor ? '>' : ' ',
+                 app->drives[i].is_target ? '*' : ' ',
+                 app->drives[i].name,
+                 app->drives[i].fs_type,
+                 app->drives[i].size,
+                 app->drives[i].is_ro_mounted ? "MOUNTED (RO)" : app->drives[i].label);
+
+        term_puts(node->x + 2, row++, line, attr);
+    }
+}
+
+static void render_modules_pane(wm_node_t *node, bool is_focused, tui_app_state_t *app) {
+    uint32_t border_attr = is_focused ? MAKE_ATTR(COLOR_BRIGHT_CYAN, COLOR_DEFAULT, ATTR_BOLD) : MAKE_ATTR(COLOR_WHITE, COLOR_DEFAULT, ATTR_NONE);
+    uint32_t title_attr = is_focused ? MAKE_ATTR(COLOR_BRIGHT_CYAN, COLOR_DEFAULT, ATTR_BOLD | ATTR_REVERSE) : MAKE_ATTR(COLOR_WHITE, COLOR_DEFAULT, ATTR_BOLD);
+
+    term_draw_box(node->x, node->y, node->w, node->h, " Forensic Scanner Modules ", border_attr, title_attr);
+
+    int row = node->y + 1;
+    for (int i = 0; i < app->module_count && row < node->y + node->h - 1; i++) {
+        char line[256];
+        bool is_cursor = (is_focused && app->module_cursor == i);
+        uint32_t attr = is_cursor ? MAKE_ATTR(COLOR_BLACK, COLOR_CYAN, ATTR_BOLD) : MAKE_ATTR(COLOR_WHITE, COLOR_DEFAULT, ATTR_NONE);
+
+        snprintf(line, sizeof(line), "%c [%c] %-32s",
+                 is_cursor ? '>' : ' ',
+                 app->modules[i].enabled ? 'X' : ' ',
+                 app->modules[i].name);
+
+        term_puts(node->x + 2, row, line, attr);
+        if (node->w > 46) {
+            term_puts(node->x + 40, row, app->modules[i].status_text, app->modules[i].status_color);
+        }
+        row++;
+    }
+}
+
+static void render_logs_pane(wm_node_t *node, bool is_focused, tui_app_state_t *app) {
+    uint32_t border_attr = is_focused ? MAKE_ATTR(COLOR_BRIGHT_CYAN, COLOR_DEFAULT, ATTR_BOLD) : MAKE_ATTR(COLOR_WHITE, COLOR_DEFAULT, ATTR_NONE);
+    uint32_t title_attr = is_focused ? MAKE_ATTR(COLOR_BRIGHT_CYAN, COLOR_DEFAULT, ATTR_BOLD | ATTR_REVERSE) : MAKE_ATTR(COLOR_WHITE, COLOR_DEFAULT, ATTR_BOLD);
+
+    char title[128];
+    snprintf(title, sizeof(title), " Live Scan & Event Stream (%d lines) ", app->log_count);
+    term_draw_box(node->x, node->y, node->w, node->h, title, border_attr, title_attr);
+
+    int max_visible = node->h - 2;
+    if (max_visible <= 0) return;
+
+    int start = app->log_count - max_visible - app->log_scroll;
+    if (start < 0) start = 0;
+
+    int row = node->y + 1;
+    for (int i = 0; i < max_visible && (start + i) < app->log_count; i++) {
+        int idx = (app->log_head + start + i) % MAX_LOG_LINES;
+        log_entry_t *entry = &app->log_ring[idx];
+
+        char prefix[64];
+        snprintf(prefix, sizeof(prefix), "[%s] [%s] ", entry->timestamp, entry->level);
+        term_puts(node->x + 2, row, prefix, entry->color);
+
+        int p_len = (int)strlen(prefix);
+        int max_msg = node->w - 4 - p_len;
+        if (max_msg > 0) {
+            char msg_trunc[256];
+            snprintf(msg_trunc, sizeof(msg_trunc), "%s", entry->msg);
+            if ((int)strlen(msg_trunc) > max_msg) {
+                msg_trunc[max_msg] = '\0';
+            }
+            term_puts(node->x + 2 + p_len, row, msg_trunc, MAKE_ATTR(COLOR_WHITE, COLOR_DEFAULT, ATTR_NONE));
+        }
+        row++;
+    }
+}
+
+static void render_threat_pane(wm_node_t *node, bool is_focused, tui_app_state_t *app) {
+    uint32_t border_attr = is_focused ? MAKE_ATTR(COLOR_BRIGHT_CYAN, COLOR_DEFAULT, ATTR_BOLD) : MAKE_ATTR(COLOR_WHITE, COLOR_DEFAULT, ATTR_NONE);
+    uint32_t title_attr = is_focused ? MAKE_ATTR(COLOR_BRIGHT_CYAN, COLOR_DEFAULT, ATTR_BOLD | ATTR_REVERSE) : MAKE_ATTR(COLOR_WHITE, COLOR_DEFAULT, ATTR_BOLD);
+
+    term_draw_box(node->x, node->y, node->w, node->h, " Threat Inspector & Disassembly ", border_attr, title_attr);
+
+    int row = node->y + 1;
+    char buf[512];
+
+    snprintf(buf, sizeof(buf), "Threat:    %s", app->threat.threat_name);
+    term_puts(node->x + 2, row++, buf, MAKE_ATTR(COLOR_BRIGHT_YELLOW, COLOR_DEFAULT, ATTR_BOLD));
+
+    snprintf(buf, sizeof(buf), "Severity:  %s", app->threat.severity);
+    term_puts(node->x + 2, row++, buf, app->threat.severity_color);
+
+    snprintf(buf, sizeof(buf), "Location:  %s", app->threat.infected_file);
+    term_puts(node->x + 2, row++, buf, MAKE_ATTR(COLOR_WHITE, COLOR_DEFAULT, ATTR_NONE));
+
+    snprintf(buf, sizeof(buf), "Mechanism: %s", app->threat.hook_type);
+    term_puts(node->x + 2, row++, buf, MAKE_ATTR(COLOR_CYAN, COLOR_DEFAULT, ATTR_NONE));
+
+    if (row < node->y + node->h - 1) {
+        snprintf(buf, sizeof(buf), "SHA256:    %.32s...", app->threat.sha256);
+        term_puts(node->x + 2, row++, buf, MAKE_ATTR(COLOR_BRIGHT_BLACK, COLOR_DEFAULT, ATTR_NONE));
+    }
+}
+
+static void render_persistence_pane(wm_node_t *node, bool is_focused, tui_app_state_t *app) {
+    uint32_t border_attr = is_focused ? MAKE_ATTR(COLOR_BRIGHT_CYAN, COLOR_DEFAULT, ATTR_BOLD) : MAKE_ATTR(COLOR_WHITE, COLOR_DEFAULT, ATTR_NONE);
+    uint32_t title_attr = is_focused ? MAKE_ATTR(COLOR_BRIGHT_CYAN, COLOR_DEFAULT, ATTR_BOLD | ATTR_REVERSE) : MAKE_ATTR(COLOR_WHITE, COLOR_DEFAULT, ATTR_BOLD);
+
+    term_draw_box(node->x, node->y, node->w, node->h, " LUKS Persistence & Case Reports ", border_attr, title_attr);
+
+    int row = node->y + 1;
+    term_puts(node->x + 2, row++, "Encrypted Persistence Status:", MAKE_ATTR(COLOR_BRIGHT_YELLOW, COLOR_DEFAULT, ATTR_BOLD));
+
+    term_puts(node->x + 4, row++, app->persistence_status,
+              app->luks_unlocked ? MAKE_ATTR(COLOR_GREEN, COLOR_DEFAULT, ATTR_BOLD) : MAKE_ATTR(COLOR_RED, COLOR_DEFAULT, ATTR_BOLD));
+
+    row++;
+    term_puts(node->x + 2, row++, "[F2] Unlock LUKS Volume", MAKE_ATTR(COLOR_BRIGHT_CYAN, COLOR_DEFAULT, ATTR_UNDERLINE));
+    term_puts(node->x + 2, row++, "[F6] Export Signed Case Report", MAKE_ATTR(COLOR_BRIGHT_GREEN, COLOR_DEFAULT, ATTR_UNDERLINE));
+}
+
+void pane_render(wm_node_t *node, bool is_focused, tui_app_state_t *app) {
+    if (!node || node->type != NODE_LEAF) return;
+
+    switch (node->pane_type) {
+        case PANE_STORAGE_DEVICES:
+            render_storage_pane(node, is_focused, app);
+            break;
+        case PANE_SCANNER_MODULES:
+            render_modules_pane(node, is_focused, app);
+            break;
+        case PANE_LIVE_LOGS:
+            render_logs_pane(node, is_focused, app);
+            break;
+        case PANE_THREAT_INSPECTOR:
+            render_threat_pane(node, is_focused, app);
+            break;
+        case PANE_PERSISTENCE:
+            render_persistence_pane(node, is_focused, app);
+            break;
+        default:
+            term_draw_box(node->x, node->y, node->w, node->h, " Generic Pane ", MAKE_ATTR(COLOR_WHITE, COLOR_DEFAULT, ATTR_NONE), MAKE_ATTR(COLOR_WHITE, COLOR_DEFAULT, ATTR_NONE));
+            break;
+    }
+}
+
+bool pane_handle_input(wm_node_t *node, const input_event_t *event, tui_app_state_t *app) {
+    if (!node || !event || !app) return false;
+
+    if (node->pane_type == PANE_STORAGE_DEVICES) {
+        if (event->type == KEY_UP || (event->type == KEY_CHAR && event->ch == 'k')) {
+            if (app->drive_cursor > 0) app->drive_cursor--;
+            return true;
+        }
+        if (event->type == KEY_DOWN || (event->type == KEY_CHAR && event->ch == 'j')) {
+            if (app->drive_cursor < app->drive_count - 1) app->drive_cursor++;
+            return true;
+        }
+        if (event->type == KEY_CHAR && event->ch == ' ') {
+            app->drives[app->drive_cursor].is_target = !app->drives[app->drive_cursor].is_target;
+            snprintf(app->status_msg, sizeof(app->status_msg), "Toggled target flag for %s", app->drives[app->drive_cursor].name);
+            return true;
+        }
+        if (event->type == KEY_ENTER) {
+            app->drives[app->drive_cursor].is_ro_mounted = !app->drives[app->drive_cursor].is_ro_mounted;
+            tui_app_append_log(app, LOG_LEVEL_INFO, NULL,
+                               app->drives[app->drive_cursor].is_ro_mounted ?
+                               "Mounted target storage strictly READ-ONLY (MS_RDONLY, noload)" :
+                               "Unmounted target storage cleanly");
+            return true;
+        }
+    } else if (node->pane_type == PANE_SCANNER_MODULES) {
+        if (event->type == KEY_UP || (event->type == KEY_CHAR && event->ch == 'k')) {
+            if (app->module_cursor > 0) app->module_cursor--;
+            return true;
+        }
+        if (event->type == KEY_DOWN || (event->type == KEY_CHAR && event->ch == 'j')) {
+            if (app->module_cursor < app->module_count - 1) app->module_cursor++;
+            return true;
+        }
+        if (event->type == KEY_CHAR && event->ch == ' ') {
+            app->modules[app->module_cursor].enabled = !app->modules[app->module_cursor].enabled;
+            snprintf(app->status_msg, sizeof(app->status_msg), "Toggled module: %s", app->modules[app->module_cursor].name);
+            return true;
+        }
+    } else if (node->pane_type == PANE_LIVE_LOGS) {
+        if (event->type == KEY_UP || (event->type == KEY_CHAR && event->ch == 'k')) {
+            if (app->log_scroll < app->log_count - 5) app->log_scroll++;
+            return true;
+        }
+        if (event->type == KEY_DOWN || (event->type == KEY_CHAR && event->ch == 'j')) {
+            if (app->log_scroll > 0) app->log_scroll--;
+            return true;
+        }
+    }
+
+    return false;
+}

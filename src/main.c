@@ -1,13 +1,18 @@
 /**
  * @file main.c
- * @brief Booto main entry point and CLI option dispatcher.
+ * @brief Booto main entry point and CLI / TUI option dispatcher.
  */
+#ifndef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 200809L
+#endif
+#ifndef _DEFAULT_SOURCE
 #define _DEFAULT_SOURCE
+#endif
 
 #include "booto.h"
 #include "logger.h"
 #include "version.h"
+#include "tui/tui_app.h"
 
 #include <getopt.h>
 #include <stdio.h>
@@ -105,31 +110,24 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    // Initialize logger
-    log_level_t min_log = ctx.verbose ? LOG_LEVEL_DEBUG : LOG_LEVEL_INFO;
-    logger_init(min_log, NULL);
-
-    LOG_INFO("Booto Engine initialized (Version: %s, Mode: %s)",
-             BOOTO_VERSION_STRING,
-             ctx.mode == BOOTO_MODE_TUI ? "TUI (Interactive)" :
-             ctx.mode == BOOTO_MODE_CLI ? "CLI (Headless)" : "Dry-Run");
-
-    if (ctx.mock_drives) {
-        LOG_INFO("Mock drive emulation active for testing");
-    }
-
-    if (ctx.target_rootfs[0] != '\0') {
-        LOG_INFO("Target rootfs specified: %s", ctx.target_rootfs);
-    }
-
     if (ctx.mode == BOOTO_MODE_DRY_RUN) {
+        logger_init(ctx.verbose ? LOG_LEVEL_DEBUG : LOG_LEVEL_INFO, NULL);
+        LOG_INFO("Booto Engine initialized (Version: %s, Mode: Dry-Run)", BOOTO_VERSION_STRING);
+        if (ctx.mock_drives) {
+            LOG_INFO("Mock drive emulation active");
+        }
         LOG_INFO("Dry-run execution completed successfully.");
+        logger_shutdown();
+        return 0;
     } else if (ctx.mode == BOOTO_MODE_CLI) {
-        LOG_INFO("Running CLI triage scan...");
+        logger_init(ctx.verbose ? LOG_LEVEL_DEBUG : LOG_LEVEL_INFO, NULL);
+        LOG_INFO("Booto CLI Mode initialized (Version: %s)", BOOTO_VERSION_STRING);
+        LOG_INFO("Target rootfs: %s", ctx.target_rootfs[0] ? ctx.target_rootfs : "Auto-discover");
+        LOG_INFO("Running CLI scan triage...");
+        logger_shutdown();
+        return 0;
     } else {
-        LOG_INFO("Ready to launch dynamic TUI workspace window manager (Stage 2)");
+        // Interactive TUI Mode
+        return tui_app_run(&ctx);
     }
-
-    logger_shutdown();
-    return 0;
 }
