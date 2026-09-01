@@ -61,3 +61,7 @@ dist/
 *.iso
 *.iso.sha256
 include/version.h
+
+# Local Worklogs & Private Notes
+worklogs/
+WORKLOG*.md
