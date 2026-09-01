@@ -5,6 +5,22 @@ All notable changes to the **Booto** forensic rootkit & bootkit detection framew
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.2] - 2026-09-02
+
+### Fixed
+- **GRUB Automated Kernel Discovery**:
+  - Embedded `iso9660`, `part_gpt`, `part_msdos`, `fat`, and `search` drivers into the `BOOTX64.EFI` standalone image.
+  - Added `search --no-floppy --set=root --file /live/vmlinuz` to the GRUB configuration to automatically mount the ISO9660 root filesystem across all virtual machine environments.
+
+---
+
+## [1.0.1] - 2026-09-02
+
+### Fixed
+- **Universal Dual-Boot Live ISO Assembly**:
+  - Formatted a dedicated 16MB FAT `efiboot.img` for El Torito UEFI boot compliance in VirtualBox and hardware UEFI systems.
+  - Added Legacy BIOS (`i386-pc`) bootloader support for seamless dual BIOS + UEFI operation.
+
 ---
 
 ## [1.0.0] - 2026-09-01
