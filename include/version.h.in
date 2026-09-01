@@ -1,0 +1,15 @@
+/**
+ * @file version.h
+ * @brief Auto-generated version and build metadata for Booto.
+ */
+#ifndef BOOTO_VERSION_H
+#define BOOTO_VERSION_H
+
+#define BOOTO_VERSION_MAJOR     @PROJECT_VERSION_MAJOR@
+#define BOOTO_VERSION_MINOR     @PROJECT_VERSION_MINOR@
+#define BOOTO_VERSION_PATCH     @PROJECT_VERSION_PATCH@
+#define BOOTO_VERSION_STRING    "@PROJECT_VERSION@"
+#define BOOTO_GIT_HASH          "@GIT_COMMIT_HASH@"
+#define BOOTO_BUILD_TIMESTAMP   "@BUILD_TIMESTAMP@"
+
+#endif /* BOOTO_VERSION_H */

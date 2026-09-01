@@ -1,0 +1,44 @@
+name: Booto CD - Release Live ISO
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-release-iso:
+    name: Build & Package Debian Live ISO
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract Tag Version
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Install Build & Live Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libncurses-dev libblkid-dev libudev-dev xorriso live-build squashfs-tools
+
+      - name: Build Booto Binary
+        run: make all
+
+      - name: Package Mock Live ISO Artifact
+        run: |
+          mkdir -p release_dist
+          # Placeholder for ISO packaging script in Stage 6
+          echo "Booto Live ISO Release for ${{ steps.get_version.outputs.VERSION }}" > release_dist/booto-${{ steps.get_version.outputs.VERSION }}-x86_64.iso
+          sha256sum release_dist/booto-${{ steps.get_version.outputs.VERSION }}-x86_64.iso > release_dist/booto-${{ steps.get_version.outputs.VERSION }}-x86_64.iso.sha256
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            release_dist/booto-${{ steps.get_version.outputs.VERSION }}-x86_64.iso
+            release_dist/booto-${{ steps.get_version.outputs.VERSION }}-x86_64.iso.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -53,3 +53,10 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+# Booto Build Artifacts
+build/
+bin/
+*.iso
+*.iso.sha256
+include/version.h

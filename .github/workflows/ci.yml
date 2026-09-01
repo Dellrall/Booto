@@ -1,0 +1,78 @@
+name: Booto CI - Build, Test & Static Analysis
+
+on:
+  push:
+    branches: [ main, master, 'feat/**', 'stage/**' ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build-and-test:
+    name: GCC C11 Build & Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libncurses-dev libblkid-dev libudev-dev
+
+      - name: Build with Makefile
+        run: make all
+
+      - name: Run Unit Tests
+        run: make test
+
+      - name: Test CLI Flags
+        run: |
+          ./bin/booto --version
+          ./bin/booto --help
+          ./bin/booto --dry-run -V
+
+  static-analysis:
+    name: Static Analysis (cppcheck & clang-tidy)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Analysis Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cppcheck clang-tidy libncurses-dev libblkid-dev
+
+      - name: Run cppcheck
+        run: |
+          cppcheck --enable=warning,style,performance,portability \
+                   --inconclusive \
+                   --suppress=missingIncludeSystem \
+                   --error-exitcode=1 \
+                   -I include \
+                   src/
+
+  memory-safety:
+    name: Memory Leak Validation (Valgrind)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Valgrind
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential valgrind
+
+      - name: Build Project
+        run: make all
+
+      - name: Run Valgrind on Dry-Run Mode
+        run: |
+          valgrind --leak-check=full \
+                   --show-leak-kinds=all \
+                   --error-exitcode=1 \
+                   --track-origins=yes \
+                   ./bin/booto --dry-run
