@@ -95,8 +95,8 @@ menuentry "Booto - Live Rootkit & Bootkit Forensic System (Debug Verbose)" {
 }
 EOF_GRUB
 
-# Create EFI Boot Image
-mkdir -p "${CD_DIR}/EFI/BOOT"
+# Create EFI Bootloader and FAT efiboot.img
+mkdir -p "${CD_DIR}/EFI/BOOT" "${CD_DIR}/boot/grub"
 grub-mkstandalone \
     --format=x86_64-efi \
     --output="${CD_DIR}/EFI/BOOT/BOOTX64.EFI" \
@@ -104,16 +104,56 @@ grub-mkstandalone \
     --fonts="" \
     "boot/grub/grub.cfg=${CD_DIR}/boot/grub/grub.cfg"
 
-# Create standalone hybrid ISO image
-xorriso -as mkisofs \
-    -iso-level 3 \
-    -full-iso9660-filenames \
-    -volid "BOOTO_LIVE" \
-    -output "${OUTPUT_DIR}/${ISO_NAME}" \
-    -e EFI/BOOT/BOOTX64.EFI \
-    -no-emul-boot \
-    -isohybrid-gpt-basdat \
-    "${CD_DIR}"
+# Create proper FAT filesystem image containing the EFI bootloader
+dd if=/dev/zero of="${WORK_DIR}/efiboot.img" bs=1M count=16
+mkfs.vfat -F 12 -n "BOOT_EFI" "${WORK_DIR}/efiboot.img"
+mmd -i "${WORK_DIR}/efiboot.img" ::/EFI ::/EFI/BOOT
+mcopy -i "${WORK_DIR}/efiboot.img" "${CD_DIR}/EFI/BOOT/BOOTX64.EFI" ::/EFI/BOOT/BOOTX64.EFI
+cp "${WORK_DIR}/efiboot.img" "${CD_DIR}/boot/grub/efiboot.img"
+
+# Create BIOS GRUB bootloader if i386-pc is available
+BIOS_FLAG=""
+if [ -f /usr/lib/grub/i386-pc/cdboot.img ]; then
+    echo "[+] Generating Legacy BIOS boot image (i386-pc)..."
+    grub-mkstandalone \
+        --format=i386-pc \
+        --output="${WORK_DIR}/core.img" \
+        --install-modules="linux normal iso9660 biosdisk search search_fs_file configfile" \
+        --modules="linux normal iso9660 biosdisk search search_fs_file configfile" \
+        --locales="" \
+        --fonts="" \
+        "boot/grub/grub.cfg=${CD_DIR}/boot/grub/grub.cfg"
+    cat /usr/lib/grub/i386-pc/cdboot.img "${WORK_DIR}/core.img" > "${CD_DIR}/boot/grub/bios.img"
+fi
+
+# Create standalone hybrid ISO image (Universal Dual BIOS + UEFI)
+if [ -f "${CD_DIR}/boot/grub/bios.img" ]; then
+    echo "[+] Building Dual BIOS + UEFI Hybrid ISO..."
+    xorriso -as mkisofs \
+        -iso-level 3 \
+        -full-iso9660-filenames \
+        -volid "BOOTO_LIVE" \
+        -output "${OUTPUT_DIR}/${ISO_NAME}" \
+        -b boot/grub/bios.img \
+        -c boot.catalog \
+        -no-emul-boot -boot-load-size 4 -boot-info-table \
+        --eltorito-alt-boot \
+        -e boot/grub/efiboot.img \
+        -no-emul-boot \
+        -isohybrid-gpt-basdat \
+        "${CD_DIR}"
+else
+    echo "[+] Building UEFI Hybrid ISO with FAT efiboot..."
+    xorriso -as mkisofs \
+        -iso-level 3 \
+        -full-iso9660-filenames \
+        -volid "BOOTO_LIVE" \
+        -output "${OUTPUT_DIR}/${ISO_NAME}" \
+        -e boot/grub/efiboot.img \
+        -no-emul-boot \
+        -isohybrid-gpt-basdat \
+        "${CD_DIR}"
+fi
 
 # Generate SHA-256 Checksum Seal
 cd "${OUTPUT_DIR}"
