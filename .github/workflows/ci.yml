@@ -2,9 +2,21 @@ name: Booto CI - Multi-Compiler Matrix, Sanitizers & Coverage
 
 on:
   push:
-    branches: [ main, master, 'feat/**', 'stage/**' ]
+    branches: [ main, master, 'feat/**', 'stage/**', 'fix/**' ]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.agents/**'
+      - 'LICENSE'
+      - '.gitignore'
   pull_request:
     branches: [ main, master ]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.agents/**'
+      - 'LICENSE'
+      - '.gitignore'
 
 jobs:
   build-matrix:
