@@ -79,7 +79,8 @@ typedef struct {
     bool luks_unlocked;
     char persistence_status[64];
 
-    // Status bar message
+    // Status bar & modal state
+    bool show_exit_modal;
     char status_msg[256];
 } tui_app_state_t;
 

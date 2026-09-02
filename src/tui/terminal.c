@@ -330,6 +330,18 @@ bool term_poll_event(input_event_t *event, int timeout_ms) {
         }
 
         if (seq[1] == '[') {
+            if (seq[2] == '[') {
+                // Linux console function keys \e[[A to \e[[E
+                switch (seq[3]) {
+                    case 'A': event->type = KEY_F1; return true;
+                    case 'B': event->type = KEY_F2; return true;
+                    case 'C': event->type = KEY_F3; return true;
+                    case 'D': event->type = KEY_F4; return true;
+                    case 'E': event->type = KEY_F5; return true;
+                    default: break;
+                }
+            }
+
             if (seq[2] == '<') {
                 int btn = 0, mx = 0, my = 0;
                 char action = 'M';
@@ -361,14 +373,16 @@ bool term_poll_event(input_event_t *event, int timeout_ms) {
                         }
                     }
                     if (n >= 4 && seq[3] == '~') { event->type = KEY_HOME; return true; }
-                    if (n >= 4 && seq[3] == '5' && seq[4] == '~') { event->type = KEY_F5; return true; }
-                    if (n >= 4 && seq[3] == '7' && seq[4] == '~') { event->type = KEY_F6; return true; }
-                    if (n >= 4 && seq[3] == '8' && seq[4] == '~') { event->type = KEY_F7; return true; }
-                    if (n >= 4 && seq[3] == '9' && seq[4] == '~') { event->type = KEY_F8; return true; }
+                    if (n >= 4 && seq[3] == '5') { event->type = KEY_F5; return true; }
+                    if (n >= 4 && seq[3] == '7') { event->type = KEY_F6; return true; }
+                    if (n >= 4 && seq[3] == '8') { event->type = KEY_F7; return true; }
+                    if (n >= 4 && seq[3] == '9') { event->type = KEY_F8; return true; }
                     break;
                 case '2':
-                    if (n >= 4 && seq[3] == '0' && seq[4] == '~') { event->type = KEY_F9; return true; }
-                    if (n >= 4 && seq[3] == '1' && seq[4] == '~') { event->type = KEY_F10; return true; }
+                    if (n >= 4 && seq[3] == '0') { event->type = KEY_F9; return true; }
+                    if (n >= 4 && seq[3] == '1') { event->type = KEY_F10; return true; }
+                    if (n >= 4 && seq[3] == '3') { event->type = KEY_F10; return true; } // F11 -> exit/power
+                    if (n >= 4 && seq[3] == '4') { event->type = KEY_F10; return true; } // F12 -> exit/power
                     break;
                 case '3':
                     if (n >= 4 && seq[3] == '~') { event->type = KEY_BACKSPACE; return true; }
@@ -394,6 +408,11 @@ bool term_poll_event(input_event_t *event, int timeout_ms) {
     }
     if (seq[0] == 127 || seq[0] == '\b') {
         event->type = KEY_BACKSPACE;
+        return true;
+    }
+    // Ctrl+C (3), Ctrl+Q (17), Ctrl+X (24) -> KEY_F10 exit menu
+    if (seq[0] == 3 || seq[0] == 17 || seq[0] == 24) {
+        event->type = KEY_F10;
         return true;
     }
 

@@ -49,17 +49,16 @@ cat << 'SYSCONFIG' > "${ROOTFS_DIR}/etc/hosts"
 127.0.1.1   booto-live
 SYSCONFIG
 
-# Configure Autologin on TTY1 to directly launch Booto TUI
+# Configure Autologin on TTY1 to directly launch Booto TUI and drop to bash on exit
 mkdir -p "${ROOTFS_DIR}/etc/systemd/system/getty@tty1.service.d"
 cat << 'SYSCONFIG' > "${ROOTFS_DIR}/etc/systemd/system/getty@tty1.service.d/override.conf"
 [Service]
 ExecStart=
-ExecStart=-/usr/local/bin/booto
+ExecStart=-/bin/bash -c "/usr/local/bin/booto; exec /bin/bash"
 StandardInput=tty
 StandardOutput=tty
 StandardError=journal
-Restart=always
-RestartSec=1
+Restart=no
 SYSCONFIG
 
 echo "[+] Step 4/6: Extracting kernel & initramfs for ISO boot..."

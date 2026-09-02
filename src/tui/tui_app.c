@@ -71,8 +71,46 @@ static void render_bottom_bar(tui_app_state_t *app, int rows, int cols) {
         term_putc(x, rows - 1, ' ', bar_attr);
     }
 
-    const char *help = " Alt+Arrow: Focus | Alt+M: Move/Swap | Alt+Z: Zoom | Alt+H/V: Split | Alt+[/]: Resize | F5: Scan | F10: Quit";
+    const char *help = " Alt+Arrow: Focus | Alt+M: Move/Swap | Alt+Z: Zoom | Alt+H/V: Split | F5: Scan | F10/Q: Power/Exit";
     term_puts(0, rows - 1, help, bar_attr);
+}
+
+static void render_exit_modal(tui_app_state_t *app, int rows, int cols) {
+    (void)app;
+    int mw = 64;
+    int mh = 11;
+    int mx = (cols - mw) / 2;
+    int my = (rows - mh) / 2;
+    if (mx < 0) mx = 0;
+    if (my < 0) my = 0;
+
+    uint32_t border_attr = MAKE_ATTR(COLOR_BRIGHT_RED, COLOR_BLACK, ATTR_BOLD);
+    uint32_t title_attr = MAKE_ATTR(COLOR_BLACK, COLOR_BRIGHT_RED, ATTR_BOLD);
+    uint32_t text_attr = MAKE_ATTR(COLOR_WHITE, COLOR_BLACK, ATTR_NONE);
+    uint32_t key_attr = MAKE_ATTR(COLOR_BRIGHT_YELLOW, COLOR_BLACK, ATTR_BOLD);
+
+    // Clear background behind modal
+    for (int y = my; y < my + mh && y < rows; y++) {
+        for (int x = mx; x < mx + mw && x < cols; x++) {
+            term_putc(x, y, ' ', text_attr);
+        }
+    }
+
+    term_draw_box(mx, my, mw, mh, " System Power & Exit Menu ", border_attr, title_attr);
+
+    term_puts(mx + 4, my + 2, "Select an action to proceed:", text_attr);
+
+    term_puts(mx + 6, my + 4, "[P]", key_attr);
+    term_puts(mx + 10, my + 4, "Power Off System (Shutdown Machine)", text_attr);
+
+    term_puts(mx + 6, my + 5, "[R]", key_attr);
+    term_puts(mx + 10, my + 5, "Reboot System    (Restart Machine)", text_attr);
+
+    term_puts(mx + 6, my + 6, "[S]", key_attr);
+    term_puts(mx + 10, my + 6, "Drop to Root Interactive Shell (Bash)", text_attr);
+
+    term_puts(mx + 6, my + 8, "[ESC/C]", key_attr);
+    term_puts(mx + 14, my + 8, "Cancel and Return to Booto TUI", text_attr);
 }
 
 static void render_tree_leaves(wm_node_t *node, wm_node_t *focused, tui_app_state_t *app) {
@@ -210,14 +248,38 @@ int tui_app_run(booto_context_t *ctx) {
             render_tree_leaves(app.wm->root, app.wm->focused_leaf, &app);
         }
 
-        // 3. Differential screen flush
+        // 3. Render Modal Overlays if active
+        if (app.show_exit_modal) {
+            render_exit_modal(&app, rows, cols);
+        }
+
+        // 4. Differential screen flush
         term_present();
 
-        // 4. Input event polling
+        // 5. Input event polling
         input_event_t event;
         if (term_poll_event(&event, 50)) {
+            if (app.show_exit_modal) {
+                if (event.type == KEY_CHAR && (event.ch == 'p' || event.ch == 'P' || event.ch == '1')) {
+                    term_shutdown();
+                    int res = system("systemctl poweroff -i 2>/dev/null || poweroff -f 2>/dev/null || halt -p 2>/dev/null");
+                    (void)res;
+                    exit(0);
+                } else if (event.type == KEY_CHAR && (event.ch == 'r' || event.ch == 'R' || event.ch == '2')) {
+                    term_shutdown();
+                    int res = system("systemctl reboot -i 2>/dev/null || reboot -f 2>/dev/null");
+                    (void)res;
+                    exit(0);
+                } else if (event.type == KEY_CHAR && (event.ch == 's' || event.ch == 'S' || event.ch == '3' || event.ch == 'q' || event.ch == 'Q')) {
+                    app.running = false;
+                } else if (event.type == KEY_ESC || event.type == KEY_F10 || (event.type == KEY_CHAR && (event.ch == 'c' || event.ch == 'C'))) {
+                    app.show_exit_modal = false;
+                }
+                continue;
+            }
+
             if (event.type == KEY_F10 || (event.type == KEY_CHAR && (event.ch == 'q' || event.ch == 'Q'))) {
-                app.running = false;
+                app.show_exit_modal = true;
             } else if (event.type == KEY_TAB) {
                 wm_focus_next(app.wm);
             } else if (event.type == KEY_ALT_LEFT || event.type == KEY_ALT_RIGHT ||

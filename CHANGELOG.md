@@ -5,6 +5,16 @@ All notable changes to the **Booto** forensic rootkit & bootkit detection framew
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.9] - 2026-09-02
+
+### Added
+- **Interactive System Power & Exit Menu**:
+  - Added dedicated power management modal triggered by `F10`, `Q`, `Ctrl+C`, `Ctrl+Q`, or `Ctrl+X`.
+  - Direct actions to **Power Off (`P`)**, **Reboot (`R`)**, **Drop to Root Bash Shell (`S`)**, or **Cancel (`Esc`)**.
+  - Updated Live ISO `getty@tty1` service to drop into an interactive root bash prompt on exit rather than restarting in an infinite loop.
+
+---
+
 ## [1.0.8] - 2026-09-02
 
 ### Fixed
