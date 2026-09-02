@@ -151,3 +151,13 @@ sudo make iso
 
 ### Stage 12: Offline Machine-Learning Anomaly Classifier
 - Lightweight heuristic/ML classification model evaluating section header entropy, unexported symbol references, and DKOM structure anomalies to identify zero-day polymorphic rootkits.
+
+### Stage 13: Self-Hosted Runner Infrastructure & Zero-Quota Builds
+- **Infrastructure Setup**:
+  - Deploy local Linux x86_64 self-hosted GitHub Actions runners (`runs-on: [self-hosted, linux]`).
+  - Zero cloud minute consumption (0 billed GitHub minutes) and bypass of external CI/CD queue constraints.
+- **Performance Acceleration**:
+  - Leverage local Debian package caching (`/var/cache/apt/archives`) and full multicore parallel compilation.
+  - Sub-minute ISO builds (~30-45s vs 3.5min on shared cloud runners).
+- **Security & Sandboxing**:
+  - Enforce branch protection and collaborator approvals for workflow triggers on self-hosted hardware.
