@@ -78,6 +78,22 @@ booto_error_t disk_unmount(const char *mount_point);
 booto_error_t disk_probe_fs_magic(const char *dev_path, char *fs_buf, size_t fs_buf_size, char *label_buf, size_t label_buf_size);
 
 /**
+ * @brief Forensically unlock a LUKS1/LUKS2 encrypted target partition strictly READ-ONLY.
+ * @param dev_path Path to encrypted block device (e.g. /dev/nvme0n1p3).
+ * @param mapper_name Mapper target name (e.g. booto_target_decrypted).
+ * @param passphrase Decryption passphrase.
+ * @return BOOTO_OK on success, BOOTO_ERR_PERMISSION_DENIED on bad passphrase, BOOTO_ERR_IO on failure.
+ */
+booto_error_t disk_luks_open_ro(const char *dev_path, const char *mapper_name, const char *passphrase);
+
+/**
+ * @brief Safely close a decrypted LUKS mapper device.
+ * @param mapper_name Mapper target name to close.
+ * @return BOOTO_OK on success.
+ */
+booto_error_t disk_luks_close(const char *mapper_name);
+
+/**
  * @brief Helper to format bytes into human-readable string (KB, MB, GB, TB).
  */
 const char *disk_format_size(uint64_t bytes, char *buf, size_t buf_size);

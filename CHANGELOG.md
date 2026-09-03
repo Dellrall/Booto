@@ -5,6 +5,19 @@ All notable changes to the **Booto** forensic rootkit & bootkit detection framew
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.2] - 2026-09-03
+
+### Added
+- **LUKS1 / LUKS2 Target Detection & Read-Only Decryption Subsystem**:
+  - Added binary header inspection for `"LUKS\xba\xbe"` at Sector 0 with version classification (LUKS1 vs LUKS2) in `disk_probe_fs_magic()`.
+  - Implemented `disk_luks_open_ro()` in `src/disk_mount.c` to forensically map encrypted partitions to `/dev/mapper/<name>` with `--readonly` enforcement, ensuring host keyslots and metadata are preserved unchanged.
+  - Implemented `disk_luks_close()` to safely tear down decrypted target device-mapper nodes.
+  - Added interactive **LUKS Encrypted Partition Unlock Modal** in the TUI (`render_luks_modal()`), triggered via `F3: Decrypt LUKS` or by pressing `Enter` on any detected `crypto_LUKS` partition in the Storage Devices pane.
+  - Automatically maps cleartext target volumes (`/dev/mapper/booto_target_luks`) directly into the active forensic scanning flow.
+  - Added LUKS header probing and lifecycle tests in `tests/test_disk_discovery.c`.
+
+---
+
 ## [1.1.1] - 2026-09-03
 
 ### Added

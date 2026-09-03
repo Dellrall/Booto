@@ -320,6 +320,15 @@ bool pane_handle_input(wm_node_t *node, const input_event_t *event, tui_app_stat
             return true;
         }
         if (event->type == KEY_ENTER) {
+            if (strcmp(app->drives[app->drive_cursor].fs_type, "crypto_LUKS") == 0) {
+                snprintf(app->luks_target_dev, sizeof(app->luks_target_dev), "%s", app->drives[app->drive_cursor].name);
+                app->luks_passphrase_len = 0;
+                app->luks_passphrase_input[0] = '\0';
+                app->luks_status_msg[0] = '\0';
+                app->show_luks_modal = true;
+                return true;
+            }
+
             if (!app->drives[app->drive_cursor].is_ro_mounted) {
                 booto_error_t err = disk_mount_ro(app->drives[app->drive_cursor].name,
                                                    DEFAULT_RO_MOUNT_POINT,

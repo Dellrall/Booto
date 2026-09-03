@@ -81,6 +81,11 @@ typedef struct {
 
     // Status bar & modal state
     bool show_exit_modal;
+    bool show_luks_modal;
+    char luks_target_dev[128];
+    char luks_passphrase_input[128];
+    int luks_passphrase_len;
+    char luks_status_msg[128];
     char status_msg[256];
 } tui_app_state_t;
 

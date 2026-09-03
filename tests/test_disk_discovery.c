@@ -165,7 +165,24 @@ static void test_fs_magic_probing(void) {
         ASSERT_STR_EQ(label, "BOOTO_LIVE", "ISO9660 volume label");
     }
 
-    // 7. Unknown / Raw Zero Disk
+    // 7. Test LUKS2 Header Probing
+    {
+        FILE *fp = fopen(tmp_img, "wb");
+        ASSERT_TRUE(fp != NULL, "Create test probe image");
+        uint8_t luks2[512] = {0};
+        memcpy(luks2, "LUKS\xba\xbe", 6);
+        luks2[6] = 0x00; // Big-endian version 2
+        luks2[7] = 0x02;
+        fwrite(luks2, 1, sizeof(luks2), fp);
+        fclose(fp);
+
+        booto_error_t err = disk_probe_fs_magic(tmp_img, fs_type, sizeof(fs_type), label, sizeof(label));
+        ASSERT_INT_EQ(err, BOOTO_OK, "LUKS2 probe return");
+        ASSERT_STR_EQ(fs_type, "crypto_LUKS", "LUKS2 filesystem type");
+        ASSERT_STR_EQ(label, "Encrypted Volume (LUKS2)", "LUKS2 volume label");
+    }
+
+    // 8. Unknown / Raw Zero Disk
     {
         FILE *fp = fopen(tmp_img, "wb");
         ASSERT_TRUE(fp != NULL, "Create test probe image");
@@ -182,12 +199,25 @@ static void test_fs_magic_probing(void) {
     TEST_PASS("test_fs_magic_probing");
 }
 
+static void test_luks_open_and_close(void) {
+    TEST_START("test_luks_open_and_close");
+
+    booto_error_t o_err = disk_luks_open_ro("/dev/nvme0n1p3", "booto_mock_luks", "CorrectPassphrase123");
+    ASSERT_INT_EQ(o_err, BOOTO_OK, "LUKS read-only open must succeed");
+
+    booto_error_t c_err = disk_luks_close("booto_mock_luks");
+    ASSERT_INT_EQ(c_err, BOOTO_OK, "LUKS close must succeed");
+
+    TEST_PASS("test_luks_open_and_close");
+}
+
 int main(void) {
     printf("\n--- Running Storage Discovery & Mount Tests ---\n");
     test_size_formatting();
     test_disk_enumeration();
     test_mock_mount_ro();
     test_fs_magic_probing();
+    test_luks_open_and_close();
     TEST_SUMMARY();
     return 0;
 }

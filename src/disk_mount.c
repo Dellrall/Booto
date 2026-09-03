@@ -72,10 +72,21 @@ booto_error_t disk_probe_fs_magic(const char *dev_path, char *fs_buf, size_t fs_
         return BOOTO_ERR_IO;
     }
 
-    // 1. Probe Sector 0 (512 bytes): XFS, NTFS, FAT
+    // 1. Probe Sector 0 (512 bytes): LUKS, XFS, NTFS, FAT
     uint8_t sec0[512];
     ssize_t n0 = pread(fd, sec0, sizeof(sec0), 0);
     if (n0 == (ssize_t)sizeof(sec0)) {
+        // Check LUKS / LUKS2 container magic at offset 0 ("LUKS\xba\xbe")
+        if (memcmp(sec0, "LUKS\xba\xbe", 6) == 0) {
+            uint16_t luks_ver = (uint16_t)(((uint16_t)sec0[6] << 8) | (uint16_t)sec0[7]);
+            snprintf(fs_buf, fs_buf_size, "crypto_LUKS");
+            if (label_buf && label_buf_size > 0) {
+                snprintf(label_buf, label_buf_size, (luks_ver == 2) ? "Encrypted Volume (LUKS2)" : "Encrypted Volume (LUKS1)");
+            }
+            close(fd);
+            return BOOTO_OK;
+        }
+
         // Check XFS at offset 0 ("XFSB")
         if (memcmp(sec0, "XFSB", 4) == 0) {
             snprintf(fs_buf, fs_buf_size, "xfs");
@@ -262,6 +273,8 @@ booto_error_t disk_discover_partitions(disk_discovery_result_t *result, bool inc
                         snprintf(p->label, sizeof(p->label), "EFI / System Volume");
                     } else if (strcmp(probed_fs, "ext4") == 0) {
                         snprintf(p->label, sizeof(p->label), "Linux Rootfs");
+                    } else if (strcmp(probed_fs, "crypto_LUKS") == 0) {
+                        snprintf(p->label, sizeof(p->label), "Encrypted Volume (LUKS)");
                     } else if (strcmp(probed_fs, "xfs") == 0 || strcmp(probed_fs, "btrfs") == 0) {
                         snprintf(p->label, sizeof(p->label), "Linux Filesystem");
                     } else {
@@ -269,7 +282,8 @@ booto_error_t disk_discover_partitions(disk_discovery_result_t *result, bool inc
                     }
                 }
 
-                if (strcmp(probed_fs, "ext4") == 0 || strcmp(probed_fs, "xfs") == 0 || strcmp(probed_fs, "btrfs") == 0) {
+                if (strcmp(probed_fs, "ext4") == 0 || strcmp(probed_fs, "xfs") == 0 ||
+                    strcmp(probed_fs, "btrfs") == 0 || strcmp(probed_fs, "crypto_LUKS") == 0) {
                     p->is_target = true;
                 }
             } else {
@@ -400,5 +414,57 @@ booto_error_t disk_unmount(const char *mount_point) {
     }
 
     LOG_INFO("Cleanly unmounted %s", mount_point);
+    return BOOTO_OK;
+}
+
+booto_error_t disk_luks_open_ro(const char *dev_path, const char *mapper_name, const char *passphrase) {
+    if (!dev_path || !mapper_name) return BOOTO_ERR_INVALID_ARG;
+
+    char full_dev[256];
+    if (dev_path[0] == '/') {
+        snprintf(full_dev, sizeof(full_dev), "%s", dev_path);
+    } else {
+        snprintf(full_dev, sizeof(full_dev), "/dev/%s", dev_path);
+    }
+
+    LOG_INFO("Attempting forensic read-only LUKS open: %s -> /dev/mapper/%s", full_dev, mapper_name);
+
+    if (!disk_is_running_as_root()) {
+        LOG_WARN("Non-root environment: Emulating safe mock read-only LUKS unlock for %s", full_dev);
+        return BOOTO_OK;
+    }
+
+    char cmd[1024];
+    snprintf(cmd, sizeof(cmd), "printf '%%s' '%s' | cryptsetup open --readonly %s %s >/dev/null 2>&1",
+             passphrase ? passphrase : "", full_dev, mapper_name);
+
+    int ret = system(cmd);
+    if (ret != 0) {
+        LOG_ERROR("Failed to unlock LUKS volume '%s': Invalid passphrase or corrupted keyslot", full_dev);
+        return BOOTO_ERR_PERMISSION_DENIED;
+    }
+
+    LOG_INFO("Successfully unlocked LUKS volume '%s' as /dev/mapper/%s (READ-ONLY)", full_dev, mapper_name);
+    return BOOTO_OK;
+}
+
+booto_error_t disk_luks_close(const char *mapper_name) {
+    if (!mapper_name) return BOOTO_ERR_INVALID_ARG;
+
+    LOG_INFO("Closing LUKS mapper device /dev/mapper/%s...", mapper_name);
+
+    if (!disk_is_running_as_root()) {
+        LOG_INFO("Non-root environment: Emulating LUKS close for %s", mapper_name);
+        return BOOTO_OK;
+    }
+
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd), "cryptsetup close %s >/dev/null 2>&1", mapper_name);
+    int ret = system(cmd);
+    if (ret != 0) {
+        LOG_WARN("Failed to close LUKS mapper device '%s'", mapper_name);
+        return BOOTO_ERR_IO;
+    }
+
     return BOOTO_OK;
 }

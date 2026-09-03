@@ -72,7 +72,7 @@ static void render_bottom_bar(tui_app_state_t *app, int rows, int cols) {
         term_putc(x, rows - 1, ' ', bar_attr);
     }
 
-    const char *help = " Alt+Arrow: Focus | Alt+M: Move/Swap | Alt+Z: Zoom | Alt+H/V: Split | F5: Scan | F10/Q: Power/Exit";
+    const char *help = " Alt+Arrow: Focus | Alt+M: Move/Swap | Alt+Z: Zoom | F3: Decrypt LUKS | F5: Scan | F10/Q: Exit";
     term_puts(0, rows - 1, help, bar_attr);
 }
 
@@ -112,6 +112,60 @@ static void render_exit_modal(tui_app_state_t *app, int rows, int cols) {
 
     term_puts(mx + 6, my + 8, "[ESC/C]", key_attr);
     term_puts(mx + 14, my + 8, "Cancel and Return to Booto TUI", text_attr);
+}
+
+static void render_luks_modal(tui_app_state_t *app, int rows, int cols) {
+    int mw = 68;
+    int mh = 12;
+    int mx = (cols - mw) / 2;
+    int my = (rows - mh) / 2;
+    if (mx < 0) mx = 0;
+    if (my < 0) my = 0;
+
+    uint32_t border_attr = MAKE_ATTR(COLOR_BRIGHT_CYAN, COLOR_BLACK, ATTR_BOLD);
+    uint32_t title_attr = MAKE_ATTR(COLOR_BLACK, COLOR_BRIGHT_CYAN, ATTR_BOLD);
+    uint32_t text_attr = MAKE_ATTR(COLOR_WHITE, COLOR_BLACK, ATTR_NONE);
+    uint32_t key_attr = MAKE_ATTR(COLOR_BRIGHT_YELLOW, COLOR_BLACK, ATTR_BOLD);
+    uint32_t input_attr = MAKE_ATTR(COLOR_BLACK, COLOR_WHITE, ATTR_BOLD);
+    uint32_t alert_attr = MAKE_ATTR(COLOR_BRIGHT_RED, COLOR_BLACK, ATTR_BOLD);
+
+    // Clear background behind modal
+    for (int y = my; y < my + mh && y < rows; y++) {
+        for (int x = mx; x < mx + mw && x < cols; x++) {
+            term_putc(x, y, ' ', text_attr);
+        }
+    }
+
+    term_draw_box(mx, my, mw, mh, " LUKS Encrypted Target Partition Unlock ", border_attr, title_attr);
+
+    char prompt[256];
+    snprintf(prompt, sizeof(prompt), "Target device %.64s is encrypted with LUKS.", app->luks_target_dev);
+    term_puts(mx + 4, my + 2, prompt, text_attr);
+    term_puts(mx + 4, my + 3, "Enter passphrase to map volume strictly READ-ONLY:", text_attr);
+
+    // Render passphrase input box
+    int box_w = 48;
+    for (int x = mx + 6; x < mx + 6 + box_w && x < cols; x++) {
+        term_putc(x, my + 5, ' ', input_attr);
+    }
+    char masked[64];
+    int mask_len = (app->luks_passphrase_len < 40) ? app->luks_passphrase_len : 40;
+    for (int i = 0; i < mask_len; i++) masked[i] = '*';
+    masked[mask_len] = '\0';
+    term_puts(mx + 7, my + 5, masked, input_attr);
+    if (mx + 7 + mask_len < cols) {
+        term_putc(mx + 7 + mask_len, my + 5, '_', MAKE_ATTR(COLOR_RED, COLOR_WHITE, ATTR_BOLD));
+    }
+
+    if (app->luks_status_msg[0] != '\0') {
+        term_puts(mx + 6, my + 7, app->luks_status_msg, alert_attr);
+    }
+
+    term_puts(mx + 6, my + 9, "[ENTER]", key_attr);
+    term_puts(mx + 14, my + 9, "Unlock Read-Only", text_attr);
+
+    term_puts(mx + 34, my + 9, "[ESC]", key_attr);
+    term_puts(mx + 40, my + 9, "Cancel / Skip", text_attr);
 }
 
 static void render_tree_leaves(wm_node_t *node, wm_node_t *focused, tui_app_state_t *app) {
@@ -266,6 +320,8 @@ int tui_app_run(booto_context_t *ctx) {
         // 3. Render Modal Overlays if active
         if (app.show_exit_modal) {
             render_exit_modal(&app, rows, cols);
+        } else if (app.show_luks_modal) {
+            render_luks_modal(&app, rows, cols);
         }
 
         // 4. Differential screen flush
@@ -293,8 +349,57 @@ int tui_app_run(booto_context_t *ctx) {
                 continue;
             }
 
+            if (app.show_luks_modal) {
+                if (event.type == KEY_ESC) {
+                    app.show_luks_modal = false;
+                    memset(app.luks_passphrase_input, 0, sizeof(app.luks_passphrase_input));
+                    app.luks_passphrase_len = 0;
+                } else if (event.type == KEY_BACKSPACE) {
+                    if (app.luks_passphrase_len > 0) {
+                        app.luks_passphrase_len--;
+                        app.luks_passphrase_input[app.luks_passphrase_len] = '\0';
+                    }
+                } else if (event.type == KEY_CHAR && event.ch >= 32 && event.ch <= 126) {
+                    if (app.luks_passphrase_len < (int)sizeof(app.luks_passphrase_input) - 1) {
+                        app.luks_passphrase_input[app.luks_passphrase_len++] = (char)event.ch;
+                        app.luks_passphrase_input[app.luks_passphrase_len] = '\0';
+                    }
+                } else if (event.type == KEY_ENTER) {
+                    booto_error_t err = disk_luks_open_ro(app.luks_target_dev, "booto_target_luks", app.luks_passphrase_input);
+                    memset(app.luks_passphrase_input, 0, sizeof(app.luks_passphrase_input));
+                    app.luks_passphrase_len = 0;
+                    if (err == BOOTO_OK) {
+                        tui_app_append_log(&app, LOG_LEVEL_INFO, NULL, "Successfully unlocked target LUKS volume (READ-ONLY)");
+                        snprintf(app.status_msg, sizeof(app.status_msg), "LUKS target unlocked: /dev/mapper/booto_target_luks");
+
+                        // Add mapped volume to drives list and mark as target
+                        if (app.drive_count < MAX_DRIVES) {
+                            int idx = app.drive_count++;
+                            snprintf(app.drives[idx].name, sizeof(app.drives[idx].name), "/dev/mapper/booto_target_luks");
+                            snprintf(app.drives[idx].size, sizeof(app.drives[idx].size), "Decrypted");
+                            snprintf(app.drives[idx].fs_type, sizeof(app.drives[idx].fs_type), "ext4");
+                            snprintf(app.drives[idx].label, sizeof(app.drives[idx].label), "Decrypted Target Rootfs");
+                            for (int d = 0; d < app.drive_count - 1; d++) app.drives[d].is_target = false;
+                            app.drives[idx].is_target = true;
+                            app.drive_cursor = idx;
+                        }
+                        app.show_luks_modal = false;
+                    } else {
+                        snprintf(app.luks_status_msg, sizeof(app.luks_status_msg), "Failed to unlock: Invalid passphrase");
+                    }
+                }
+                continue;
+            }
+
             if (event.type == KEY_F10 || (event.type == KEY_CHAR && (event.ch == 'q' || event.ch == 'Q'))) {
                 app.show_exit_modal = true;
+            } else if (event.type == KEY_F3) {
+                const char *target = (app.drive_count > 0) ? app.drives[app.drive_cursor].name : "/dev/nvme0n1p3";
+                snprintf(app.luks_target_dev, sizeof(app.luks_target_dev), "%s", target);
+                app.luks_passphrase_len = 0;
+                app.luks_passphrase_input[0] = '\0';
+                app.luks_status_msg[0] = '\0';
+                app.show_luks_modal = true;
             } else if (event.type == KEY_TAB) {
                 wm_focus_next(app.wm);
             } else if (event.type == KEY_ALT_LEFT || event.type == KEY_ALT_RIGHT ||
