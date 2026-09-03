@@ -158,9 +158,55 @@ sudo ./scripts/build_iso.sh booto-live-amd64.iso
 ./scripts/run_qemu_vm.sh ~/Downloads/booto-v1.1.0-amd64.iso
 ```
 
+## 6. Architectural Improvement Priorities & Low-Level Design Specs
+
+The following 5 improvements are designated architectural priorities for future iterations of Booto:
+
+### 1. Direct Superblock Magic Probing (`src/disk_mount.c`)
+- **Problem**: Partition names (e.g. `sda1`, `sda2`) are unreliable indicators of filesystem types.
+- **Specification**: Probe raw superblock signatures via `pread()` on sector 0 / initial disk blocks:
+  - **`ext4`**: Magic `0xEF53` at offset 1024 (2 bytes).
+  - **`vfat`**: Strings `"FAT12"`, `"FAT16"` at offset 54, or `"FAT32"` at offset 82.
+  - **`ntfs`**: OEM ID string `"NTFS    "` at byte offset 3 (8 bytes).
+  - **`btrfs`**: Superblock magic `"_BHRfS_M"` at offset 65,536 (64 KB).
+  - **`xfs`**: Magic header `"XFSB"` at offset 0 (4 bytes).
+  - **`iso9660`**: Volume descriptor identifier `"CD001"` at offset 32,768 (32 KB).
+
+### 2. Multi-Partition ESP Auto-Discovery (`src/tui/tui_app.c`)
+- **Problem**: When mounting a Linux rootfs offline (e.g. `/dev/sda2`), `/boot/efi` is an unmounted empty directory because the EFI partition resides on `/dev/sda1`.
+- **Specification**:
+  - Detect if `$scan_root/boot/efi` is empty or missing `.efi` binaries.
+  - Query discovered partitions on the same parent disk device for `vfat` / ESP partitions (or GPT type GUID `C12A7328-F81F-11D2-BA4B-00A0C93EC93B`).
+  - Automatically mount the neighbor ESP partition read-only to `/tmp/booto_esp_target`.
+  - Redirect `uefi_inspect_esp_directory()` to audit the true EFI System Partition.
+
+### 3. Transparent In-Memory Initramfs Decompression (`src/initramfs_auditor.c`)
+- **Problem**: Production distributions compress `initrd.img` with zstd, gzip, or xz, and prepend uncompressed CPU microcode CPIO archives.
+- **Specification**:
+  - Identify stream compression magic signatures:
+    - `Gzip`: `\x1f\x8b`
+    - `Zstandard (zstd)`: `\x28\xb5\x2f\xfd`
+    - `XZ`: `\xfd7zXZ\x00`
+  - When encountering concatenated archives, parse the early microcode CPIO until `TRAILER!!!`, then decompress the subsequent payload stream in RAM prior to script analysis.
+
+### 4. Asynchronous Live Scan Threading (`src/tui/tui_app.c`)
+- **Problem**: Synchronous scan execution (`F5`) momentarily freezes the main TUI frame refresh on slow or mechanical disks.
+- **Specification**:
+  - Launch `execute_forensic_scan()` via `pthread_create()`.
+  - Use an `atomic_int g_scan_progress` (0 to 100%) and `atomic_bool g_scan_active`.
+  - Keep the TUI main loop rendering at 60 FPS with an animated progress bar and live log streaming.
+
+### 5. Ext4 Block Group Descriptor Table (BGDT) Traversal (`src/ext4_diff.c`)
+- **Problem**: Current scanner computes superblock metadata counts but needs low-level bitmap walking.
+- **Specification**:
+  - Read Block Group Descriptors located immediately after the superblock (offset 2048 or 4096 depending on block size).
+  - Inspect the Inode Allocation Bitmap for each block group to identify allocated raw inodes.
+  - For every allocated inode, read `ext4_inode` and check `i_links_count`.
+  - Inodes with allocated data blocks but `i_links_count == 0` that do not appear in a VFS `nftw()` directory walk are flagged as hidden zero-day rootkit binaries.
+
 ---
 
-## 6. Strategic Future Roadmap
+## 7. Strategic Future Roadmap
 
 - **Stage 10: Companion Rust-Based USB Flasher (`booto-flasher`)**:
   - Memory-safe USB drive discovery, streaming block writer with `indicatif` progress bar, and dual-partition provisioning.

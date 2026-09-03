@@ -42,7 +42,6 @@ void tui_app_state_init(tui_app_state_t *app, booto_context_t *ctx) {
     }
 
     // Initialize forensic modules
-    // Initialize forensic modules
     app->module_count = 6;
     app->module_cursor = 0;
 
