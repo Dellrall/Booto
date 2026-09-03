@@ -67,6 +67,17 @@ booto_error_t disk_mount_ro(const char *dev_path, const char *mount_point, const
 booto_error_t disk_unmount(const char *mount_point);
 
 /**
+ * @brief Directly probe superblock magic bytes of a block device to identify filesystem.
+ * @param dev_path Device node path (e.g., /dev/sda1).
+ * @param fs_buf Output buffer to receive filesystem name ("ext4", "vfat", "ntfs", "btrfs", "xfs", "iso9660", "unknown").
+ * @param fs_buf_size Size of output buffer.
+ * @param label_buf Optional output buffer for volume label (may be NULL).
+ * @param label_buf_size Size of label buffer.
+ * @return BOOTO_OK on successful detection, BOOTO_ERR_* on failure.
+ */
+booto_error_t disk_probe_fs_magic(const char *dev_path, char *fs_buf, size_t fs_buf_size, char *label_buf, size_t label_buf_size);
+
+/**
  * @brief Helper to format bytes into human-readable string (KB, MB, GB, TB).
  */
 const char *disk_format_size(uint64_t bytes, char *buf, size_t buf_size);

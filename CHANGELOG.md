@@ -5,6 +5,23 @@ All notable changes to the **Booto** forensic rootkit & bootkit detection framew
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2026-09-03
+
+### Added
+- **Direct Superblock Magic Byte Probing**:
+  - Implemented `disk_probe_fs_magic()` in `src/disk_mount.c` to directly inspect low-level filesystem superblock signatures via `pread()` on raw disk blocks.
+  - Added native signature support for:
+    - **Ext4**: Superblock magic `0xEF53` at offset 1024 with embedded volume label extraction.
+    - **FAT12 / FAT16 / FAT32 (vfat)**: BPB boot signature `0x55AA` and OEM filesystem identifiers at offsets 54 and 82.
+    - **NTFS**: Volume OEM ID `"NTFS    "` at offset 3.
+    - **XFS**: Magic header `"XFSB"` at offset 0 with 12-character filesystem label extraction.
+    - **Btrfs**: Superblock signature `"_BHRfS_M"` at offset 65,536 (64 KB).
+    - **ISO9660**: Volume descriptor identifier `"CD001"` at offset 32,768 (32 KB).
+  - Clean trailing whitespace trimming on extracted volume labels.
+  - Added comprehensive 7-scenario unit test suite in `tests/test_disk_discovery.c`.
+
+---
+
 ## [1.1.0] - 2026-09-03
 
 ### Added
