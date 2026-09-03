@@ -6,6 +6,7 @@
 #include "elf_analyzer.h"
 #include "uefi_analyzer.h"
 #include "initramfs_auditor.h"
+#include "mbr_auditor.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -99,11 +100,48 @@ static void test_fuzz_initramfs_parser(void) {
     TEST_PASS("test_fuzz_initramfs_parser");
 }
 
+static void test_fuzz_mbr_auditor(void) {
+    TEST_START("test_fuzz_mbr_auditor");
+
+    uint8_t buffer[1024];
+    srand(5555);
+
+    for (int iter = 0; iter < FUZZ_ITERATIONS; iter++) {
+        size_t len = (size_t)((unsigned int)rand() % (unsigned int)sizeof(buffer));
+
+        for (size_t i = 0; i < len; i++) {
+            buffer[i] = (uint8_t)((unsigned int)rand() % 256U);
+        }
+
+        // Occasionally inject 0x55AA signature at offset 510
+        if (iter % 2 == 0 && len >= 512) {
+            buffer[510] = 0x55;
+            buffer[511] = 0xAA;
+        }
+
+        mbr_scan_result_t res;
+        memset(&res, 0, sizeof(res));
+        booto_error_t err = mbr_audit_buffer(buffer, len, "/dev/fuzz_disk", &res);
+        (void)err;
+
+        memset(&res, 0, sizeof(res));
+        booto_error_t v_err = mbr_audit_vbr_buffer(buffer, len, 2048, "/dev/fuzz_part", &res);
+        (void)v_err;
+
+        memset(&res, 0, sizeof(res));
+        booto_error_t g_err = mbr_audit_gap_buffer(buffer, len, 1, "/dev/fuzz_disk", &res);
+        (void)g_err;
+    }
+
+    TEST_PASS("test_fuzz_mbr_auditor");
+}
+
 int main(void) {
     printf("\n--- Running Defensive Parser Mutation Fuzzing Harness ---\n");
     test_fuzz_elf_parser();
     test_fuzz_uefi_parser();
     test_fuzz_initramfs_parser();
+    test_fuzz_mbr_auditor();
     TEST_SUMMARY();
     return 0;
 }

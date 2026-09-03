@@ -5,159 +5,169 @@ description: Specialized instructions and workflows for developing, building, te
 
 # Booto Development & Forensic Verification Skill
 
-This skill provides guidelines, automated commands, versioning procedures, and a strict **stage-by-stage development protocol** for building, testing, debugging, and packaging Booto based on **Debian Live**.
+This skill serves as the **authoritative architectural specification, coding protocol, and operational manual** for developing, testing, debugging, versioning, and deploying the Booto forensic live operating system and detection engines.
 
 ---
 
-## 1. Strict Stage-by-Stage Development Protocol
+## 1. Core Engineering Principles & Architecture
 
-> **CRITICAL RULE**: Do **NOT** attempt to implement the entire system in one monolithic step. All development, refactoring, and feature additions must strictly follow an incremental, stage-by-stage progression.
-
-### Per-Stage Execution Flow:
-1. **Scope & Plan**: Clearly define the specific module or stage being worked on.
-2. **Implement**: Write modular, defensive C11 code for that specific component only.
-3. **Verify & Test**:
-   - Compile cleanly with strict flags (`-Wall -Wextra -Werror -Wpedantic`).
-   - Run static analysis (`cppcheck`, `clang-tidy`).
-   - Run memory safety checks with `valgrind` and AddressSanitizer (`ASan`).
-   - Run unit/mock tests via `ctest` / `make test`.
-4. **Version & Tag**:
-   - Bump version in `CMakeLists.txt`, `Makefile`, and `CHANGELOG.md`.
-   - Commit changes and create an annotated git tag (`vX.Y.Z`).
-5. **Checkpoint & Review**: Confirm the stage is fully functional before progressing to the next stage.
+1. **Zero External Dynamic Dependencies**:
+   - The core engine is pure C11. It must never rely on heavy external runtimes (e.g., Python, Electron, GLib, Qt).
+   - Standard POSIX syscalls and self-contained algorithms only (e.g. custom SHA-256 in `src/crypto_utils.c`, custom ELF parser in `src/elf_analyzer.c`).
+2. **Strict Compiler Hardening**:
+   - All code must compile warning-free with:
+     ```makefile
+     -std=c11 -Wall -Wextra -Wpedantic -Werror -Wshadow -Wformat=2 -Wconversion -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE
+     ```
+3. **Forensic Integrity & Strict Read-Only Access**:
+   - Target disks must only ever be mounted with `MS_RDONLY | MS_NODEV | MS_NOEXEC | MS_NOSUID` and `noload` to guarantee zero evidence tampering.
+   - Unformatted or raw partitions must be audited at the block level without throwing destructive errors.
+4. **Defensive Memory Hygiene**:
+   - All string formatting into fixed buffers must use precision specifiers (`snprintf(buf, sizeof(buf), "%.100s", src)`).
+   - Clear sensitive memory buffers (hashes, keys, passphrases) with memory wipes prior to `free()`.
 
 ---
 
-## 2. Expanded Implementation Stages & Version Milestones
+## 2. Standard Recipe for Implementing Any New Detection Module
+
+Every new forensic detection module (e.g. MBR, UEFI, LKM, Preload) must strictly follow this 8-step integration recipe to maintain uniform architecture:
 
 ```mermaid
-graph TD
-    S1[Stage 1: Foundation & Versioning - v0.1.0-alpha] --> S2[Stage 2: Zellij TUI Window Manager - v0.1.5-alpha]
-    S2 --> S3[Stage 3: Target Storage Discovery & RO Mounter - v0.2.0-alpha]
-    S3 --> S4[Stage 4: Modular Forensic Detection Engines - v0.3.0-beta to v0.4.0-beta]
-    S4 --> S5[Stage 5: Tails-Style LUKS2 Persistence & Case Reporting - v0.5.0-rc1]
-    S5 --> S6[Stage 6: Fuzzing Harness & Synthetic Test Disks - v0.6.0-rc1]
-    S6 --> S7[Stage 7: Advanced CI/CD Matrix, Sanitizers & Code Coverage - v0.7.0-rc1]
-    S7 --> S8[Stage 8: Debian Live ISO Packaging & Automated CD - v0.8.0-rc1]
-    S8 --> S9[Stage 9: QEMU Benchmarking & Empirical Evaluation - v1.0.0]
+graph LR
+    S1[1. Header API include/] --> S2[2. Engine Impl src/]
+    S2 --> S3[3. Signatures rules/]
+    S3 --> S4[4. Unit Tests tests/]
+    S4 --> S5[5. Fuzzing Harness]
+    S5 --> S6[6. Case Reporter]
+    S6 --> S7[7. TUI Live Scan]
+    S7 --> S8[8. Mock Disk & Updater]
 ```
 
-### Stage Breakdown:
-- **Stage 1: Foundation, Toolchain & Dynamic Versioning (`v0.1.0-alpha`)** [COMPLETED]
-  - Project directory layout, hardened C11 compiler flags (`-D_FORTIFY_SOURCE=2 -fPIE`), `version.h` generator, base CLI dispatcher.
+### Step-by-Step Implementation Checklist:
 
-- **Stage 2: Dynamic Zellij-Style TUI Window Manager (`v0.1.5-alpha`)** [COMPLETED]
-  - Zero-dependency double-buffered ANSI/VT100 terminal engine, SGR 1006 mouse tracking, BSP tree splits (`Alt+H`/`Alt+V`), swapping (`Alt+M`), zooming (`Alt+Z`).
+1. **Header Definition (`include/<module>.h`)**:
+   - Define severity enum (`<module>_severity_t`: INFO, LOW, MEDIUM, HIGH, CRITICAL).
+   - Define finding struct (`<module>_threat_finding_t` with `threat_name`, `target`, `sha256`, `rule_id`, `severity`, `description`).
+   - Define aggregated result struct (`<module>_scan_result_t` with `threats_detected`, count metrics, and array of findings).
+   - Declare parsing functions (`<module>_audit_buffer`, `<module>_audit_device`), string conversion helper (`<module>_severity_to_string`), and mock fallback (`<module>_audit_mock`).
 
-- **Stage 3: Target Storage Discovery & Safe Read-Only Mounter (`v0.2.0-alpha`)** [COMPLETED]
-  - Storage enumeration via `/proc/partitions` and `sysfs`, strict forensic read-only mounter (`MS_RDONLY` + `noload`), dynamic TUI connection.
+2. **Core Implementation (`src/<module>.c`)**:
+   - Implement low-level buffer parsing and invariant heuristics (e.g. byte patterns, opcode validation, symbol references).
+   - Provide a safe mock fallback (`<module>_audit_mock(scenario, result)`) to support non-root unit testing and CI testbeds.
+   - Log critical alerts using `LOG_CRITICAL("[MODULE ALERT] ...")` and audit info using `LOG_INFO(...)`.
 
-- **Stage 4: Modular Forensic Detection Engines (`v0.4.0-beta`)** [COMPLETED]
-  - *Sub-Stage 4A*: Custom 64-bit ELF Parser, Standalone SHA-256 Engine, & Kernel LKM Rootkit Inspector (`.ko` hook detection) [COMPLETED].
-  - *Sub-Stage 4B*: UEFI & ESP Bootkit Analyzer (Authenticode, Secure Boot DB/DBX validation) [COMPLETED].
-  - *Sub-Stage 4C*: In-Memory Initramfs Decompressor (`cpio`/`gzip`/`zstd`) & Early-Boot Script Auditor [COMPLETED].
-  - *Sub-Stage 4D*: Userland `ld.so.preload` and PAM Interceptor Scanner [COMPLETED].
-  - *Sub-Stage 4E*: Raw Ext4 Inode vs VFS Directory Table Differential Cross-View Scanner [COMPLETED].
+3. **Threat Signatures Database (`rules/<module>_signatures.json`)**:
+   - Store signature JSON with schema: `name`, `rule_id`, `pattern_hex` / `symbols`, `severity`.
+   - Generate SHA-256 seal: `sha256sum rules/<module>_signatures.json > rules/<module>_signatures.json.sha256`.
 
-- **Stage 5: Tails-Style LUKS2 Persistence & Case Reporting (`v0.5.0-rc1`)** [COMPLETED]
-  - LUKS volume detection and passphrase unlock modal in TUI.
-  - Cryptographic case report generator (JSON & Markdown) exporting to `/persistence/cases/` with SHA-256 integrity seals.
+4. **Standalone Unit Test Suite (`tests/test_<module>.c`)**:
+   - Test clean baseline scenarios (e.g., standard GRUB, clean kernel modules).
+   - Test synthetic threat samples (e.g., specific bootkits, malicious hooks).
+   - Wire target into `Makefile` and `CMakeLists.txt`.
 
-- **Stage 6: Dedicated Testing & Fuzzing Harness (`v0.6.0-rc1`)** [COMPLETED]
-  - Synthetic test disk generator script (`scripts/gen_mock_disk.sh`) creating loopback images with simulated rootkit artifacts.
-  - 1,500-iteration defensive mutation fuzzing harness (`tests/test_fuzz.c`) testing malformed ELF, PE32+, and CPIO headers.
-  - AddressSanitizer (`ASan`) and UndefinedBehaviorSanitizer (`UBSan`) test build targets (`make asan`).
+5. **Mutation Fuzzing Harness (`tests/test_fuzz.c`)**:
+   - Integrate the parser into `test_fuzz.c` and subject it to 1,500 iterations of randomized, corrupted payloads to prove crash resilience.
 
-- **Stage 7: Advanced CI/CD Matrix & Automated Code Coverage (`v0.7.0-rc1`)** [COMPLETED]
-  - Multi-compiler GitHub Actions test matrix across GCC and Clang.
-  - Code coverage reporting (`make coverage`, `scripts/check_coverage.sh`) enforcing >85% line coverage.
-  - Clang Static Analyzer and `cppcheck` automated CI checks.
+6. **Forensic Case Reporter (`include/case_reporter.h` & `src/case_reporter.c`)**:
+   - Add `<module>_threats_count` to `forensic_case_summary_t`.
+   - Update `case_report_generate_json()` and `case_report_generate_markdown()` to include detection tables for the new module.
 
-- **Stage 8: Debian Live ISO Packaging & Automated Release CD (`v0.8.0-rc1`)** [COMPLETED]
-  - Debian 12 (Bookworm) `debootstrap` / `xorriso` hybrid Live ISO packaging pipeline (`scripts/build_iso.sh`).
-  - USB dual-partition deployment script (`scripts/setup_usb.sh`).
-  - Tag-triggered GitHub Actions CD workflow uploading versioned ISOs (`booto-vX.Y.Z-amd64.iso`) with embedded release notes.
+7. **TUI Live Scan & Modules Display (`src/tui/tui_app.c` & `src/tui/pane.c`)**:
+   - In `src/tui/pane.c`: Add the module to `app->modules[...]` and increment `app->module_count`.
+   - In `src/tui/tui_app.c`: Invoke the module inside `execute_forensic_scan()`, aggregate threats, and update the Threat Inspector card.
 
-- **Stage 9: QEMU Benchmarking & Empirical Evaluation (`v1.0.0`)** [COMPLETED]
-  - Automated head-to-head empirical benchmarking suite (`scripts/run_benchmarks.sh` -> `BENCHMARK_RESULTS.md`): Booto (offline) vs. In-System scanners (`chkrootkit`, `rkhunter`).
-  - Quantitative metrics: 100% True Positive Rate (TPR), 0% False Positive Rate (FPR), ~7x-9x scan speedup, <15 MB peak RAM footprint.
+8. **Synthetic Disk & Tooling Integration (`scripts/gen_mock_disk.sh` & `scripts/update_rules.sh`)**:
+   - In `scripts/gen_mock_disk.sh`: Inject a synthetic mock sample into the loopback image.
+   - In `scripts/update_rules.sh`: Add rule generation and SHA-256 sealing for the new module.
 
 ---
 
-## 3. Build, Lint & Test Commands
+## 3. Real-World Lessons Learned & Common Pitfalls
 
-### Standard Build (C TUI Application on Debian):
+| Subsystem | Common Problem | Proven Solution |
+| :--- | :--- | :--- |
+| **UEFI & ISO Boot (VirtualBox)** | `No bootable medium found!` in UEFI mode. | `xorriso -e` requires a formatted FAT filesystem image (`efiboot.img`), not raw PE binaries. Include `i386-pc/bios.img` for universal dual BIOS+UEFI boot. |
+| **GRUB Kernel Discovery** | `error: file '/live/vmlinuz' not found`. | GRUB `$root` defaults to the EFI partition. Must embed `iso9660`, `part_gpt`, `fat`, `search` modules and run `search --no-floppy --set=root --file /live/vmlinuz`. |
+| **Target Disk Mounter** | `Failed to mount /dev/sda: Invalid argument` on fresh VM disks. | New virtual disks contain raw zeroes without partition tables. Probe candidate filesystems (`ext4`, `vfat`, `ntfs`, `iso9660`, `btrfs`, `xfs`) and gracefully fall back to direct raw block/sector analysis. |
+| **Systemd Getty Loop** | TUI restart loop when pressing F10/Q. | Live OS `getty@tty1.service.d/override.conf` must use `Restart=no` and `ExecStart=-/bin/bash -c "/usr/local/bin/booto; exec /bin/bash"`. |
+| **Terminal Alignment** | Table headers and data rows shifted by 2–3 characters. | Ensure printf format string widths match character-by-character (e.g. `%-20.20s %-8.8s %-9.9s %-16.16s` in both header and row). |
+| **GCC Format Truncation** | `-Werror=format-truncation` build failure. | Always use bounded precision specifiers (`snprintf(dest, sizeof(dest), "%.60s", src)`). |
+
+---
+
+## 4. CI/CD Architecture, Git Flags & Commit Conventions
+
+### Conventional Commit Format:
+Use structured commit prefixes:
+- `feat(scope): ...` — New detection engine, TUI feature, or tool.
+- `fix(scope): ...` — Bug fix, memory leak fix, or bootloader correction.
+- `docs(scope): ...` — Markdown documentation, skill files, or worklogs.
+- `test(scope): ...` — Unit test, fuzzing, or benchmark additions.
+- `chore(scope): ...` — Build script, gitignore, or dependency tweaks.
+
+### Commit Flags (Saving Runner Time & Quota):
+
+| Flag in Commit Message | CI/CD Behavior | Best Used When |
+| :--- | :--- | :--- |
+| **`[skip ci]`** or **`[ci skip]`** | Skips **all** CI tests and ISO builds completely. | Editing documentation, README, `.gitignore`, comments, or worklogs. |
+| **`[skip iso]`** or **`[no iso]`** | Runs compiler matrix & unit tests, but skips the 3-minute Debian ISO build. | Testing C code logic, refactoring, or adding unit tests before tagging releases. |
+
+### Automated Path Filtering:
+GitHub Actions automatically ignores runs when commits only modify:
+- `**.md`, `docs/**`, `.agents/**`, `LICENSE`, `.gitignore`.
+
+### Version Tagging & Automated Release Protocol:
+1. Update version entries in `CHANGELOG.md` under `## [X.Y.Z] - YYYY-MM-DD`.
+2. Commit changes: `git commit -m "chore(release): prepare vX.Y.Z"`
+3. Create annotated tag: `git tag -a vX.Y.Z -m "Release vX.Y.Z: Summary"`
+4. Push tag to GitHub: `git push origin main --tags`
+5. The ISO builder will automatically compile `booto-vX.Y.Z-amd64.iso`, extract the changelog section, and publish the GitHub Release.
+
+---
+
+## 5. Build, Lint & Test Commands Reference
+
+### Standard Compilation:
 ```bash
-make all
+make clean all
 ```
 
-### Run Unit Tests & Fuzzing:
+### Run Unit Tests & Mutation Fuzzing:
 ```bash
 make test
 make fuzz
 ```
 
-### Build with AddressSanitizer (Memory Bounds & Undefined Behavior):
+### AddressSanitizer & UndefinedBehaviorSanitizer:
 ```bash
-make asan
+make asan && ./build/test_mbr_auditor && ./build/test_fuzz
 ```
 
-### Generate gcov Code Coverage Report:
+### Code Coverage Analysis (gcov):
 ```bash
 make coverage
 ```
 
-### Run Valgrind:
+### Build Live Debian ISO Locally:
 ```bash
-valgrind --leak-check=full --show-leak-kinds=all --error-exitcode=1 ./bin/booto --dry-run
+sudo ./scripts/build_iso.sh booto-live-amd64.iso
 ```
 
-### Build Live Debian ISO:
+### Run QEMU Virtual Machine Testbed:
 ```bash
-sudo make iso
+./scripts/run_qemu_vm.sh ~/Downloads/booto-v1.1.0-amd64.iso
 ```
 
 ---
 
-## 4. C Safety & Defensive Constraints
+## 6. Strategic Future Roadmap
 
-1. **Incremental Validation**: Every stage must compile warning-free and pass unit tests before moving to the next.
-2. **Terminal UI Safety**: Double-buffered VT100/ANSI rendering, handling `SIGWINCH` and `SIGINT` gracefully.
-3. **Strict Read-Only Access**: Target disk partitions must only ever be mounted with `MS_RDONLY | MS_NODEV | MS_NOEXEC | MS_NOSUID` and `noload`.
-4. **Persistence Isolation**: Write operations are strictly restricted to the unlocked `/persistence/` directory.
-5. **Memory Hygiene**: Zero out sensitive buffers (cryptographic keys, passphrases, hashes) using `explicit_bzero()` or memory wipes before freeing.
+- **Stage 10: Companion Rust-Based USB Flasher (`booto-flasher`)**:
+  - Memory-safe USB drive discovery, streaming block writer with `indicatif` progress bar, and dual-partition provisioning.
+- **Stage 11: Tails/CAINE-Style XFCE4 Desktop Forensic Workstation (`booto-desktop`)**:
+  - Debian Live XFCE desktop session with graphical `booto-gui` dashboard and pre-packaged offline DFIR tools (GHex, GParted).
+- **Stage 12: Offline Machine-Learning Anomaly Classifier**:
+  - Pure C mathematical Shannon entropy ($H = -\sum p_i \log_2 p_i$) and section heuristic classifier for zero-day polymorphic rootkits.
+- **Stage 13: Self-Hosted Runner Infrastructure & Zero-Quota Local Builds**:
+  - Local Linux x86_64 runners (`runs-on: [self-hosted, linux]`) providing 0-minute cloud billing and sub-minute ISO creation.
 
----
-
-## 5. Future Roadmap & Strategic Evolution Plan
-
-### Stage 10: Companion Rust-Based USB Flasher (`booto-flasher`)
-- **Repository**: Standalone companion repository (`Dellrall/booto-flasher`).
-- **Core Architecture**:
-  - Memory-safe hardware USB auto-detection via `sysfs`/`udev` with strict rootfs & NVMe internal drive safeguards (preventing accidental disk erasure).
-  - High-speed block streaming engine with live `indicatif` progress bar, MB/s throughput, and post-write SHA-256 verification.
-  - Automated dual-partition disk partitioning: Partition 1 (`BOOTO_LIVE`, FAT32/ISO9660) and Partition 2 (`BOOTO_DATA`, LUKS2 encrypted persistence container).
-  - Cross-platform desktop CLI/TUI distribution for Linux, macOS, and Windows.
-
-### Stage 11: Tails/CAINE-Style XFCE4 Desktop Forensic Workstation
-- **Desktop Environment Integration**:
-  - Update `scripts/build_iso.sh` to construct an XFCE4 desktop live session (`xorg`, `xfce4`, `lightdm`, `thunar`, `ghex`, `mousepad`, `firefox-esr`).
-  - LightDM autologin directly into a non-root `forensic` user environment with root polkit escalation for detection operations.
-- **Graphical Front-End (`booto-gui`)**:
-  - Build a native GTK3/GTK4 or Rust-based desktop application wrapping the C11 detection engine APIs.
-  - Interactive partition map visualization, highlighted binary disassembly viewer for flagged offsets, and one-click PDF/HTML case report generation.
-- **Integrated Offline Forensic Toolsuite**:
-  - Pre-package standard offline analysis tools: GHex (binary hex editor), GParted (partition viewer), and document readers for case artifacts.
-
-### Stage 12: Offline Machine-Learning Anomaly Classifier
-- Lightweight heuristic/ML classification model evaluating section header entropy, unexported symbol references, and DKOM structure anomalies to identify zero-day polymorphic rootkits.
-
-### Stage 13: Self-Hosted Runner Infrastructure & Zero-Quota Builds
-- **Infrastructure Setup**:
-  - Deploy local Linux x86_64 self-hosted GitHub Actions runners (`runs-on: [self-hosted, linux]`).
-  - Zero cloud minute consumption (0 billed GitHub minutes) and bypass of external CI/CD queue constraints.
-- **Performance Acceleration**:
-  - Leverage local Debian package caching (`/var/cache/apt/archives`) and full multicore parallel compilation.
-  - Sub-minute ISO builds (~30-45s vs 3.5min on shared cloud runners).
-- **Security & Sandboxing**:
-  - Enforce branch protection and collaborator approvals for workflow triggers on self-hosted hardware.

@@ -48,5 +48,24 @@ chmod +x "${INITRAMFS_STAGING}/init"
 (cd "${INITRAMFS_STAGING}" && find . | cpio -o -H newc > "${STAGING_DIR}/boot/initrd.img-6.5.0-generic" 2>/dev/null)
 rm -rf "${INITRAMFS_STAGING}"
 
+echo "[+] Injecting synthetic Rovnix MBR Bootkit into Sector 0 of disk image..."
+# Write 512-byte MBR with Rovnix hook and 0x55AA boot signature
+python3 -c "
+import sys
+mbr = bytearray(512)
+# Rovnix bootkit hook: \xfa\x33\xc0\x8e\xd0\x8e\xd8\x8e\xc0\xbc\x00\x7c\xcd\x13
+hook = b'\xfa\x33\xc0\x8e\xd0\x8e\xd8\x8e\xc0\xbc\x00\x7c\xcd\x13'
+mbr[0:len(hook)] = hook
+# Partition 1 at LBA 2048 (Linux 0x83)
+mbr[446] = 0x80 # Active
+mbr[450] = 0x83 # Linux
+mbr[454] = 0x00; mbr[455] = 0x08; mbr[456] = 0x00; mbr[457] = 0x00 # LBA 2048
+mbr[458] = 0x00; mbr[459] = 0x20; mbr[460] = 0x00; mbr[461] = 0x00 # 8192 sectors
+mbr[510] = 0x55
+mbr[511] = 0xAA
+with open('${OUTPUT_IMG}', 'r+b') as f:
+    f.write(mbr)
+" 2>/dev/null || true
+
 echo "[+] Staging complete at ${STAGING_DIR}"
 echo "=== Synthetic disk artifacts created successfully ==="

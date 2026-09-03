@@ -16,6 +16,7 @@
 #include "case_reporter.h"
 #include "persistence_mgr.h"
 #include "disk_mount.h"
+#include "mbr_auditor.h"
 #include "elf_analyzer.h"
 #include "kernel_inspector.h"
 #include "uefi_analyzer.h"
@@ -116,7 +117,7 @@ static void render_exit_modal(tui_app_state_t *app, int rows, int cols) {
 static void render_tree_leaves(wm_node_t *node, wm_node_t *focused, tui_app_state_t *app) {
     if (!node) return;
     if (node->type == NODE_LEAF) {
-        pane_render(node, (node == focused), app);
+        pane_render(node, node == focused, app);
     } else {
         render_tree_leaves(node->left, focused, app);
         render_tree_leaves(node->right, focused, app);
@@ -139,51 +140,65 @@ static void execute_forensic_scan(tui_app_state_t *app) {
     const char *scan_root = "/tmp/booto_scan_target";
     disk_mount_ro(target_dev, scan_root, "ext4");
 
-    // 1. UEFI ESP Analyzer
-    tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "[1/5] Auditing UEFI ESP bootloader & DBX revocation list...");
+    // 1. MBR & VBR Boot Sector Auditor
+    tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "[1/6] Auditing Master Boot Record (MBR) and Volume Boot Records (VBR)...");
+    mbr_scan_result_t mbr_res;
+    memset(&mbr_res, 0, sizeof(mbr_res));
+    mbr_audit_device(target_dev, &mbr_res);
+
+    // 2. UEFI ESP Analyzer
+    tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "[2/6] Auditing UEFI ESP bootloader & DBX revocation list...");
     uefi_scan_result_t uefi_res;
     memset(&uefi_res, 0, sizeof(uefi_res));
     char esp_path[512];
     snprintf(esp_path, sizeof(esp_path), "%s/boot/efi", scan_root);
     uefi_inspect_esp_directory(esp_path, &uefi_res);
 
-    // 2. Kernel LKM Rootkit Inspector
-    tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "[2/5] Parsing Kernel ELF binary and /lib/modules LKMs...");
+    // 3. Kernel LKM Rootkit Inspector
+    tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "[3/6] Parsing Kernel ELF binary and /lib/modules LKMs...");
     kernel_scan_result_t kernel_res;
     memset(&kernel_res, 0, sizeof(kernel_res));
     char lkm_path[512];
     snprintf(lkm_path, sizeof(lkm_path), "%s/lib/modules", scan_root);
     kernel_inspect_directory(lkm_path, &kernel_res);
 
-    // 3. In-Memory Initramfs Auditor
-    tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "[3/5] Decompressing in-memory initramfs CPIO scripts...");
+    // 4. In-Memory Initramfs Auditor
+    tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "[4/6] Decompressing in-memory initramfs CPIO scripts...");
     initramfs_scan_result_t initrd_res;
     memset(&initrd_res, 0, sizeof(initrd_res));
     char initrd_path[512];
     snprintf(initrd_path, sizeof(initrd_path), "%s/boot/initrd.img", scan_root);
     initramfs_audit_file(initrd_path, &initrd_res);
 
-    // 4. Userland LD_PRELOAD Scanner
-    tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "[4/5] Auditing /etc/ld.so.preload & dynamic linker hooks...");
+    // 5. Userland LD_PRELOAD Scanner
+    tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "[5/6] Auditing /etc/ld.so.preload & dynamic linker hooks...");
     preload_scan_result_t preload_res;
     memset(&preload_res, 0, sizeof(preload_res));
     preload_scan_rootfs(scan_root, &preload_res);
 
-    // 5. Raw Ext4 Inode Differential Engine
-    tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "[5/5] Executing Raw Ext4 Inode vs VFS Directory Table Diff...");
+    // 6. Raw Ext4 Inode Differential Engine
+    tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "[6/6] Executing Raw Ext4 Inode vs VFS Directory Table Diff...");
     ext4_diff_result_t ext4_res;
     memset(&ext4_res, 0, sizeof(ext4_res));
     ext4_diff_scan(target_dev, scan_root, &ext4_res);
 
-    int total_threats = uefi_res.bootkits_detected + kernel_res.threats_detected +
-                        initrd_res.threats_detected + preload_res.threats_detected +
-                        ext4_res.hidden_inodes_count;
+    int total_threats = mbr_res.threats_detected + uefi_res.bootkits_detected +
+                        kernel_res.threats_detected + initrd_res.threats_detected +
+                        preload_res.threats_detected + ext4_res.hidden_inodes_count;
 
     if (total_threats > 0) {
         snprintf(log_buf, sizeof(log_buf), "=== Forensic Scan Finished: %d Threat(s) Identified ===", total_threats);
         tui_app_append_log(app, LOG_LEVEL_CRITICAL, NULL, log_buf);
 
-        if (kernel_res.threats_detected > 0) {
+        if (mbr_res.threats_detected > 0) {
+            snprintf(app->threat.threat_name, sizeof(app->threat.threat_name), "%.60s", mbr_res.findings[0].threat_name);
+            snprintf(app->threat.infected_file, sizeof(app->threat.infected_file), "%.70s (LBA %llu)",
+                     mbr_res.findings[0].target_device, (unsigned long long)mbr_res.findings[0].sector_lba);
+            snprintf(app->threat.hook_type, sizeof(app->threat.hook_type), "Rule: %.50s", mbr_res.findings[0].rule_id);
+            snprintf(app->threat.sha256, sizeof(app->threat.sha256), "%.64s", mbr_res.findings[0].sha256);
+            snprintf(app->threat.severity, sizeof(app->threat.severity), "%.15s", mbr_severity_to_string(mbr_res.findings[0].severity));
+            app->threat.severity_color = MAKE_ATTR(COLOR_BRIGHT_RED, COLOR_DEFAULT, ATTR_BOLD);
+        } else if (kernel_res.threats_detected > 0) {
             snprintf(app->threat.threat_name, sizeof(app->threat.threat_name), "%.60s", kernel_res.findings[0].threat_name);
             snprintf(app->threat.infected_file, sizeof(app->threat.infected_file), "%.120s", kernel_res.findings[0].file_path);
             snprintf(app->threat.hook_type, sizeof(app->threat.hook_type), "%.30s: %.25s",
@@ -206,7 +221,7 @@ static void execute_forensic_scan(tui_app_state_t *app) {
 
         snprintf(app->threat.threat_name, sizeof(app->threat.threat_name), "Storage Clean (0 Threats)");
         snprintf(app->threat.infected_file, sizeof(app->threat.infected_file), "%.100s (Clean)", target_dev);
-        snprintf(app->threat.hook_type, sizeof(app->threat.hook_type), "All 5 Forensic Engines Passed");
+        snprintf(app->threat.hook_type, sizeof(app->threat.hook_type), "All 6 Forensic Engines Passed");
         snprintf(app->threat.sha256, sizeof(app->threat.sha256), "0000000000000000000000000000000000000000000000000000000000000000");
         snprintf(app->threat.severity, sizeof(app->threat.severity), "CLEAN / PASSED");
         app->threat.severity_color = MAKE_ATTR(COLOR_BRIGHT_GREEN, COLOR_DEFAULT, ATTR_BOLD);
@@ -318,6 +333,7 @@ int tui_app_run(booto_context_t *ctx) {
                 snprintf(sum.target_disk, sizeof(sum.target_disk), "/dev/nvme0n1p2");
                 snprintf(sum.target_fs, sizeof(sum.target_fs), "ext4");
                 snprintf(sum.examiner, sizeof(sum.examiner), "Booto Live Examiner");
+                sum.mbr_threats_count = 0;
                 sum.kernel_threats_count = 1;
                 sum.uefi_threats_count = 0;
                 sum.initramfs_threats_count = 0;

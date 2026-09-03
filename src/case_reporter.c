@@ -70,6 +70,7 @@ booto_error_t case_report_generate_json(const forensic_case_summary_t *summary,
     fprintf(fp, "  \"findings_summary\": {\n");
     fprintf(fp, "    \"total_threats\": %d,\n", summary->total_threats);
     fprintf(fp, "    \"highest_severity\": \"%s\",\n", summary->highest_severity);
+    fprintf(fp, "    \"mbr_bootkit_threats\": %d,\n", summary->mbr_threats_count);
     fprintf(fp, "    \"kernel_lkm_threats\": %d,\n", summary->kernel_threats_count);
     fprintf(fp, "    \"uefi_bootkit_threats\": %d,\n", summary->uefi_threats_count);
     fprintf(fp, "    \"initramfs_script_threats\": %d,\n", summary->initramfs_threats_count);
@@ -119,6 +120,8 @@ booto_error_t case_report_generate_markdown(const forensic_case_summary_t *summa
     fprintf(fp, "## 2. Detection Breakdown by Module\n\n");
     fprintf(fp, "| Forensic Inspection Engine | Detections Count | Status |\n");
     fprintf(fp, "| :--- | :---: | :--- |\n");
+    fprintf(fp, "| **MBR & VBR Boot Sector Auditor** | %d | %s |\n",
+            summary->mbr_threats_count, summary->mbr_threats_count > 0 ? "CRITICAL ALERT" : "CLEAN");
     fprintf(fp, "| **Kernel LKM & Syscall Hook Inspector** | %d | %s |\n",
             summary->kernel_threats_count, summary->kernel_threats_count > 0 ? "CRITICAL ALERT" : "CLEAN");
     fprintf(fp, "| **UEFI & ESP Bootkit Analyzer** | %d | %s |\n",

@@ -20,8 +20,9 @@ Built with low-level **C11**, Booto operates from a trusted Debian Live USB envi
 - **Zellij-Inspired Movable TUI**: Terminal User Interface with a dynamic Binary Space Partitioning (BSP) window manager supporting movable, resizable, and zoomable workspace panes.
 - **Safe Forensic Storage Discovery & Mounter**: Automatic enumeration of NVMe/SATA/USB block devices via `/proc/partitions` and `sysfs`, enforcing strict read-only mounts (`MS_RDONLY | MS_NODEV | MS_NOEXEC | MS_NOSUID` with `noload`).
 - **Low-Level Forensic Detection Modules**:
-  - **Kernel Image & LKM Hook Scanner**: Custom 64-bit ELF parser, symbol table auditing, `sys_call_table` tampering detection, DKOM process/module hiding rules (Diamorphine, Reptile, Suterusu, Khook).
+  - **MBR & VBR Boot Sector Auditor**: Raw sector-level parser for Master Boot Record (Sector 0), Track 0 unpartitioned slack space, and partition Volume Boot Records (VBR), detecting Rovnix, TDL4/Mebroot, Stoned, GAPZ/Cidox, and HermeticWiper payloads.
   - **UEFI & ESP Bootkit Analyzer**: PE32+ (PE/COFF) binary parser, Authenticode certificate validator, Secure Boot DBX revocation list matcher (BlackLotus, BootHole, ESPecter, MoonBounce).
+  - **Kernel Image & LKM Hook Scanner**: Custom 64-bit ELF parser, symbol table auditing, `sys_call_table` tampering detection, DKOM process/module hiding rules (Diamorphine, Reptile, Suterusu, Khook).
   - **In-Memory Initramfs Decompressor**: CPIO archive parser and early-boot reverse shell/backdoor script auditor.
   - **Userland Interceptor Scanner**: `/etc/ld.so.preload` and PAM dynamic linker hook detection (Azazel, Jynx).
   - **Raw Ext4 Inode Differential Engine**: Cross-view validation comparing raw disk superblock & inode tables against VFS directory trees.

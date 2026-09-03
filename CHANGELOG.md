@@ -5,6 +5,19 @@ All notable changes to the **Booto** forensic rootkit & bootkit detection framew
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-09-03
+
+### Added
+- **MBR, Track 0 Slack Gap & VBR Bootkit Detection Engine (Sub-Stage 4F)**:
+  - Direct sector-level offline analysis of Sector 0 (MBR), Track 0 unpartitioned slack space (LBA 1..63 / 2047), and partition Volume Boot Records (VBR).
+  - Signature and heuristic detection for classic and advanced bootkits: **Rovnix / Carberp MBR**, **TDL4 / Sinowal (Mebroot)**, **Stoned / Legacy Bootkits**, **GAPZ / Cidox VBR hooks**, and **HermeticWiper / Ransomware MBR wipers**.
+  - Structural anomaly heuristics: Invalid `0x55AA` signatures, corrupt partition status bytes, multiple active/bootable partitions, and direct BIOS INT 13h disk-write instructions in MBR code.
+  - Automated bootloader fingerprint classification (`GRUB 2`, `GRUB Legacy`, `Syslinux/ISOLINUX`, `Windows NT 6+`, `Windows Legacy`, `LILO`).
+  - Unit test suite (`tests/test_mbr_auditor.c`), 500-iteration mutation fuzzing harness (`tests/test_fuzz.c`), and threat rules (`rules/mbr_bootkit_signatures.json`).
+  - Integrated into the 6-module TUI scan sequence (`F5: Scan`) and cryptographic case reporting (`F6: Export Report`).
+
+---
+
 ## [1.0.9] - 2026-09-02
 
 ### Added

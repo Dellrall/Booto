@@ -42,38 +42,45 @@ void tui_app_state_init(tui_app_state_t *app, booto_context_t *ctx) {
     }
 
     // Initialize forensic modules
-    app->module_count = 5;
+    // Initialize forensic modules
+    app->module_count = 6;
     app->module_cursor = 0;
 
-    snprintf(app->modules[0].name, sizeof(app->modules[0].name), "UEFI & ESP Bootkit Analyzer");
-    snprintf(app->modules[0].target_path, sizeof(app->modules[0].target_path), "/boot/efi/EFI/*");
+    snprintf(app->modules[0].name, sizeof(app->modules[0].name), "MBR, VBR & Track 0 Slack Auditor");
+    snprintf(app->modules[0].target_path, sizeof(app->modules[0].target_path), "Sector 0, LBA 1-63, VBRs");
     app->modules[0].enabled = true;
     snprintf(app->modules[0].status_text, sizeof(app->modules[0].status_text), "READY");
     app->modules[0].status_color = MAKE_ATTR(COLOR_GREEN, COLOR_DEFAULT, ATTR_BOLD);
 
-    snprintf(app->modules[1].name, sizeof(app->modules[1].name), "Kernel LKM & Symbol Hook Scanner");
-    snprintf(app->modules[1].target_path, sizeof(app->modules[1].target_path), "/lib/modules, vmlinuz");
+    snprintf(app->modules[1].name, sizeof(app->modules[1].name), "UEFI & ESP Bootkit Analyzer");
+    snprintf(app->modules[1].target_path, sizeof(app->modules[1].target_path), "/boot/efi/EFI/*");
     app->modules[1].enabled = true;
     snprintf(app->modules[1].status_text, sizeof(app->modules[1].status_text), "READY");
     app->modules[1].status_color = MAKE_ATTR(COLOR_GREEN, COLOR_DEFAULT, ATTR_BOLD);
 
-    snprintf(app->modules[2].name, sizeof(app->modules[2].name), "In-Memory Initramfs Auditor");
-    snprintf(app->modules[2].target_path, sizeof(app->modules[2].target_path), "/boot/initrd.img*");
+    snprintf(app->modules[2].name, sizeof(app->modules[2].name), "Kernel LKM & Symbol Hook Scanner");
+    snprintf(app->modules[2].target_path, sizeof(app->modules[2].target_path), "/lib/modules, vmlinuz");
     app->modules[2].enabled = true;
     snprintf(app->modules[2].status_text, sizeof(app->modules[2].status_text), "READY");
     app->modules[2].status_color = MAKE_ATTR(COLOR_GREEN, COLOR_DEFAULT, ATTR_BOLD);
 
-    snprintf(app->modules[3].name, sizeof(app->modules[3].name), "LD_PRELOAD & PAM Interceptors");
-    snprintf(app->modules[3].target_path, sizeof(app->modules[3].target_path), "/etc/ld.so.preload");
+    snprintf(app->modules[3].name, sizeof(app->modules[3].name), "In-Memory Initramfs Auditor");
+    snprintf(app->modules[3].target_path, sizeof(app->modules[3].target_path), "/boot/initrd.img*");
     app->modules[3].enabled = true;
     snprintf(app->modules[3].status_text, sizeof(app->modules[3].status_text), "READY");
     app->modules[3].status_color = MAKE_ATTR(COLOR_GREEN, COLOR_DEFAULT, ATTR_BOLD);
 
-    snprintf(app->modules[4].name, sizeof(app->modules[4].name), "Raw Ext4 Inode vs VFS Diff");
-    snprintf(app->modules[4].target_path, sizeof(app->modules[4].target_path), "Raw Block Inodes");
+    snprintf(app->modules[4].name, sizeof(app->modules[4].name), "LD_PRELOAD & PAM Interceptors");
+    snprintf(app->modules[4].target_path, sizeof(app->modules[4].target_path), "/etc/ld.so.preload");
     app->modules[4].enabled = true;
     snprintf(app->modules[4].status_text, sizeof(app->modules[4].status_text), "READY");
     app->modules[4].status_color = MAKE_ATTR(COLOR_GREEN, COLOR_DEFAULT, ATTR_BOLD);
+
+    snprintf(app->modules[5].name, sizeof(app->modules[5].name), "Raw Ext4 Inode vs VFS Diff");
+    snprintf(app->modules[5].target_path, sizeof(app->modules[5].target_path), "Raw Block Inodes");
+    app->modules[5].enabled = true;
+    snprintf(app->modules[5].status_text, sizeof(app->modules[5].status_text), "READY");
+    app->modules[5].status_color = MAKE_ATTR(COLOR_GREEN, COLOR_DEFAULT, ATTR_BOLD);
 
     // Initial clean/idle threat inspector state
     snprintf(app->threat.threat_name, sizeof(app->threat.threat_name), "None (System Idle)");

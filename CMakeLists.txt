@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 
 project(booto
-    VERSION 1.0.0
+    VERSION 1.1.0
     DESCRIPTION "Debian-Based Tails-Inspired Live Linux Forensic Rootkit & Bootkit Detection Suite"
     LANGUAGES C
 )
@@ -64,6 +64,7 @@ set(BOOT_LIB_SOURCES
     src/elf_analyzer.c
     src/kernel_inspector.c
     src/uefi_analyzer.c
+    src/mbr_auditor.c
     src/initramfs_auditor.c
     src/preload_scanner.c
     src/ext4_diff.c
@@ -108,6 +109,10 @@ add_test(NAME test_elf_analyzer COMMAND test_elf_analyzer)
 add_executable(test_uefi_analyzer tests/test_uefi_analyzer.c)
 target_link_libraries(test_uefi_analyzer PRIVATE booto_core)
 add_test(NAME test_uefi_analyzer COMMAND test_uefi_analyzer)
+
+add_executable(test_mbr_auditor tests/test_mbr_auditor.c)
+target_link_libraries(test_mbr_auditor PRIVATE booto_core)
+add_test(NAME test_mbr_auditor COMMAND test_mbr_auditor)
 
 add_executable(test_initramfs_auditor tests/test_initramfs_auditor.c)
 target_link_libraries(test_initramfs_auditor PRIVATE booto_core)

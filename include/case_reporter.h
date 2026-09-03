@@ -20,6 +20,7 @@ typedef struct {
     char target_disk[128];
     char target_fs[32];
     char examiner[64];
+    int mbr_threats_count;
     int kernel_threats_count;
     int uefi_threats_count;
     int initramfs_threats_count;

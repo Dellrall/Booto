@@ -15,6 +15,7 @@ SOURCES = $(SRCDIR)/logger.c \
           $(SRCDIR)/elf_analyzer.c \
           $(SRCDIR)/kernel_inspector.c \
           $(SRCDIR)/uefi_analyzer.c \
+          $(SRCDIR)/mbr_auditor.c \
           $(SRCDIR)/initramfs_auditor.c \
           $(SRCDIR)/preload_scanner.c \
           $(SRCDIR)/ext4_diff.c \

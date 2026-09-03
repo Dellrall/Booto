@@ -21,12 +21,13 @@ static void test_report_generation(void) {
     snprintf(sum.target_disk, sizeof(sum.target_disk), "/dev/nvme0n1p2");
     snprintf(sum.target_fs, sizeof(sum.target_fs), "ext4");
     snprintf(sum.examiner, sizeof(sum.examiner), "Unit Test Examiner");
+    sum.mbr_threats_count = 1;
     sum.kernel_threats_count = 1;
     sum.uefi_threats_count = 0;
     sum.initramfs_threats_count = 0;
     sum.preload_threats_count = 1;
     sum.ext4_hidden_inodes_count = 1;
-    sum.total_threats = 3;
+    sum.total_threats = 4;
     snprintf(sum.highest_severity, sizeof(sum.highest_severity), "CRITICAL");
 
     char json_path[512];

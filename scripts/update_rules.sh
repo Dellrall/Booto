@@ -77,12 +77,57 @@ cat << 'EOF_LKM' > "${RULES_DIR}/lkm_rootkit_signatures.json"
     }
   ]
 }
-EOF_LKM
+# 3. Fetch latest MBR / VBR Bootkit Signatures
+echo "[+] Updating MBR/VBR Bootkit Signatures..."
+cat << 'EOF_MBR' > "${RULES_DIR}/mbr_bootkit_signatures.json"
+{
+  "updated_at": "2026-09-03T00:00:00Z",
+  "signatures": [
+    {
+      "name": "Rovnix / Carberp MBR Bootkit",
+      "rule_id": "MBR_BOOTKIT_ROVNIX",
+      "pattern_hex": "fa33c08ed08ed88ec0bc007c",
+      "target": "MBR (Sector 0)",
+      "severity": "CRITICAL"
+    },
+    {
+      "name": "TDL4 / Sinowal (Mebroot) Bootkit",
+      "rule_id": "MBR_BOOTKIT_TDL4_MEBROOT",
+      "pattern_hex": "31c08ed889164c00",
+      "target": "MBR IVT Hook (0x0000:0x004c)",
+      "severity": "CRITICAL"
+    },
+    {
+      "name": "Stoned / Legacy Bootkit",
+      "rule_id": "MBR_BOOTKIT_STONED",
+      "pattern_hex": "cd137205ea0000c09f",
+      "target": "MBR Sector 0",
+      "severity": "CRITICAL"
+    },
+    {
+      "name": "GAPZ / Cidox VBR Bootkit",
+      "rule_id": "VBR_BOOTKIT_GAPZ",
+      "pattern_hex": "eb58905657538cc8",
+      "target": "VBR Partition Boot Sector",
+      "severity": "CRITICAL"
+    },
+    {
+      "name": "HermeticWiper / Ransomware MBR Wiper",
+      "rule_id": "MBR_WIPER_RANSOMWARE",
+      "pattern_hex": "31c08ed8b9000231c0aa",
+      "target": "MBR (Sector 0)",
+      "severity": "CRITICAL"
+    }
+  ]
+}
+EOF_MBR
 
 echo "[+] Generating cryptographic signature seal for updated rules..."
 sha256sum "${RULES_DIR}/uefi_dbx_revocations.json" > "${RULES_DIR}/uefi_dbx_revocations.json.sha256"
 sha256sum "${RULES_DIR}/lkm_rootkit_signatures.json" > "${RULES_DIR}/lkm_rootkit_signatures.json.sha256"
+sha256sum "${RULES_DIR}/mbr_bootkit_signatures.json" > "${RULES_DIR}/mbr_bootkit_signatures.json.sha256"
 
 echo "=== Rules Updated Successfully ==="
 echo "Total DBX Rules: 4"
 echo "Total LKM Rules: 4"
+echo "Total MBR Rules: 5"
