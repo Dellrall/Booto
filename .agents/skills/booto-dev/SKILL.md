@@ -204,6 +204,17 @@ The following 5 improvements are designated architectural priorities for future 
   - For every allocated inode, read `ext4_inode` and check `i_links_count`.
   - Inodes with allocated data blocks but `i_links_count == 0` that do not appear in a VFS `nftw()` directory walk are flagged as hidden zero-day rootkit binaries.
 
+### 6. Native C11 "Mini-CHIPSEC" Hardware Silicon & Firmware Auditor (`src/hardware_auditor.c`)
+- **Problem**: Full Intel CHIPSEC requires Python 3 and heavy dependencies (~50 MB+), contradicting Booto's zero-dependency <150 KB C11 architecture.
+- **Specification**:
+  - **NVRAM Secure Boot & Key State**: Direct binary parsing of `/sys/firmware/efi/efivars/` variables (`SecureBoot-8be4df61-...`, `SetupMode-...`, `PK`, `KEK`, `db`, `dbx`) to detect compromised platform keychains or disabled Secure Boot enforcement.
+  - **CPU Model Specific Registers (MSRs)**: Read `/dev/cpu/0/msr` for `MSR_IA32_FEATURE_CONTROL` (0x3A) bit 0 (Lock bit) to verify SMM lock state against rogue SMM implants.
+  - **PCI Config Space BIOS Protection**: Inspect `/sys/bus/pci/devices/0000:00:1f.0/config` (LPC/eSPI bridge) for the `BIOS_CNTL` register:
+    - Verify `SMM_BWP` (SMM BIOS Write Protect, bit 5 == 1).
+    - Verify `BLE` (BIOS Lock Enable, bit 1 == 1).
+    - Flag unprotected firmware chips susceptible to ring-0 SPI flash rewrites.
+  - **IOMMU / DMA Attack Protection**: Audit `/sys/class/iommu/` and kernel ACPI DMAR tables to verify VT-d / AMD-Vi protections against malicious Thunderbolt / PCIe DMA implants (e.g., PCILeech).
+
 ---
 
 ## 7. Strategic Future Roadmap
@@ -216,4 +227,7 @@ The following 5 improvements are designated architectural priorities for future 
   - Pure C mathematical Shannon entropy ($H = -\sum p_i \log_2 p_i$) and section heuristic classifier for zero-day polymorphic rootkits.
 - **Stage 13: Self-Hosted Runner Infrastructure & Zero-Quota Local Builds**:
   - Local Linux x86_64 runners (`runs-on: [self-hosted, linux]`) providing 0-minute cloud billing and sub-minute ISO creation.
+- **Stage 14: Native C11 "Mini-CHIPSEC" Hardware Silicon & Firmware Auditor (`hardware_auditor`)**:
+  - Zero-dependency x86_64 silicon register probing, SMM/SMRAM lock auditing, SPI flash controller write-protection checks, and NVRAM Secure Boot state validation.
+
 
