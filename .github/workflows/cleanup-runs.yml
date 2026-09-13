@@ -1,0 +1,23 @@
+name: Cleanup Old Workflow Runs & Artifacts
+
+on:
+  schedule:
+    - cron: '0 0 * * 0' # Automatically run every Sunday at midnight
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  prune-old-runs:
+    name: Prune Workflow Runs Older Than 3 Days
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete Old Runs & Artifacts
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          retain_days: 3
+          keep_minimum_runs: 3

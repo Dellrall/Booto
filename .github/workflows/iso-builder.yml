@@ -52,14 +52,15 @@ jobs:
           echo "Building ISO with filename: ${ISO_NAME}"
           sudo ./scripts/build_iso.sh "${ISO_NAME}"
 
-      - name: Upload ISO Artifact
+      - name: Upload ISO Artifact (Test Builds Only)
+        if: "!startsWith(github.ref, 'refs/tags/v')"
         uses: actions/upload-artifact@v4
         with:
           name: booto-live-amd64-iso
           path: |
             dist/*.iso
             dist/*.sha256
-          retention-days: 14
+          retention-days: 1
 
       - name: Extract Changelog Section
         id: extract_changelog
