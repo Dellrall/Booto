@@ -194,14 +194,17 @@ static void check_flag_var(fw_check_t *c, const char *dir, const char *name, uin
     } else if (efivar_data_len(&v) < 1) {
         c->result = FW_RESULT_UNKNOWN;
         snprintf(c->detail, sizeof(c->detail), "%s is empty.", name);
-    } else if (efivar_data(&v)[0] == good) {
-        set_check(c, FW_RESULT_PASS, pass_msg);
-    } else if (efivar_data(&v)[0] == (good ? 0 : 1)) {
-        set_check(c, FW_RESULT_FAIL, fail_msg);
     } else {
-        c->result = FW_RESULT_UNKNOWN;
-        snprintf(c->detail, sizeof(c->detail), "%s has unexpected value %u.", name,
-                 (unsigned)efivar_data(&v)[0]);
+        const uint8_t *data = efivar_data(&v);
+        uint8_t val = data[0];
+        if (val == good) {
+            set_check(c, FW_RESULT_PASS, pass_msg);
+        } else if (val == (good ? 0 : 1)) {
+            set_check(c, FW_RESULT_FAIL, fail_msg);
+        } else {
+            c->result = FW_RESULT_UNKNOWN;
+            snprintf(c->detail, sizeof(c->detail), "%s has unexpected value %u.", name, (unsigned)val);
+        }
     }
     free(v.buf);
 }
