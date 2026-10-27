@@ -57,7 +57,7 @@ static void print_help(const char *prog_name) {
     printf("  -t, --target <dev>         Raw block device to scan (mounted read-only)\n");
     printf("  -s, --scan-dir <path>      Specify local rootfs path to inspect\n");
     printf("  -p, --persistence-dir <dir>Write JSON+Markdown case reports to <dir>\n");
-    printf("  -u, --update-rules         Fetch latest DBX revocations & rootkit signatures\n");
+    printf("  -u, --update-rules         Regenerate sealed rule files (scripts/update_rules.sh)\n");
     printf("  -V, --verbose              Enable verbose/debug logging\n\n");
     printf("CLI exit codes:\n");
     printf("  0  CLEAN       every enabled engine ran and found nothing\n");

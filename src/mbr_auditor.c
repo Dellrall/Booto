@@ -12,6 +12,7 @@
 #include "mbr_auditor.h"
 #include "crypto_utils.h"
 #include "logger.h"
+#include "rules_loader.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -80,6 +81,23 @@ static const uint8_t *mem_search(const uint8_t *haystack, size_t haystack_len,
     return NULL;
 }
 
+// Report every rule for `target` whose patterns (any of them) occur in buf[0..len).
+static void apply_pattern_rules(const rules_mbr_set_t *rules, rules_mbr_target_t target,
+                                const uint8_t *buf, size_t len, bool bootloader_known,
+                                const char *dev_path, const char *sha256, uint64_t sector_lba,
+                                mbr_scan_result_t *result) {
+    for (int r = 0; r < rules->count; r++) {
+        const rules_mbr_entry_t *rule = &rules->entries[r];
+        if (rule->target != target || (rule->unknown_bootloader_only && bootloader_known)) continue;
+        for (int p = 0; p < rule->pattern_count; p++) {
+            if (!mem_search(buf, len, rule->patterns[p], rule->pattern_len[p])) continue;
+            add_mbr_threat(result, rule->name, dev_path, sha256, rule->rule_id, sector_lba,
+                           (mbr_severity_t)rules_severity_level(rule->severity), rule->description);
+            break;
+        }
+    }
+}
+
 static bootloader_type_t detect_known_bootloader(const uint8_t *code, size_t len) {
     if (len < MBR_BOOTSTRAP_SIZE) return BOOTLOADER_UNKNOWN;
 
@@ -131,6 +149,10 @@ static bootloader_type_t detect_known_bootloader(const uint8_t *code, size_t len
 
 booto_error_t mbr_audit_buffer(const uint8_t *buffer, size_t len, const char *device_path, mbr_scan_result_t *result) {
     if (!buffer || len < MBR_SECTOR_SIZE || !result) return BOOTO_ERR_INVALID_ARG;
+
+    const rules_mbr_set_t *rules;
+    booto_error_t err = rules_get_mbr(&rules);
+    if (err != BOOTO_OK) return err;
 
     result->sectors_scanned++;
     result->mbr_inspected = true;
@@ -213,62 +235,10 @@ booto_error_t mbr_audit_buffer(const uint8_t *buffer, size_t len, const char *de
                        "More than one partition flagged as active/bootable (0x80) in MBR table");
     }
 
-    // C. Known Bootkit Signatures
-
-    // 1. Rovnix / Carberp MBR Bootkit
-    // Pattern: fa 33 c0 8e d0 8e d8 8e c0 bc 00 7c with INT 13h hook setup / hidden sector read
-    static const uint8_t ROVNIX_SIG1[] = { 0xFA, 0x33, 0xC0, 0x8E, 0xD0, 0x8E, 0xD8, 0x8E, 0xC0, 0xBC, 0x00, 0x7C };
-    static const uint8_t ROVNIX_SIG2[] = { 0xFA, 0x31, 0xC0, 0x8E, 0xD8, 0x8E, 0xD0, 0xBC, 0x00, 0x7C, 0xFB, 0xCD, 0x13 };
-    if (mem_search(buffer, MBR_BOOTSTRAP_SIZE, ROVNIX_SIG1, sizeof(ROVNIX_SIG1)) ||
-        mem_search(buffer, MBR_BOOTSTRAP_SIZE, ROVNIX_SIG2, sizeof(ROVNIX_SIG2))) {
-        add_mbr_threat(result, "Rovnix / Carberp MBR Bootkit", info->device_path, info->bootstrap_sha256,
-                       "MBR_BOOTKIT_ROVNIX", 0, MBR_SEVERITY_CRITICAL,
-                       "Matches Rovnix/Carberp MBR bootstrap hook redirecting execution to hidden sectors before partition table");
-    }
-
-    // 2. TDL4 / Sinowal (Mebroot) Bootkit
-    // Overwrites INT 13h IVT vector at 0x0000:0x004c (\x31\xc0\x8e\xd8\x89\x16\x4c\x00 or \x89\x0e\x4c\x00)
-    static const uint8_t TDL4_SIG1[] = { 0x31, 0xC0, 0x8E, 0xD8, 0x89, 0x16, 0x4C, 0x00 };
-    static const uint8_t TDL4_SIG2[] = { 0x8C, 0xC8, 0x8E, 0xD8, 0xA1, 0x4C, 0x00 };
-    if (mem_search(buffer, MBR_BOOTSTRAP_SIZE, TDL4_SIG1, sizeof(TDL4_SIG1)) ||
-        mem_search(buffer, MBR_BOOTSTRAP_SIZE, TDL4_SIG2, sizeof(TDL4_SIG2))) {
-        add_mbr_threat(result, "TDL4 / Sinowal (Mebroot) Bootkit", info->device_path, info->bootstrap_sha256,
-                       "MBR_BOOTKIT_TDL4_MEBROOT", 0, MBR_SEVERITY_CRITICAL,
-                       "Intercepts and rewires INT 13h BIOS disk handler to execute rootkit payload from reserved sectors");
-    }
-
-    // 3. Stoned / Michelangelo Legacy Bootkits
-    if (mem_search(buffer, MBR_BOOTSTRAP_SIZE, (const uint8_t *)"Your PC is now Stoned!", 22) ||
-        mem_search(buffer, MBR_BOOTSTRAP_SIZE, (const uint8_t *)"\xCD\x13\x72\x05\xEA\x00\x00\xC0\x9F", 9)) {
-        add_mbr_threat(result, "Stoned / Legacy MBR Bootkit", info->device_path, info->bootstrap_sha256,
-                       "MBR_BOOTKIT_STONED", 0, MBR_SEVERITY_CRITICAL,
-                       "Classic MBR bootkit hooking INT 13h and relocating original boot sector to high memory (0x9FC0)");
-    }
-
-    // 4. HermeticWiper / Ransomware MBR Wiper
-    // Wiper string patterns or destructive zeroing loops
-    static const uint8_t WIPER_LOOP[] = { 0x31, 0xC0, 0x8E, 0xD8, 0xB9, 0x00, 0x02, 0x31, 0xC0, 0xAA };
-    if (mem_search(buffer, MBR_BOOTSTRAP_SIZE, (const uint8_t *)"Repairing filesystem", 20) ||
-        mem_search(buffer, MBR_BOOTSTRAP_SIZE, (const uint8_t *)"Your actionable files are encrypted", 35) ||
-        mem_search(buffer, MBR_BOOTSTRAP_SIZE, (const uint8_t *)"CHKDSK is repairing", 19) ||
-        mem_search(buffer, MBR_BOOTSTRAP_SIZE, WIPER_LOOP, sizeof(WIPER_LOOP))) {
-        add_mbr_threat(result, "HermeticWiper / Ransomware MBR Payload", info->device_path, info->bootstrap_sha256,
-                       "MBR_WIPER_RANSOMWARE", 0, MBR_SEVERITY_CRITICAL,
-                       "Destructive MBR wiper or ransomware screen replacing standard OS bootloader with fake repair screen / wiper loop");
-    }
-
-    // 5. Direct Disk Writing in Bootstrap Heuristic
-    // Clean standard MBRs only execute reads (INT 13h ah=02h/42h), never writes (ah=03h/43h)
-    static const uint8_t INT13_WRITE_STD[] = { 0xB4, 0x03, 0xCD, 0x13 }; // mov ah, 03h; int 13h
-    static const uint8_t INT13_WRITE_EXT[] = { 0xB4, 0x43, 0xCD, 0x13 }; // mov ah, 43h; int 13h
-    if (mem_search(buffer, MBR_BOOTSTRAP_SIZE, INT13_WRITE_STD, sizeof(INT13_WRITE_STD)) ||
-        mem_search(buffer, MBR_BOOTSTRAP_SIZE, INT13_WRITE_EXT, sizeof(INT13_WRITE_EXT))) {
-        if (info->detected_bootloader == BOOTLOADER_UNKNOWN) {
-            add_mbr_threat(result, "Anomalous Direct Disk Write in MBR Code", info->device_path, info->bootstrap_sha256,
-                           "MBR_HEURISTIC_DISK_WRITE", 0, MBR_SEVERITY_HIGH,
-                           "Unrecognized MBR bootstrap code invokes BIOS INT 13h disk write routines (suspicious self-propagating bootkit)");
-        }
-    }
+    // C. Known Bootkit Signatures and bootstrap heuristics (rules_loader: mbr_bootkit_signatures.json)
+    apply_pattern_rules(rules, RULES_MBR_TARGET_BOOTSTRAP, buffer, MBR_BOOTSTRAP_SIZE,
+                        info->detected_bootloader != BOOTLOADER_UNKNOWN,
+                        info->device_path, info->bootstrap_sha256, 0, result);
 
     return BOOTO_OK;
 }
@@ -336,6 +306,10 @@ booto_error_t mbr_audit_gap_buffer(const uint8_t *gap_data, size_t gap_len, uint
 booto_error_t mbr_audit_vbr_buffer(const uint8_t *buffer, size_t len, uint64_t vbr_lba, const char *device_path, mbr_scan_result_t *result) {
     if (!buffer || len < MBR_SECTOR_SIZE || !result) return BOOTO_ERR_INVALID_ARG;
 
+    const rules_mbr_set_t *rules;
+    booto_error_t err = rules_get_mbr(&rules);
+    if (err != BOOTO_OK) return err;
+
     result->sectors_scanned++;
     result->vbr_scanned++;
 
@@ -369,14 +343,9 @@ booto_error_t mbr_audit_vbr_buffer(const uint8_t *buffer, size_t len, uint64_t v
                        "Volume Boot Record BPB contains invalid sector geometry (possible bootkit hook or tamper)");
     }
 
-    // 3. GAPZ / Cidox VBR Bootkit Detection
-    // GAPZ manipulates NTFS/FAT VBR jump offset to point into reserved sector clusters and hook INT 13h
-    static const uint8_t GAPZ_VBR_SIG[] = { 0xEB, 0x58, 0x90, 0x56, 0x57, 0x53, 0x8C, 0xC8 };
-    if (mem_search(buffer, MBR_SECTOR_SIZE, GAPZ_VBR_SIG, sizeof(GAPZ_VBR_SIG))) {
-        add_mbr_threat(result, "GAPZ / Cidox VBR Bootkit", dev_str, vbr_sha256,
-                       "VBR_BOOTKIT_GAPZ", vbr_lba, MBR_SEVERITY_CRITICAL,
-                       "Partition VBR contains GAPZ/Cidox bootloader hook hijacking control flow before Windows kernel initialization");
-    }
+    // 3. VBR bootkit signatures (e.g. GAPZ / Cidox jump into reserved clusters hooking INT 13h)
+    apply_pattern_rules(rules, RULES_MBR_TARGET_VBR, buffer, MBR_SECTOR_SIZE, false,
+                        dev_str, vbr_sha256, vbr_lba, result);
 
     return BOOTO_OK;
 }
