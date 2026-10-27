@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Mount directories are created with `disk_ensure_private_dir()`, which creates them as 0700 and rejects symlinks or foreign-owned directories.
   - The target block device is marked read-only with `BLKROSET` before any mount.
   - ext4/ext3 are never mounted without `noload`, xfs without `norecovery`, or btrfs without `nologreplay`.
+- **Case reporter (`src/case_reporter.c`)**:
+  - JSON string fields are escaped per RFC 8259, and Markdown cells neutralise `|`, backticks and control characters.
+  - `case_id` is restricted to `[A-Za-z0-9_-]{1,50}`, which closes path traversal through the report filename.
 
 ### Fixed
 - `disk_mount_ro()` returns `BOOTO_ERR_MOUNT_FAILED` when no filesystem mounts, instead of `BOOTO_OK`.
@@ -20,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Mock partitions are injected only with `--mock-drives`. Partition names such as `nvme0n1` are no longer mislabelled by substring heuristics.
 - `persistence_lock()` checks the `umount`/`cryptsetup close` results and stays `UNLOCKED` on failure. `persistence_unlock()` closes the mapper if mounting fails and reports real capacity via `statvfs`.
 - The TUI wipes the LUKS passphrase buffer with `explicit_bzero`.
+- Case report write, close and seal failures now propagate as `BOOTO_ERR_IO` instead of returning `BOOTO_OK`.
 
 ---
 
