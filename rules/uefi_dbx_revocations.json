@@ -1,30 +1,39 @@
 {
-  "updated_at": "2026-09-01T00:00:00Z",
-  "source": "UEFI Forum & Microsoft Secure Boot DBX",
   "revocations": [
     {
-      "threat": "BlackLotus UEFI Bootkit",
-      "cve": "CVE-2022-21894",
       "sha256": "0c644d57c79e614066929a008c2a382d5e305e9e03d42c38848d7c4dbfc78f24",
-      "severity": "CRITICAL"
+      "threat": "BlackLotus Revoked Windows Bootloader",
+      "cve": "CVE-2022-21894",
+      "severity": "CRITICAL",
+      "description": "Vulnerable Windows EFI boot manager exploited by BlackLotus UEFI bootkit to bypass Secure Boot"
     },
     {
-      "threat": "BootHole GRUB Vulnerability",
+      "sha256": "80b4d96931bf0d02fd91a61e19d14f1da452e66db2408ca44b83993b36a49f63",
+      "threat": "BlackLotus Batched EFI Payload",
+      "cve": "CVE-2023-24932",
+      "severity": "CRITICAL",
+      "description": "BlackLotus second-stage kernel hijacker payload deployed into ESP"
+    },
+    {
+      "sha256": "cb078e4726b008d51624c96ea208d249f3e498c8793b890916d7a46abf1d4f9b",
+      "threat": "BootHole Vulnerable GRUB2 Binary",
       "cve": "CVE-2020-10713",
-      "sha256": "80b4d96931ff46150cedab401bc1d3e32430209b040523f139414493a30d3730",
-      "severity": "CRITICAL"
+      "severity": "HIGH",
+      "description": "Revoked GRUB2 EFI executable vulnerable to heap-overflow buffer execution in grub.cfg parser"
     },
     {
-      "threat": "ESPecter UEFI Bootkit",
-      "cve": "CVE-2021-39842",
-      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
-      "severity": "CRITICAL"
+      "sha256": "5f8a3562a63200dc8ba79198642738a9d9e4a3b17728f3a9e0123ef89a12c451",
+      "threat": "ESPecter UEFI Bootloader Implant",
+      "cve": "ESPecter",
+      "severity": "CRITICAL",
+      "description": "ESPecter bootkit persistence module hidden in the EFI partition"
     },
     {
-      "threat": "MoonBounce SPI Bootkit",
-      "cve": "CVE-2022-0001",
-      "sha256": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
-      "severity": "CRITICAL"
+      "sha256": "a849201bc93ef4a890123ef9a82bc128912ef349a128901bc3412ef89018f4b2",
+      "threat": "MoonBounce Stage-2 Bootloader",
+      "cve": "MoonBounce",
+      "severity": "CRITICAL",
+      "description": "Stage-2 OS-loader interceptor deploying memory implants from ESP"
     }
   ]
 }

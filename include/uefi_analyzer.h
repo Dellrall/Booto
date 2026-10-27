@@ -26,7 +26,8 @@ typedef enum {
 
 typedef struct {
     char file_path[256];
-    char sha256[65];
+    char sha256[65];              // whole-file SHA-256 (reporting)
+    char authenticode_sha256[65]; // Authenticode PE image hash (DBX matching)
     bool is_pe32_plus;
     uint16_t machine_type;
     uint16_t subsystem;       // 10 = IMAGE_SUBSYSTEM_EFI_APPLICATION
@@ -35,7 +36,8 @@ typedef struct {
     uint32_t cert_table_size; // Security Directory Size
     bool has_authenticode;
     bool is_revoked_dbx;
-    char matched_threat[64];
+    char matched_threat[96];
+    uefi_severity_t matched_severity;
 } pe_efi_info_t;
 
 typedef struct {

@@ -72,6 +72,7 @@ set(BOOT_LIB_SOURCES
     src/case_reporter.c
     src/forensic_scan.c
     src/disk_mount.c
+    src/rules_loader.c
     src/tui/terminal.c
     src/tui/wm.c
     src/tui/pane.c
@@ -114,6 +115,10 @@ add_test(NAME test_uefi_analyzer COMMAND test_uefi_analyzer)
 add_executable(test_mbr_auditor tests/test_mbr_auditor.c)
 target_link_libraries(test_mbr_auditor PRIVATE booto_core)
 add_test(NAME test_mbr_auditor COMMAND test_mbr_auditor)
+
+add_executable(test_rules_loader tests/test_rules_loader.c)
+target_link_libraries(test_rules_loader PRIVATE booto_core)
+add_test(NAME test_rules_loader COMMAND test_rules_loader WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_executable(test_initramfs_auditor tests/test_initramfs_auditor.c)
 target_link_libraries(test_initramfs_auditor PRIVATE booto_core)

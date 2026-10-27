@@ -1,25 +1,109 @@
 {
-  "updated_at": "2026-09-01T00:00:00Z",
   "signatures": [
     {
-      "name": "Diamorphine LKM",
-      "symbols": ["diamorphine_init", "diamorphine_cleanup", "hacked_kill", "module_hidden", "sys_call_table"],
-      "severity": "CRITICAL"
+      "name": "Syscall Table Hooking",
+      "rule_id": "LKM_HOOK_SYS_CALL_TABLE",
+      "severity": "CRITICAL",
+      "description": "Direct reference or modification to the kernel sys_call_table",
+      "symbols": ["sys_call_table"]
     },
     {
-      "name": "Reptile Kernel Rootkit",
-      "symbols": ["reptile_init", "khook_init", "r_hide_proc", "reptile_listen"],
-      "severity": "CRITICAL"
+      "name": "Dynamic Kernel Symbol Resolution",
+      "rule_id": "LKM_KALLSYMS_LOOKUP",
+      "severity": "MEDIUM",
+      "description": "Resolves unexported kernel symbols at runtime (used for syscall hooking)",
+      "symbols": ["kallsyms_lookup_name"]
+    },
+    {
+      "name": "Diamorphine Rootkit",
+      "rule_id": "LKM_DIAMORPHINE_CORE",
+      "severity": "CRITICAL",
+      "description": "Matches Diamorphine rootkit core symbol signatures",
+      "symbols": ["diamorphine"]
+    },
+    {
+      "name": "Kill Syscall Interceptor",
+      "rule_id": "LKM_HOOK_KILL",
+      "severity": "CRITICAL",
+      "description": "Hooks sys_kill to execute root backdoor signals (e.g. signal 64 root escalation)",
+      "symbols": ["hacked_kill"]
+    },
+    {
+      "name": "Directory Entry Hider",
+      "rule_id": "LKM_HOOK_GETDENTS",
+      "severity": "CRITICAL",
+      "description": "Hooks sys_getdents to hide rootkit files and directories from userland",
+      "symbols": ["hacked_getdents"]
+    },
+    {
+      "name": "Directory Entry Hider (64-bit)",
+      "rule_id": "LKM_HOOK_GETDENTS64",
+      "severity": "CRITICAL",
+      "description": "Hooks sys_getdents64 to hide rootkit files and directories from userland",
+      "symbols": ["hacked_getdents64"]
+    },
+    {
+      "name": "LKM Kernel Object Hiding (DKOM)",
+      "rule_id": "LKM_DKOM_HIDE_MODULE",
+      "severity": "CRITICAL",
+      "description": "Unlinks module from the sysfs/lsmod list using Direct Kernel Object Manipulation",
+      "symbols": ["is_invisible"]
+    },
+    {
+      "name": "Process Hiding Mechanism",
+      "rule_id": "LKM_DKOM_HIDE_PROC",
+      "severity": "CRITICAL",
+      "description": "Hides malicious PID structures from /proc directory walks",
+      "symbols": ["hide_proc"]
+    },
+    {
+      "name": "Ftrace Syscall Hijack",
+      "rule_id": "LKM_FTRACE_HOOK_INSTALL",
+      "severity": "CRITICAL",
+      "description": "Uses Linux ftrace subsystem to redirect kernel execution flow",
+      "symbols": ["fh_install_hook"]
+    },
+    {
+      "name": "Ftrace Hook Uninstaller",
+      "rule_id": "LKM_FTRACE_HOOK_REMOVE",
+      "severity": "HIGH",
+      "description": "Ftrace hook removal routine",
+      "symbols": ["fh_remove_hook"]
+    },
+    {
+      "name": "Khook In-Kernel Hooking Engine",
+      "rule_id": "LKM_KHOOK_ENGINE",
+      "severity": "CRITICAL",
+      "description": "Generic kernel-mode inline function hooking framework",
+      "symbols": ["khook_init"]
+    },
+    {
+      "name": "Reptile Rootkit Hook",
+      "rule_id": "LKM_REPTILE_HOOK",
+      "severity": "CRITICAL",
+      "description": "Matches Reptile Linux rootkit network and file hook signatures",
+      "symbols": ["rep_hook"]
     },
     {
       "name": "Suterusu Rootkit",
-      "symbols": ["suterusu_init", "suterusu_read_hook", "suterusu_write_hook"],
-      "severity": "CRITICAL"
+      "rule_id": "LKM_SUTERUSU_SIGNATURE",
+      "severity": "CRITICAL",
+      "description": "Matches Suterusu LKM rootkit framework signatures",
+      "symbols": ["suterusu"]
     },
     {
-      "name": "Azazel Userland Preload",
-      "patterns": ["libazazel.so", "unhide_tcp", "unhide_udp"],
-      "severity": "HIGH"
+      "name": "TCP Network Port Hider",
+      "rule_id": "LKM_NET_PORT_HIDER",
+      "severity": "CRITICAL",
+      "description": "Hooks tcp4_seq_show to hide listening reverse shell ports from netstat/ss",
+      "symbols": ["tcp4_seq_show"]
+    },
+    {
+      "name": "UDP Network Port Hider",
+      "rule_id": "LKM_NET_PORT_HIDER",
+      "severity": "CRITICAL",
+      "description": "Hooks udp4_seq_show to hide UDP listening ports",
+      "symbols": ["udp4_seq_show"]
     }
   ]
 }

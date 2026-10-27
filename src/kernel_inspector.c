@@ -12,6 +12,7 @@
 #include "kernel_inspector.h"
 #include "crypto_utils.h"
 #include "logger.h"
+#include "rules_loader.h"
 
 #include <dirent.h>
 #include <stdio.h>
@@ -28,56 +29,6 @@ const char *kernel_severity_to_string(threat_severity_t severity) {
         default:                return "INFO";
     }
 }
-
-typedef struct {
-    const char *symbol_pattern;
-    const char *rule_id;
-    const char *threat_name;
-    threat_severity_t severity;
-    const char *description;
-} lkm_threat_rule_t;
-
-static const lkm_threat_rule_t G_LKM_RULES[] = {
-    // 1. Syscall Table Manipulation
-    { "sys_call_table",      "LKM_HOOK_SYS_CALL_TABLE", "Syscall Table Hooking",
-      SEVERITY_CRITICAL, "Direct reference or modification to the kernel sys_call_table" },
-    { "kallsyms_lookup_name","LKM_KALLSYMS_LOOKUP",     "Dynamic Kernel Symbol Resolution",
-      SEVERITY_MEDIUM,   "Resolves unexported kernel symbols at runtime (used for syscall hooking)" },
-
-    // 2. Diamorphine & Derivatives
-    { "diamorphine",         "LKM_DIAMORPHINE_CORE",    "Diamorphine Rootkit",
-      SEVERITY_CRITICAL, "Matches Diamorphine rootkit core symbol signatures" },
-    { "hacked_kill",         "LKM_HOOK_KILL",           "Kill Syscall Interceptor",
-      SEVERITY_CRITICAL, "Hooks sys_kill to execute root backdoor signals (e.g. signal 64 root escalation)" },
-    { "hacked_getdents",     "LKM_HOOK_GETDENTS",       "Directory Entry Hider",
-      SEVERITY_CRITICAL, "Hooks sys_getdents to hide rootkit files and directories from userland" },
-    { "hacked_getdents64",   "LKM_HOOK_GETDENTS64",     "Directory Entry Hider (64-bit)",
-      SEVERITY_CRITICAL, "Hooks sys_getdents64 to hide rootkit files and directories from userland" },
-    { "is_invisible",        "LKM_DKOM_HIDE_MODULE",    "LKM Kernel Object Hiding (DKOM)",
-      SEVERITY_CRITICAL, "Unlinks module from the sysfs/lsmod list using Direct Kernel Object Manipulation" },
-    { "hide_proc",           "LKM_DKOM_HIDE_PROC",      "Process Hiding Mechanism",
-      SEVERITY_CRITICAL, "Hides malicious PID structures from /proc directory walks" },
-
-    // 3. Ftrace / Kprobe Hooking (Reptile / Suterusu / Ftrace Hooks)
-    { "fh_install_hook",     "LKM_FTRACE_HOOK_INSTALL", "Ftrace Syscall Hijack",
-      SEVERITY_CRITICAL, "Uses Linux ftrace subsystem to redirect kernel execution flow" },
-    { "fh_remove_hook",      "LKM_FTRACE_HOOK_REMOVE",  "Ftrace Hook Uninstaller",
-      SEVERITY_HIGH,     "Ftrace hook removal routine" },
-    { "khook_init",          "LKM_KHOOK_ENGINE",        "Khook In-Kernel Hooking Engine",
-      SEVERITY_CRITICAL, "Generic kernel-mode inline function hooking framework" },
-    { "rep_hook",            "LKM_REPTILE_HOOK",        "Reptile Rootkit Hook",
-      SEVERITY_CRITICAL, "Matches Reptile Linux rootkit network and file hook signatures" },
-    { "suterusu",            "LKM_SUTERUSU_SIGNATURE",  "Suterusu Rootkit",
-      SEVERITY_CRITICAL, "Matches Suterusu LKM rootkit framework signatures" },
-
-    // 4. Network Packet Interceptors
-    { "tcp4_seq_show",       "LKM_NET_PORT_HIDER",      "TCP Network Port Hider",
-      SEVERITY_CRITICAL, "Hooks tcp4_seq_show to hide listening reverse shell ports from netstat/ss" },
-    { "udp4_seq_show",       "LKM_NET_PORT_HIDER",      "UDP Network Port Hider",
-      SEVERITY_CRITICAL, "Hooks udp4_seq_show to hide UDP listening ports" }
-};
-
-static const size_t G_LKM_RULES_COUNT = sizeof(G_LKM_RULES) / sizeof(G_LKM_RULES[0]);
 
 static void add_threat_finding(kernel_scan_result_t *result,
                                const char *threat_name,
@@ -108,10 +59,14 @@ static void add_threat_finding(kernel_scan_result_t *result,
 booto_error_t kernel_inspect_lkm_file(const char *ko_path, kernel_scan_result_t *result) {
     if (!ko_path || !result) return BOOTO_ERR_INVALID_ARG;
 
+    const rules_lkm_set_t *rules;
+    booto_error_t err = rules_get_lkm(&rules);
+    if (err != BOOTO_OK) return err;
+
     result->modules_scanned++;
 
     elf_binary_info_t elf;
-    booto_error_t err = elf_parse_file(ko_path, &elf);
+    err = elf_parse_file(ko_path, &elf);
     if (err != BOOTO_OK) {
         LOG_WARN("Could not parse ELF binary '%s' (err: %d)", ko_path, err);
         return err;
@@ -121,18 +76,20 @@ booto_error_t kernel_inspect_lkm_file(const char *ko_path, kernel_scan_result_t 
     for (int i = 0; i < elf.symbol_count; i++) {
         const elf_symbol_info_t *sym = &elf.symbols[i];
 
-        for (size_t r = 0; r < G_LKM_RULES_COUNT; r++) {
-            const lkm_threat_rule_t *rule = &G_LKM_RULES[r];
-            if (strstr(sym->name, rule->symbol_pattern) != NULL) {
+        for (int r = 0; r < rules->count; r++) {
+            const rules_lkm_entry_t *rule = &rules->entries[r];
+            for (int s = 0; s < rule->symbol_count; s++) {
+                if (strstr(sym->name, rule->symbols[s]) == NULL) continue;
                 add_threat_finding(result,
-                                   rule->threat_name,
+                                   rule->name,
                                    ko_path,
                                    elf.sha256,
                                    rule->rule_id,
                                    sym->name,
                                    sym->value,
-                                   rule->severity,
+                                   (threat_severity_t)rules_severity_level(rule->severity),
                                    rule->description);
+                break; // one finding per (symbol, rule)
             }
         }
     }
@@ -188,6 +145,11 @@ static void scan_dir_recursive(const char *base_path, kernel_scan_result_t *resu
 
 booto_error_t kernel_inspect_directory(const char *lib_modules_dir, kernel_scan_result_t *result) {
     if (!lib_modules_dir || !result) return BOOTO_ERR_INVALID_ARG;
+
+    // Per-file errors are tolerated during the walk; unusable rules must fail the whole engine.
+    const rules_lkm_set_t *rules;
+    booto_error_t err = rules_get_lkm(&rules);
+    if (err != BOOTO_OK) return err;
 
     LOG_INFO("Scanning kernel modules in directory: %s", lib_modules_dir);
     scan_dir_recursive(lib_modules_dir, result, 0);

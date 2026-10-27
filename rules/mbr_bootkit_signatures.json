@@ -1,40 +1,58 @@
 {
-  "updated_at": "2026-09-03T00:00:00Z",
   "signatures": [
     {
       "name": "Rovnix / Carberp MBR Bootkit",
       "rule_id": "MBR_BOOTKIT_ROVNIX",
-      "pattern_hex": "fa33c08ed08ed88ec0bc007c",
-      "target": "MBR (Sector 0)",
-      "severity": "CRITICAL"
+      "target": "mbr_bootstrap",
+      "severity": "CRITICAL",
+      "unknown_bootloader_only": false,
+      "description": "Matches Rovnix/Carberp MBR bootstrap hook redirecting execution to hidden sectors before partition table",
+      "patterns_hex": ["fa33c08ed08ed88ec0bc007c", "fa31c08ed88ed0bc007cfbcd13"]
     },
     {
       "name": "TDL4 / Sinowal (Mebroot) Bootkit",
       "rule_id": "MBR_BOOTKIT_TDL4_MEBROOT",
-      "pattern_hex": "31c08ed889164c00",
-      "target": "MBR IVT Hook (0x0000:0x004c)",
-      "severity": "CRITICAL"
+      "target": "mbr_bootstrap",
+      "severity": "CRITICAL",
+      "unknown_bootloader_only": false,
+      "description": "Intercepts and rewires INT 13h BIOS disk handler to execute rootkit payload from reserved sectors",
+      "patterns_hex": ["31c08ed889164c00", "8cc88ed8a14c00"]
     },
     {
-      "name": "Stoned / Legacy Bootkit",
+      "name": "Stoned / Legacy MBR Bootkit",
       "rule_id": "MBR_BOOTKIT_STONED",
-      "pattern_hex": "cd137205ea0000c09f",
-      "target": "MBR Sector 0",
-      "severity": "CRITICAL"
+      "target": "mbr_bootstrap",
+      "severity": "CRITICAL",
+      "unknown_bootloader_only": false,
+      "description": "Classic MBR bootkit hooking INT 13h and relocating original boot sector to high memory (0x9FC0)",
+      "patterns_hex": ["596f7572205043206973206e6f772053746f6e656421", "cd137205ea0000c09f"]
+    },
+    {
+      "name": "HermeticWiper / Ransomware MBR Payload",
+      "rule_id": "MBR_WIPER_RANSOMWARE",
+      "target": "mbr_bootstrap",
+      "severity": "CRITICAL",
+      "unknown_bootloader_only": false,
+      "description": "Destructive MBR wiper or ransomware screen replacing standard OS bootloader with fake repair screen / wiper loop",
+      "patterns_hex": ["526570616972696e672066696c6573797374656d", "596f757220616374696f6e61626c652066696c65732061726520656e63727970746564", "43484b44534b20697320726570616972696e67", "31c08ed8b9000231c0aa"]
+    },
+    {
+      "name": "Anomalous Direct Disk Write in MBR Code",
+      "rule_id": "MBR_HEURISTIC_DISK_WRITE",
+      "target": "mbr_bootstrap",
+      "severity": "HIGH",
+      "unknown_bootloader_only": true,
+      "description": "Unrecognized MBR bootstrap code invokes BIOS INT 13h disk write routines (suspicious self-propagating bootkit)",
+      "patterns_hex": ["b403cd13", "b443cd13"]
     },
     {
       "name": "GAPZ / Cidox VBR Bootkit",
       "rule_id": "VBR_BOOTKIT_GAPZ",
-      "pattern_hex": "eb58905657538cc8",
-      "target": "VBR Partition Boot Sector",
-      "severity": "CRITICAL"
-    },
-    {
-      "name": "HermeticWiper / Ransomware MBR Wiper",
-      "rule_id": "MBR_WIPER_RANSOMWARE",
-      "pattern_hex": "31c08ed8b9000231c0aa",
-      "target": "MBR (Sector 0)",
-      "severity": "CRITICAL"
+      "target": "vbr_sector",
+      "severity": "CRITICAL",
+      "unknown_bootloader_only": false,
+      "description": "Partition VBR contains GAPZ/Cidox bootloader hook hijacking control flow before Windows kernel initialization",
+      "patterns_hex": ["eb58905657538cc8"]
     }
   ]
 }

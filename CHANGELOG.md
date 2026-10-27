@@ -14,6 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Writes JSON and Markdown reports.
   - Exits `0` for clean, `1` for threats and `2` for incomplete scans.
 - `--dry-run` prints the planned scan without touching any disk. `-V` now also applies to the TUI.
+- **Runtime rules loader (`src/rules_loader.c`)**:
+  - DBX, LKM and MBR signatures load from `rules/*.json`. The search order is `$BOOTO_RULES_DIR`, `/persistence/rules`, `/usr/share/booto/rules`, then `./rules`.
+  - A bounded JSON reader parses the files.
+  - A present file must match its `.sha256` seal or it is refused (`BOOTO_ERR_CORRUPT_DATA`), which marks the engine `ERROR`.
+  - Absent files fall back to identical built-in tables.
+  - The ISO installs the rules into `/usr/share/booto/rules`.
+- **Authenticode PE image hash (`authenticode_sha256`)** for PE32 and PE32+. UEFI DBX matching now uses it instead of the whole-file SHA-256. Verified against the digest embedded in Debian's signed `shimx64.efi`.
 
 ### Security
 - **Storage layer (`src/disk_mount.c`, `src/persistence_mgr.c`)**:
@@ -30,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `symbol_count` is published only after the symbol array is allocated.
   - The PE header and certificate table bounds are computed in 64-bit, so the 32-bit wrap that let a crafted `e_lfanew` read out of bounds is gone.
 
+- `scripts/update_rules.sh` closes the `EOF_LKM` heredoc, which previously swallowed the rest of the script into the LKM rules file. It now regenerates all three rule files and seals byte-for-byte, and fetches nothing from the network.
 ### Changed
 - **Ext4 engine is stats-only**: it reports superblock inode counts with `cross_view_performed = false`. The fabricated "hidden inode #1849201" mock and its fallback were removed.
 - **Case reports** now carry the scan verdict and each module's real status instead of hardcoded `CLEAN`/`ALERT` labels.

@@ -11,9 +11,11 @@
 
 #include "uefi_analyzer.h"
 #include "crypto_utils.h"
+#include "rules_loader.h"
 #include "logger.h"
 
 #include <dirent.h>
+#include <strings.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -29,41 +31,20 @@ const char *uefi_severity_to_string(uefi_severity_t severity) {
     }
 }
 
-// Database of known revoked EFI bootloaders / bootkits (Secure Boot DBX signatures)
-typedef struct {
-    const char *sha256_hash;
-    const char *threat_name;
-    const char *cve;
-    uefi_severity_t severity;
-    const char *description;
-} dbx_revocation_entry_t;
+static uint32_t rd32(const uint8_t *p) {
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
 
-static const dbx_revocation_entry_t G_DBX_REVOCATIONS[] = {
-    // 1. BlackLotus UEFI Bootkit Revocations
-    { "0c644d57c79e614066929a008c2a382d5e305e9e03d42c38848d7c4dbfc78f24",
-      "BlackLotus Revoked Windows Bootloader", "CVE-2022-21894", UEFI_SEVERITY_CRITICAL,
-      "Vulnerable Windows EFI boot manager exploited by BlackLotus UEFI bootkit to bypass Secure Boot" },
-    { "80b4d96931bf0d02fd91a61e19d14f1da452e66db2408ca44b83993b36a49f63",
-      "BlackLotus Batched EFI Payload", "CVE-2023-24932", UEFI_SEVERITY_CRITICAL,
-      "BlackLotus second-stage kernel hijacker payload deployed into ESP" },
+static bool in_bounds(size_t len, uint64_t off, uint64_t size) {
+    return off <= len && size <= len - off;
+}
 
-    // 2. BootHole GRUB2 Vulnerability Hashes
-    { "cb078e4726b008d51624c96ea208d249f3e498c8793b890916d7a46abf1d4f9b",
-      "BootHole Vulnerable GRUB2 Binary", "CVE-2020-10713", UEFI_SEVERITY_HIGH,
-      "Revoked GRUB2 EFI executable vulnerable to heap-overflow buffer execution in grub.cfg parser" },
+typedef struct { uint32_t ptr; uint32_t size; } raw_section_t;
 
-    // 3. ESPecter UEFI Bootkit
-    { "5f8a3562a63200dc8ba79198642738a9d9e4a3b17728f3a9e0123ef89a12c451",
-      "ESPecter UEFI Bootloader Implant", "ESPecter", UEFI_SEVERITY_CRITICAL,
-      "ESPecter bootkit persistence module hidden in the EFI partition" },
-
-    // 4. MoonBounce / CosmicStrand Firmware-to-ESP Stage
-    { "a849201bc93ef4a890123ef9a82bc128912ef349a128901bc3412ef89018f4b2",
-      "MoonBounce Stage-2 Bootloader", "MoonBounce", UEFI_SEVERITY_CRITICAL,
-      "Stage-2 OS-loader interceptor deploying memory implants from ESP" }
-};
-
-static const size_t G_DBX_REVOCATIONS_COUNT = sizeof(G_DBX_REVOCATIONS) / sizeof(G_DBX_REVOCATIONS[0]);
+static int cmp_section(const void *a, const void *b) {
+    uint32_t x = ((const raw_section_t *)a)->ptr, y = ((const raw_section_t *)b)->ptr;
+    return (x > y) - (x < y);
+}
 
 booto_error_t uefi_parse_pe_buffer(const uint8_t *buf, size_t len, pe_efi_info_t *info) {
     if (!buf || !info) return BOOTO_ERR_INVALID_ARG;
@@ -72,70 +53,118 @@ booto_error_t uefi_parse_pe_buffer(const uint8_t *buf, size_t len, pe_efi_info_t
     memset(info, 0, sizeof(*info));
     sha256_buffer_hex(buf, len, info->sha256);
 
-    // 1. Validate DOS Header ("MZ" = 0x5A4D)
-    if (buf[0] != 'M' || buf[1] != 'Z') {
-        return BOOTO_ERR_CORRUPT_DATA;
-    }
+    // 1. Validate DOS Header ("MZ")
+    if (buf[0] != 'M' || buf[1] != 'Z') return BOOTO_ERR_CORRUPT_DATA;
 
-    uint32_t pe_offset = (uint32_t)buf[0x3C] | ((uint32_t)buf[0x3D] << 8) |
-                         ((uint32_t)buf[0x3E] << 16) | ((uint32_t)buf[0x3F] << 24);
-
-    if ((size_t)pe_offset + 0x100 > len) {
+    uint32_t pe_offset = rd32(buf + 0x3C);
+    if (!in_bounds(len, pe_offset, 24)) {
         LOG_ERROR("PE header offset out of bounds: 0x%x", pe_offset);
         return BOOTO_ERR_CORRUPT_DATA;
     }
 
-    // 2. Validate PE Signature ("PE\0\0" = 0x00004550)
+    // 2. Validate PE Signature ("PE\0\0")
     if (buf[pe_offset] != 'P' || buf[pe_offset + 1] != 'E' ||
         buf[pe_offset + 2] != 0 || buf[pe_offset + 3] != 0) {
         return BOOTO_ERR_CORRUPT_DATA;
     }
 
-    // 3. COFF File Header (20 bytes after PE signature)
-    size_t coff_offset = pe_offset + 4;
-    info->machine_type = (uint16_t)(buf[coff_offset] | (buf[coff_offset + 1] << 8));
-    uint16_t opt_hdr_size = (uint16_t)(buf[coff_offset + 16] | (buf[coff_offset + 17] << 8));
+    // 3. COFF File Header
+    size_t coff = (size_t)pe_offset + 4;
+    info->machine_type = (uint16_t)(buf[coff] | (buf[coff + 1] << 8));
+    uint16_t num_sections = (uint16_t)(buf[coff + 2] | (buf[coff + 3] << 8));
+    uint16_t opt_hdr_size = (uint16_t)(buf[coff + 16] | (buf[coff + 17] << 8));
+    size_t opt = coff + 20;
+    if (!in_bounds(len, opt, opt_hdr_size)) return BOOTO_ERR_CORRUPT_DATA;
 
-    if (opt_hdr_size == 0 || coff_offset + 20 + opt_hdr_size > len) {
+    // 4. Optional Header
+    if (opt_hdr_size < 2) return BOOTO_ERR_CORRUPT_DATA;
+    uint16_t opt_magic = (uint16_t)(buf[opt] | (buf[opt + 1] << 8));
+    if (opt_magic != 0x10b && opt_magic != 0x20b) return BOOTO_ERR_CORRUPT_DATA;
+    info->is_pe32_plus = (opt_magic == 0x20b);
+    size_t num_rva_off = info->is_pe32_plus ? 108 : 92;
+    size_t dirs_off = info->is_pe32_plus ? 112 : 96;
+    if (opt_hdr_size < dirs_off) return BOOTO_ERR_CORRUPT_DATA;
+
+    info->entry_point = rd32(buf + opt + 16);
+    info->subsystem = (uint16_t)(buf[opt + 68] | (buf[opt + 69] << 8));
+    uint32_t size_of_headers = rd32(buf + opt + 60);
+    uint32_t num_rva = rd32(buf + opt + num_rva_off);
+    size_t checksum_off = opt + 64;
+    size_t cert_dir_off = opt + dirs_off + 4 * 8;
+    bool has_cert_dir = num_rva > 4 && cert_dir_off + 8 <= opt + opt_hdr_size;
+
+    if (has_cert_dir) {
+        info->cert_table_rva = rd32(buf + cert_dir_off);  // file offset, not an RVA
+        info->cert_table_size = rd32(buf + cert_dir_off + 4);
+        info->has_authenticode = info->cert_table_size > 0 && info->cert_table_rva > 0 &&
+                                 in_bounds(len, info->cert_table_rva, info->cert_table_size);
+    }
+
+    // 5. Authenticode image hash (Microsoft PE/Authenticode spec)
+    if (size_of_headers > len || size_of_headers < (has_cert_dir ? cert_dir_off + 8 : checksum_off + 4)) {
         return BOOTO_ERR_CORRUPT_DATA;
     }
-
-    // 4. Optional Header (PE32+ / 64-bit check)
-    size_t opt_offset = coff_offset + 20;
-    uint16_t opt_magic = (uint16_t)(buf[opt_offset] | (buf[opt_offset + 1] << 8));
-    info->is_pe32_plus = (opt_magic == 0x20b); // 0x20b = PE32+ (64-bit)
-
-    if (info->is_pe32_plus) {
-        // PE32+ EntryPoint offset is at opt_offset + 16
-        info->entry_point = (uint64_t)(buf[opt_offset + 16] | (buf[opt_offset + 17] << 8) |
-                                      (buf[opt_offset + 18] << 16) | (buf[opt_offset + 19] << 24));
-
-        // Subsystem offset is at opt_offset + 68
-        info->subsystem = (uint16_t)(buf[opt_offset + 68] | (buf[opt_offset + 69] << 8));
-
-        // NumberOfRvaAndSizes is at opt_offset + 108
-        uint32_t num_rva = (uint32_t)buf[opt_offset + 108] | ((uint32_t)buf[opt_offset + 109] << 8) |
-                           ((uint32_t)buf[opt_offset + 110] << 16) | ((uint32_t)buf[opt_offset + 111] << 24);
-
-        // Security Directory is Directory #4 (Index 4 * 8 bytes = offset 144)
-        if (num_rva > 4 && opt_offset + 112 + (4 * 8) + 8 <= len) {
-            size_t sec_dir_offset = opt_offset + 112 + (4 * 8);
-            info->cert_table_rva = (uint32_t)buf[sec_dir_offset] | ((uint32_t)buf[sec_dir_offset + 1] << 8) |
-                                   ((uint32_t)buf[sec_dir_offset + 2] << 16) | ((uint32_t)buf[sec_dir_offset + 3] << 24);
-            info->cert_table_size = (uint32_t)buf[sec_dir_offset + 4] | ((uint32_t)buf[sec_dir_offset + 5] << 8) |
-                                    ((uint32_t)buf[sec_dir_offset + 6] << 16) | ((uint32_t)buf[sec_dir_offset + 7] << 24);
-
-            if (info->cert_table_size > 0 && info->cert_table_rva > 0 && (uint64_t)info->cert_table_rva + info->cert_table_size <= len) {
-                info->has_authenticode = true;
-            }
-        }
+    sha256_ctx_t ctx;
+    sha256_init(&ctx);
+    sha256_update(&ctx, buf, checksum_off);
+    if (has_cert_dir) {
+        sha256_update(&ctx, buf + checksum_off + 4, cert_dir_off - (checksum_off + 4));
+        sha256_update(&ctx, buf + cert_dir_off + 8, size_of_headers - (cert_dir_off + 8));
+    } else {
+        sha256_update(&ctx, buf + checksum_off + 4, size_of_headers - (checksum_off + 4));
     }
 
-    // 5. Compare with Secure Boot DBX Revocations
-    for (size_t i = 0; i < G_DBX_REVOCATIONS_COUNT; i++) {
-        if (strcasecmp(info->sha256, G_DBX_REVOCATIONS[i].sha256_hash) == 0) {
+    size_t sect_tbl = opt + opt_hdr_size;
+    if (!in_bounds(len, sect_tbl, (uint64_t)num_sections * 40)) return BOOTO_ERR_CORRUPT_DATA;
+    raw_section_t *secs = NULL;
+    size_t n = 0;
+    if (num_sections > 0) {
+        secs = calloc(num_sections, sizeof(*secs));
+        if (!secs) return BOOTO_ERR_OUT_OF_MEMORY;
+    }
+    for (size_t i = 0; i < num_sections; i++) {
+        const uint8_t *e = buf + sect_tbl + i * 40;
+        uint32_t size = rd32(e + 16), ptr = rd32(e + 20);
+        if (size == 0) continue;
+        if (!in_bounds(len, ptr, size)) {
+            free(secs);
+            return BOOTO_ERR_CORRUPT_DATA;
+        }
+        secs[n].ptr = ptr;
+        secs[n].size = size;
+        n++;
+    }
+    if (n > 1) qsort(secs, n, sizeof(*secs), cmp_section);
+    uint64_t sum_of_bytes = size_of_headers;
+    for (size_t i = 0; i < n; i++) {
+        sha256_update(&ctx, buf + secs[i].ptr, secs[i].size);
+        sum_of_bytes += secs[i].size;
+    }
+    free(secs);
+
+    // Trailing data, excluding the certificate table
+    if (sum_of_bytes < len) {
+        uint64_t extra = len - sum_of_bytes;
+        if (info->has_authenticode) {
+            extra = info->cert_table_size > extra ? 0 : extra - info->cert_table_size;
+        }
+        sha256_update(&ctx, buf + sum_of_bytes, (size_t)extra);
+    }
+    uint8_t digest[32];
+    sha256_final(&ctx, digest);
+    for (size_t i = 0; i < 32; i++) {
+        snprintf(info->authenticode_sha256 + i * 2, 3, "%02x", digest[i]);
+    }
+
+    // 6. Compare with Secure Boot DBX revocations
+    const rules_dbx_set_t *dbx = NULL;
+    booto_error_t err = rules_get_dbx(&dbx);
+    if (err != BOOTO_OK) return err;
+    for (int i = 0; i < dbx->count; i++) {
+        if (strcasecmp(info->authenticode_sha256, dbx->entries[i].sha256) == 0) {
             info->is_revoked_dbx = true;
-            snprintf(info->matched_threat, sizeof(info->matched_threat), "%s", G_DBX_REVOCATIONS[i].threat_name);
+            snprintf(info->matched_threat, sizeof(info->matched_threat), "%s", dbx->entries[i].threat);
+            info->matched_severity = (uefi_severity_t)rules_severity_level(dbx->entries[i].severity);
             break;
         }
     }
@@ -219,7 +248,7 @@ booto_error_t uefi_inspect_efi_file(const char *efi_path, uefi_scan_result_t *re
                         efi_path,
                         pe.sha256,
                         "UEFI_DBX_REVOCATION_MATCH",
-                        UEFI_SEVERITY_CRITICAL,
+                        pe.matched_severity,
                         "EFI executable matches a known revoked bootkit or vulnerable loader in the Secure Boot DBX");
     }
 

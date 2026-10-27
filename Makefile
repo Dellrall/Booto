@@ -23,6 +23,7 @@ SOURCES = $(SRCDIR)/logger.c \
           $(SRCDIR)/case_reporter.c \
           $(SRCDIR)/forensic_scan.c \
           $(SRCDIR)/disk_mount.c \
+          $(SRCDIR)/rules_loader.c \
           $(SRCDIR)/tui/terminal.c \
           $(SRCDIR)/tui/wm.c \
           $(SRCDIR)/tui/pane.c \
