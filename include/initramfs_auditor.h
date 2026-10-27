@@ -26,6 +26,8 @@ typedef struct {
 } initramfs_finding_t;
 
 typedef struct {
+    int segments_parsed;   /**< newc archives parsed (early microcode + main, etc.) */
+    char compression[16];  /**< last decompressor used ("gzip", "zstd", ...) or "none" */
     int files_extracted;
     int scripts_audited;
     int threats_detected;
@@ -33,11 +35,13 @@ typedef struct {
 } initramfs_scan_result_t;
 
 /**
- * @brief Parse and audit an in-memory CPIO initramfs archive.
+ * @brief Parse and audit an in-memory initramfs: concatenated newc CPIO archives, optionally followed by a
+ *        gzip/zstd/xz/lzma/lz4/bzip2-compressed archive (decompressed via the external tool, 1 GiB cap).
  * @param buf Pointer to archive buffer.
  * @param len Buffer length in bytes.
  * @param result Output structure to record findings.
- * @return BOOTO_OK on success, negative error code on failure.
+ * @return BOOTO_OK on success, BOOTO_ERR_NOT_FOUND if a needed decompressor is missing,
+ *         BOOTO_ERR_CORRUPT_DATA on malformed/unknown data, other negative codes on failure.
  */
 booto_error_t initramfs_audit_buffer(const uint8_t *buf, size_t len, initramfs_scan_result_t *result);
 

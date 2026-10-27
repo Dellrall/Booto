@@ -106,6 +106,17 @@ booto_error_t disk_luks_close(const char *mapper_name);
 booto_error_t disk_exec_argv(const char *const argv[], const char *stdin_data, size_t stdin_len, int *exit_status);
 
 /**
+ * @brief Run argv[0] via fork+execvp (no shell), feeding stdin_data (may be NULL) to its stdin while
+ *        concurrently capturing its stdout (poll-driven, no pipe deadlock). Child stderr goes to /dev/null.
+ * @param out Receives a malloc'd buffer with the child's stdout (caller frees); NULL on error.
+ * @param max_out Output cap; exceeding it kills the child (decompression-bomb guard).
+ * @return BOOTO_OK on exit 0, BOOTO_ERR_NOT_FOUND if exec failed (exit 127), BOOTO_ERR_CORRUPT_DATA on
+ *         non-zero exit, signal death or output above max_out, BOOTO_ERR_IO/OUT_OF_MEMORY/GENERIC otherwise.
+ */
+booto_error_t disk_exec_capture(const char *const argv[], const uint8_t *stdin_data, size_t stdin_len,
+                                uint8_t **out, size_t *out_len, size_t max_out);
+
+/**
  * @brief Create directory with mode 0700 if missing; if it exists it must be a real directory
  *        (not a symlink) owned by geteuid() without group/other write bits.
  * @return BOOTO_OK, BOOTO_ERR_PERMISSION_DENIED if unsafe, BOOTO_ERR_IO on other failure.

@@ -16,6 +16,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/fs.h>
+#include <poll.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -88,6 +89,139 @@ booto_error_t disk_exec_argv(const char *const argv[], const char *stdin_data, s
     if (code == 0) return BOOTO_OK;
     if (code == 127) return BOOTO_ERR_NOT_FOUND;
     return BOOTO_ERR_GENERIC;
+}
+
+booto_error_t disk_exec_capture(const char *const argv[], const uint8_t *stdin_data, size_t stdin_len,
+                                uint8_t **out, size_t *out_len, size_t max_out) {
+    if (out) *out = NULL;
+    if (out_len) *out_len = 0;
+    if (!argv || !argv[0] || !out || !out_len || (!stdin_data && stdin_len > 0)) return BOOTO_ERR_INVALID_ARG;
+
+    int in_pfd[2], out_pfd[2];
+    if (pipe(in_pfd) != 0) return BOOTO_ERR_IO;
+    if (pipe(out_pfd) != 0) {
+        close(in_pfd[0]); close(in_pfd[1]);
+        return BOOTO_ERR_IO;
+    }
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(in_pfd[0]); close(in_pfd[1]); close(out_pfd[0]); close(out_pfd[1]);
+        return BOOTO_ERR_GENERIC;
+    }
+    if (pid == 0) {
+        if (dup2(in_pfd[0], STDIN_FILENO) < 0 || dup2(out_pfd[1], STDOUT_FILENO) < 0) _exit(126);
+        close(in_pfd[0]); close(in_pfd[1]); close(out_pfd[0]); close(out_pfd[1]);
+        int devnull = open("/dev/null", O_WRONLY);
+        if (devnull >= 0) {
+            dup2(devnull, STDERR_FILENO);
+            if (devnull > STDERR_FILENO) close(devnull);
+        }
+        execvp(argv[0], (char *const *)argv);
+        _exit(127);
+    }
+
+    close(in_pfd[0]);
+    close(out_pfd[1]);
+    int wfd = in_pfd[1];
+    int rfd = out_pfd[0];
+
+    /* Ignore SIGPIPE so an early-exiting child only yields EPIPE here. */
+    struct sigaction ign, old;
+    memset(&ign, 0, sizeof(ign));
+    ign.sa_handler = SIG_IGN;
+    sigemptyset(&ign.sa_mask);
+    sigaction(SIGPIPE, &ign, &old);
+
+    if (stdin_len == 0) {
+        close(wfd);
+        wfd = -1;
+    } else {
+        /* Non-blocking so a partial pipe never stalls us while the child waits for stdout to drain. */
+        int fl = fcntl(wfd, F_GETFL);
+        if (fl >= 0) fcntl(wfd, F_SETFL, fl | O_NONBLOCK);
+    }
+
+    size_t limit = max_out < SIZE_MAX ? max_out + 1 : SIZE_MAX;
+    uint8_t *buf = NULL;
+    size_t cap = 0, used = 0, woff = 0;
+    booto_error_t err = BOOTO_OK;
+
+    while (rfd >= 0) {
+        struct pollfd pfds[2];
+        nfds_t n = 0;
+        pfds[n].fd = rfd; pfds[n].events = POLLIN; pfds[n].revents = 0; n++;
+        if (wfd >= 0) { pfds[n].fd = wfd; pfds[n].events = POLLOUT; pfds[n].revents = 0; n++; }
+
+        if (poll(pfds, n, -1) < 0) {
+            if (errno == EINTR) continue;
+            err = BOOTO_ERR_IO;
+            break;
+        }
+
+        if (wfd >= 0 && pfds[1].revents) {
+            ssize_t w = (pfds[1].revents & POLLOUT) ? write(wfd, stdin_data + woff, stdin_len - woff) : -1;
+            if (w > 0) woff += (size_t)w;
+            /* Child stopped reading (EPIPE/POLLERR): stop feeding; its exit status decides the outcome. */
+            if (woff == stdin_len || (w < 0 && errno != EINTR && errno != EAGAIN) || !(pfds[1].revents & POLLOUT)) {
+                close(wfd);
+                wfd = -1;
+            }
+        }
+
+        if (pfds[0].revents) {
+            if (used == cap) {
+                size_t ncap = cap == 0 ? 65536 : (cap > limit / 2 ? limit : cap * 2);
+                if (ncap > limit) ncap = limit;
+                uint8_t *nb = (uint8_t *)realloc(buf, ncap);
+                if (!nb) {
+                    err = BOOTO_ERR_OUT_OF_MEMORY;
+                    break;
+                }
+                buf = nb;
+                cap = ncap;
+            }
+            ssize_t r = read(rfd, buf + used, cap - used);
+            if (r > 0) {
+                used += (size_t)r;
+                if (used > max_out) {
+                    LOG_ERROR("'%s' output exceeds %zu byte limit; aborting (decompression bomb guard)", argv[0], max_out);
+                    err = BOOTO_ERR_CORRUPT_DATA;
+                    break;
+                }
+            } else if (r == 0) {
+                close(rfd);
+                rfd = -1;
+            } else if (errno != EINTR && errno != EAGAIN) {
+                err = BOOTO_ERR_IO;
+                break;
+            }
+        }
+    }
+
+    if (wfd >= 0) close(wfd);
+    if (rfd >= 0) close(rfd);
+    if (err != BOOTO_OK) kill(pid, SIGKILL);
+
+    int status = 0;
+    pid_t wr;
+    do {
+        wr = waitpid(pid, &status, 0);
+    } while (wr < 0 && errno == EINTR);
+    sigaction(SIGPIPE, &old, NULL);
+
+    if (err == BOOTO_OK) {
+        if (wr < 0) err = BOOTO_ERR_GENERIC;
+        else if (WIFEXITED(status) && WEXITSTATUS(status) == 127) err = BOOTO_ERR_NOT_FOUND;
+        else if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) err = BOOTO_ERR_CORRUPT_DATA;
+    }
+    if (err != BOOTO_OK) {
+        free(buf);
+        return err;
+    }
+    *out = buf;
+    *out_len = used;
+    return BOOTO_OK;
 }
 
 booto_error_t disk_ensure_private_dir(const char *path) {
