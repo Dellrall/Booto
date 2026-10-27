@@ -79,7 +79,9 @@ set(BOOT_LIB_SOURCES
     src/tui/tui_app.c
 )
 
+find_package(Threads REQUIRED)
 add_library(booto_core STATIC ${BOOT_LIB_SOURCES})
+target_link_libraries(booto_core PUBLIC Threads::Threads)
 
 # Executable binary
 add_executable(booto src/main.c)

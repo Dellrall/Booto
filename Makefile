@@ -1,6 +1,6 @@
 CC ?= gcc
-CFLAGS ?= -std=c11 -Wall -Wextra -Wpedantic -Werror -Wshadow -Wformat=2 -Wconversion -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE
-LDFLAGS ?= -pie -Wl,-z,relro,-z,now
+CFLAGS ?= -std=c11 -Wall -Wextra -Wpedantic -Werror -Wshadow -Wformat=2 -Wconversion -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE -pthread
+LDFLAGS ?= -pie -Wl,-z,relro,-z,now -pthread
 
 VERSION ?= $(shell git describe --tags --always 2>/dev/null | sed 's/^v//' || echo "1.0.4")
 INCLUDES = -Iinclude
@@ -75,8 +75,8 @@ test: version $(TEST_BINS)
 
 asan: clean
 	@echo "--- Compiling with AddressSanitizer & UndefinedBehaviorSanitizer ---"
-	$(MAKE) CFLAGS="-std=c11 -Wall -Wextra -Wpedantic -Werror -g -fsanitize=address,undefined -fno-omit-frame-pointer -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE" \
-	        LDFLAGS="-fsanitize=address,undefined" test
+	$(MAKE) CFLAGS="-std=c11 -Wall -Wextra -Wpedantic -Werror -g -fsanitize=address,undefined -fno-omit-frame-pointer -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE -pthread" \
+	        LDFLAGS="-fsanitize=address,undefined -pthread" test
 
 fuzz: $(BUILDDIR)/test_fuzz
 	@echo "--- Running Defensive Fuzzing Suite ---"
@@ -84,8 +84,8 @@ fuzz: $(BUILDDIR)/test_fuzz
 
 coverage: clean
 	@echo "--- Compiling with gcov Code Coverage Profiling ---"
-	$(MAKE) CFLAGS="-std=c11 -Wall -Wextra -Wpedantic -g -O0 --coverage -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE" \
-	        LDFLAGS="--coverage" test
+	$(MAKE) CFLAGS="-std=c11 -Wall -Wextra -Wpedantic -g -O0 --coverage -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE -pthread" \
+	        LDFLAGS="--coverage -pthread" test
 	@./scripts/check_coverage.sh
 
 run: all

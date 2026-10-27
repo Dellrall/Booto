@@ -10,6 +10,9 @@
 #include "logger.h"
 #include "forensic_scan.h"
 
+#include <pthread.h>
+#include <stdatomic.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -67,7 +70,8 @@ typedef struct {
     int module_count;
     int module_cursor;
 
-    // Log state
+    // Log state (log_lock guards log_ring/log_head/log_count/log_scroll; appended from any thread)
+    pthread_mutex_t log_lock;
     log_entry_t log_ring[MAX_LOG_LINES];
     int log_head;
     int log_count;
@@ -76,6 +80,17 @@ typedef struct {
     // Threat state
     threat_detail_t threat;
     forensic_scan_report_t *last_scan;  // heap-allocated on first scan, freed at exit
+
+    // Background scan (F5). Worker owns pending_scan/pending_err/scan_target/scan_enabled until scan_done;
+    // the main thread reads them only after pthread_join.
+    pthread_t scan_thread;
+    atomic_bool scan_active;            // set by main before spawn, cleared by main after join
+    atomic_bool scan_done;              // set by worker when forensic_scan_run returns
+    _Atomic int scan_step;              // 0..SCAN_MOD_COUNT, from the progress callback
+    forensic_scan_report_t *pending_scan;
+    booto_error_t pending_err;
+    char scan_target[128];
+    bool scan_enabled[SCAN_MOD_COUNT];
 
     // Persistence state
     bool luks_unlocked;
