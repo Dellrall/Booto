@@ -10,7 +10,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 if [ -z "${1:-}" ]; then
     # Auto-detect latest ISO in dist/ or current directory
-    LATEST_ISO=$(ls -t "${REPO_ROOT}/dist/"*.iso 2>/dev/null | head -n 1 || true)
+    LATEST_ISO=$(ls -t "${REPO_ROOT}/dist/"*.iso 2>/dev/null | head -n 1 || true)  # names under dist/ have no newlines
     if [ -n "${LATEST_ISO}" ]; then
         ISO_PATH="${LATEST_ISO}"
     else
@@ -53,24 +53,24 @@ if [ ! -f "${DISK_IMG}" ]; then
 fi
 
 # 4. Check for KVM acceleration
-KVM_FLAG=""
+KVM_FLAG=()
 if [ -w /dev/kvm ]; then
     echo "[+] Hardware virtualization (KVM) enabled."
-    KVM_FLAG="-enable-kvm"
+    KVM_FLAG=(-enable-kvm)
 else
     echo "[*] KVM not accessible, running in standard emulation mode."
 fi
 
 # 5. Locate UEFI firmware (OVMF)
-OVMF_FLAG=""
+OVMF_FLAG=()
 if [ -f /usr/share/edk2/ovmf/OVMF_CODE.fd ]; then
-    OVMF_FLAG="-drive if=pflash,format=raw,readonly=on,file=/usr/share/edk2/ovmf/OVMF_CODE.fd"
+    OVMF_FLAG=(-drive "if=pflash,format=raw,readonly=on,file=/usr/share/edk2/ovmf/OVMF_CODE.fd")
     echo "[+] UEFI (Fedora edk2-ovmf) firmware detected."
 elif [ -f /usr/share/OVMF/OVMF_CODE.fd ]; then
-    OVMF_FLAG="-drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE.fd"
+    OVMF_FLAG=(-drive "if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE.fd")
     echo "[+] UEFI (OVMF) firmware detected."
 elif [ -f /usr/share/ovmf/OVMF.fd ]; then
-    OVMF_FLAG="-drive if=pflash,format=raw,readonly=on,file=/usr/share/ovmf/OVMF.fd"
+    OVMF_FLAG=(-drive "if=pflash,format=raw,readonly=on,file=/usr/share/ovmf/OVMF.fd")
     echo "[+] UEFI (OVMF) firmware detected."
 fi
 
@@ -80,11 +80,11 @@ echo "[+] Target Drive:  ${DISK_IMG} (/dev/sda)"
 echo "======================================================================"
 
 exec qemu-system-x86_64 \
-    ${KVM_FLAG} \
+    "${KVM_FLAG[@]}" \
     -m 2048 \
     -smp 2 \
     -cdrom "${ISO_PATH}" \
     -boot d \
     -drive file="${DISK_IMG}",format=raw,index=1,media=disk \
-    ${OVMF_FLAG} \
+    "${OVMF_FLAG[@]}" \
     -vga std

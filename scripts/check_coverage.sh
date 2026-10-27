@@ -20,9 +20,8 @@ for t in build/test_*; do
     fi
 done
 
-# 2. Run gcov on all source object files
-mkdir -p build/coverage
-cd build
+# 2. Run gcov against the objects `make coverage` writes to build/<name>.o (+ .gcno/.gcda)
+command -v gcov >/dev/null || { echo "[-] Error: gcov not found." >&2; exit 1; }
 
 total_lines=0
 exec_lines=0
@@ -31,19 +30,33 @@ echo "--------------------------------------------------------"
 printf "%-30s | %-12s | %-10s\n" "Source File" "Lines Exec" "Coverage %"
 echo "--------------------------------------------------------"
 
-for f in ../src/*.c; do
+for f in src/*.c; do
     fname=$(basename "$f")
-    obj_name="${fname%.c}.o"
-    
-    if [ -f "${fname%.c}.gcno" ] || [ -f "${obj_name%.o}.gcno" ]; then
-        gcov_out=$(gcov -o . "$f" 2>/dev/null || true)
-        
-        lines_pct=$(echo "$gcov_out" | grep "Lines executed:" | head -n 1 | awk '{print $2}' | tr -d '%')
-        if [ -n "$lines_pct" ]; then
-            printf "%-30s | %-12s | %6s%%\n" "$fname" "Covered" "$lines_pct"
-        fi
+    gcno="build/${fname%.c}.gcno"
+    if [ ! -f "${gcno}" ]; then
+        printf "%-30s | %-12s | %s\n" "$fname" "-" "no ${gcno} (run 'make coverage')"
+        continue
     fi
+    # First "Lines executed:NN.NN% of M" belongs to the source file itself.
+    summary=$(gcov -n -o build "$f" 2>/dev/null | grep -m1 "Lines executed:" || true)
+    if [ -z "${summary}" ]; then
+        printf "%-30s | %-12s | %s\n" "$fname" "-" "no data"
+        continue
+    fi
+    pct=$(echo "${summary}" | sed -E 's/.*executed:([0-9.]+)% of ([0-9]+).*/\1/')
+    lines=$(echo "${summary}" | sed -E 's/.*executed:([0-9.]+)% of ([0-9]+).*/\2/')
+    hit=$(awk -v p="${pct}" -v n="${lines}" 'BEGIN { printf "%d", (p * n / 100) + 0.5 }')
+    total_lines=$((total_lines + lines))
+    exec_lines=$((exec_lines + hit))
+    printf "%-30s | %-12s | %6s%%\n" "$fname" "${hit}/${lines}" "${pct}"
 done
 
 echo "--------------------------------------------------------"
+if [ "${total_lines}" -gt 0 ]; then
+    printf "%-30s | %-12s | %6s%%\n" "TOTAL" "${exec_lines}/${total_lines}" \
+        "$(awk -v e="${exec_lines}" -v t="${total_lines}" 'BEGIN { printf "%.2f", 100 * e / t }')"
+else
+    echo "[-] Error: no coverage data found under build/ (run 'make coverage')." >&2
+    exit 1
+fi
 echo "[+] Coverage analysis complete."

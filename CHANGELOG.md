@@ -65,6 +65,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Closing a zoomed pane no longer leaves a dangling `zoomed_leaf`. Splits stop at 32 panes or the minimum pane size.
 - **Logger**: genuinely thread-safe (mutex). It no longer writes to stderr while the TUI callback is registered, so log lines stopped painting over the UI. Re-initialising closes the previous log file.
 - **F5 scans run on a worker thread**: the UI keeps rendering with a `Scanning [k/6]` spinner. Export, mount and LUKS actions are refused, and quitting waits for the worker. `Alt+M` swaps with the next pane instead of always "right".
+- **Build and CI**:
+  - The version comes only from git tags, for both Make and CMake (fallback `0.0.0-unknown`); the hardcoded CMake `1.1.2` is gone.
+  - GitHub Actions are pinned to commit SHAs, and `ci.yml` has read-only `contents` permission.
+  - CI runs on pushes to `main` and on pull requests (no duplicate feature-branch push runs), with `cancel-in-progress` concurrency.
+  - ISO timestamps derive from `SOURCE_DATE_EPOCH` (the last commit time).
+- **Scripts**:
+  - `setup_usb.sh` refuses disks backing `/`, `/boot` or `/boot/efi`, partitions and non-disk devices, and non-removable disks unless `--force-nonremovable` is passed. It requires typing the exact device path to confirm and fails on unmount errors.
+  - `gen_mock_disk.sh` and `check_coverage.sh` fail loudly; `check_coverage.sh` also prints an aggregate total.
+
+### Removed
+- `BENCHMARK_RESULTS.md` and `scripts/run_benchmarks.sh`: the script wrote hardcoded numbers without running Booto.
+- README claims not backed by code: the benchmark figures, "signed" reports, PAM scanning, the ncurses TUI and the coverage badge.
 
 ---
 

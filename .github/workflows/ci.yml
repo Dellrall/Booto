@@ -2,7 +2,7 @@ name: Booto CI - Multi-Compiler Matrix, Sanitizers & Coverage
 
 on:
   push:
-    branches: [ main, master, 'feat/**', 'stage/**', 'fix/**' ]
+    branches: [ main, master ]
     paths-ignore:
       - '**.md'
       - 'docs/**'
@@ -18,6 +18,13 @@ on:
       - 'LICENSE'
       - '.gitignore'
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-matrix:
     name: Build & Test (${{ matrix.compiler }})
@@ -28,7 +35,7 @@ jobs:
         compiler: [ gcc, clang ]
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
 
@@ -56,7 +63,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
 
@@ -76,7 +83,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
 
@@ -93,7 +100,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install Analysis Tools
         run: |
@@ -121,7 +128,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install Valgrind
         run: |

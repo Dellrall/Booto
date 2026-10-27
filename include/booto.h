@@ -36,9 +36,9 @@ typedef enum {
  * @brief Runtime mode of operation.
  */
 typedef enum {
-    BOOTO_MODE_TUI,      /**< Interactive ncurses dynamic window manager (Default) */
+    BOOTO_MODE_TUI,      /**< Interactive raw termios/ANSI dynamic window manager (Default) */
     BOOTO_MODE_CLI,      /**< Headless/scripted CLI scanner */
-    BOOTO_MODE_DRY_RUN   /**< Mock execution mode for unit tests & dry runs */
+    BOOTO_MODE_DRY_RUN   /**< Print the planned scan and exit without touching any disk */
 } booto_mode_t;
 
 /**

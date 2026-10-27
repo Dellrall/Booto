@@ -8,13 +8,29 @@ set -euo pipefail
 OUTPUT_IMG="${1:-/tmp/booto_mock_disk.img}"
 IMG_SIZE_MB=64
 
+for tool in python3 dd cpio find; do
+    command -v "${tool}" >/dev/null || { echo "[-] Error: required tool '${tool}' not found in PATH." >&2; exit 1; }
+done
+
+STAGING_DIR="/tmp/booto_mock_staging_$$"
+INITRAMFS_STAGING="/tmp/booto_initrd_staging_$$"
+on_exit() {
+    rc=$?
+    rm -rf "${INITRAMFS_STAGING}"
+    if [ "${rc}" -ne 0 ]; then
+        echo "[-] Error: mock disk generation failed; removing partial ${OUTPUT_IMG}" >&2
+        rm -f "${OUTPUT_IMG}"
+        rm -rf "${STAGING_DIR}"
+    fi
+}
+trap on_exit EXIT
+
 echo "=== Generating Booto Synthetic Forensic Disk: ${OUTPUT_IMG} ==="
 
 # 1. Allocate blank disk image
 dd if=/dev/zero of="${OUTPUT_IMG}" bs=1M count="${IMG_SIZE_MB}" status=none
 
 # 2. Populate synthetic directory hierarchy in temporary staging area
-STAGING_DIR="/tmp/booto_mock_staging_$$"
 rm -rf "${STAGING_DIR}"
 mkdir -p "${STAGING_DIR}/boot/efi/EFI/BOOT" \
          "${STAGING_DIR}/lib/modules/6.5.0-generic/kernel/drivers/char" \
@@ -35,7 +51,6 @@ echo "/lib/x86_64-linux-gnu/libazazel.so" > "${STAGING_DIR}/etc/ld.so.preload"
 echo "ELF MOCK LIB AZAZEL" > "${STAGING_DIR}/lib/x86_64-linux-gnu/libazazel.so"
 
 echo "[+] Generating synthetic Initramfs CPIO archive with reverse shell payload..."
-INITRAMFS_STAGING="/tmp/booto_initrd_staging_$$"
 mkdir -p "${INITRAMFS_STAGING}"
 cat << 'SH' > "${INITRAMFS_STAGING}/init"
 #!/bin/sh
@@ -45,12 +60,12 @@ exec /sbin/init
 SH
 chmod +x "${INITRAMFS_STAGING}/init"
 
-(cd "${INITRAMFS_STAGING}" && find . | cpio -o -H newc > "${STAGING_DIR}/boot/initrd.img-6.5.0-generic" 2>/dev/null)
+(cd "${INITRAMFS_STAGING}" && find . | cpio -o -H newc --quiet > "${STAGING_DIR}/boot/initrd.img-6.5.0-generic")
 rm -rf "${INITRAMFS_STAGING}"
 
 echo "[+] Injecting synthetic Rovnix MBR Bootkit into Sector 0 of disk image..."
 # Write 512-byte MBR with Rovnix hook and 0x55AA boot signature
-python3 -c "
+python3 - "${OUTPUT_IMG}" <<'PY'
 import sys
 mbr = bytearray(512)
 # Rovnix bootkit hook: \xfa\x33\xc0\x8e\xd0\x8e\xd8\x8e\xc0\xbc\x00\x7c\xcd\x13
@@ -63,9 +78,9 @@ mbr[454] = 0x00; mbr[455] = 0x08; mbr[456] = 0x00; mbr[457] = 0x00 # LBA 2048
 mbr[458] = 0x00; mbr[459] = 0x20; mbr[460] = 0x00; mbr[461] = 0x00 # 8192 sectors
 mbr[510] = 0x55
 mbr[511] = 0xAA
-with open('${OUTPUT_IMG}', 'r+b') as f:
+with open(sys.argv[1], 'r+b') as f:
     f.write(mbr)
-" 2>/dev/null || true
+PY
 
 echo "[+] Staging complete at ${STAGING_DIR}"
 echo "=== Synthetic disk artifacts created successfully ==="
