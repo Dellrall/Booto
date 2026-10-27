@@ -29,7 +29,8 @@ typedef struct {
     booto_error_t mount_err;            /* BOOTO_OK if rootfs available */
     scan_status_t status[SCAN_MOD_COUNT];
     booto_error_t err[SCAN_MOD_COUNT];
-    char note[SCAN_MOD_COUNT][96];      /* human reason for SKIPPED/ERROR, "" if OK */
+    char note[SCAN_MOD_COUNT][96];      /* human reason for SKIPPED/ERROR; may also annotate OK */
+    char esp_dev[128];                  /* ESP audited by the UEFI engine ("<root>/boot/efi" or device), "" if none */
     mbr_scan_result_t mbr;
     uefi_scan_result_t uefi;
     kernel_scan_result_t kernel;
@@ -46,6 +47,8 @@ typedef void (*forensic_scan_progress_cb)(int step, int total, const char *msg, 
 /* target_dev: raw device (may be NULL when rootfs_dir is given).
  * rootfs_dir: already-available root directory to inspect (e.g. -s path); when NULL, target_dev is mounted RO at
  *   /tmp/booto_scan_target via disk_mount_ro(target_dev, ..., NULL) and unmounted at the end.
+ * UEFI: <root>/boot/efi if it holds EFI files, else the ESP on target_dev's disk (GPT/MBR lookup) mounted RO at
+ *   /tmp/booto_esp_target and unmounted after the scan; no ESP anywhere -> UEFI SKIPPED.
  * enabled: NULL = all enabled. Disabled modules -> SKIPPED, note "disabled".
  * out: caller-allocated (it is large; heap-allocate it). Returns BOOTO_OK when the scan ran (whatever the verdict),
  * BOOTO_ERR_INVALID_ARG if both target_dev and rootfs_dir are NULL or out is NULL. */

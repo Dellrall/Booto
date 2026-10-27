@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **ESP auto-discovery**:
+  - When the scanned root filesystem has no EFI files in `/boot/efi`, the UEFI engine reads the target disk's partition table and finds the EFI System Partition: GPT type `C12A7328-…` (header and entry-array CRC32 verified) or MBR type `0xEF`.
+  - It maps the partition to its device through sysfs, mounts it read-only at `/tmp/booto_esp_target`, scans it and unmounts it.
+  - No ESP gives `SKIPPED`; an unreadable or corrupt table, or a failed ESP mount, gives `ERROR`. The UEFI check no longer depends on the root filesystem mounting.
 - **Shared scan orchestrator (`src/forensic_scan.c`)**: records a per-engine status (`OK`/`ERROR`/`SKIPPED`) and a verdict (`CLEAN`/`THREATS`/`INCOMPLETE`). `CLEAN` is reported only when every engine ran and nothing was found; a failed mount yields `INCOMPLETE`.
 - **Real headless CLI**:
   - `booto -c [-t <dev> | -s <rootfs>] [-p <report-dir>]` scans and prints a per-module table.

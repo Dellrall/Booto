@@ -107,6 +107,10 @@ add_executable(test_disk_discovery tests/test_disk_discovery.c)
 target_link_libraries(test_disk_discovery PRIVATE booto_core)
 add_test(NAME test_disk_discovery COMMAND test_disk_discovery)
 
+add_executable(test_esp_discovery tests/test_esp_discovery.c)
+target_link_libraries(test_esp_discovery PRIVATE booto_core)
+add_test(NAME test_esp_discovery COMMAND test_esp_discovery)
+
 add_executable(test_elf_analyzer tests/test_elf_analyzer.c)
 target_link_libraries(test_elf_analyzer PRIVATE booto_core)
 add_test(NAME test_elf_analyzer COMMAND test_elf_analyzer)
