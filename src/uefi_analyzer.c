@@ -80,7 +80,7 @@ booto_error_t uefi_parse_pe_buffer(const uint8_t *buf, size_t len, pe_efi_info_t
     uint32_t pe_offset = (uint32_t)buf[0x3C] | ((uint32_t)buf[0x3D] << 8) |
                          ((uint32_t)buf[0x3E] << 16) | ((uint32_t)buf[0x3F] << 24);
 
-    if (pe_offset + 0x100 > len) {
+    if ((size_t)pe_offset + 0x100 > len) {
         LOG_ERROR("PE header offset out of bounds: 0x%x", pe_offset);
         return BOOTO_ERR_CORRUPT_DATA;
     }
@@ -125,7 +125,7 @@ booto_error_t uefi_parse_pe_buffer(const uint8_t *buf, size_t len, pe_efi_info_t
             info->cert_table_size = (uint32_t)buf[sec_dir_offset + 4] | ((uint32_t)buf[sec_dir_offset + 5] << 8) |
                                     ((uint32_t)buf[sec_dir_offset + 6] << 16) | ((uint32_t)buf[sec_dir_offset + 7] << 24);
 
-            if (info->cert_table_size > 0 && info->cert_table_rva > 0 && info->cert_table_rva + info->cert_table_size <= len) {
+            if (info->cert_table_size > 0 && info->cert_table_rva > 0 && (uint64_t)info->cert_table_rva + info->cert_table_size <= len) {
                 info->has_authenticode = true;
             }
         }

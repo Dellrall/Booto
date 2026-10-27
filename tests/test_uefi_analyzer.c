@@ -106,11 +106,25 @@ static void test_dbx_revocation_matching(void) {
     TEST_PASS("test_dbx_revocation_matching");
 }
 
+static void test_pe_wrapping_offset_rejected(void) {
+    TEST_START("test_pe_wrapping_offset_rejected");
+    uint8_t buf[0x200];
+    memset(buf, 0, sizeof(buf));
+    buf[0] = 'M';
+    buf[1] = 'Z';
+    // e_lfanew = 0xFFFFFF80: 32-bit "pe_offset + 0x100" wraps to 0x80 and used to pass the bounds check.
+    buf[0x3C] = 0x80; buf[0x3D] = 0xFF; buf[0x3E] = 0xFF; buf[0x3F] = 0xFF;
+    pe_efi_info_t info;
+    ASSERT_INT_EQ(uefi_parse_pe_buffer(buf, sizeof(buf), &info), BOOTO_ERR_CORRUPT_DATA, "Wrapping PE offset must be rejected");
+    TEST_PASS("test_pe_wrapping_offset_rejected");
+}
+
 int main(void) {
     printf("\n--- Running UEFI & ESP Bootkit Analyzer Tests ---\n");
     test_synthetic_pe32_plus_parser();
     test_corrupted_pe_rejection();
     test_dbx_revocation_matching();
+    test_pe_wrapping_offset_rejected();
     TEST_SUMMARY();
     return 0;
 }

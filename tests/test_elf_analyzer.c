@@ -7,6 +7,7 @@
 #include "elf_analyzer.h"
 #include "kernel_inspector.h"
 
+#include <elf.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -68,11 +69,57 @@ static void test_rootkit_lkm_detection(void) {
     TEST_PASS("test_rootkit_lkm_detection");
 }
 
+static void test_elf_wrapping_shoff_rejected(void) {
+    TEST_START("test_elf_wrapping_shoff_rejected");
+    uint8_t buf[sizeof(Elf64_Ehdr) + 64];
+    memset(buf, 0, sizeof(buf));
+    Elf64_Ehdr *eh = (Elf64_Ehdr *)buf;
+    memcpy(eh->e_ident, ELFMAG, SELFMAG);
+    eh->e_ident[EI_CLASS] = ELFCLASS64;
+    eh->e_shentsize = sizeof(Elf64_Shdr);
+    eh->e_shnum = 4;
+    eh->e_shoff = UINT64_MAX - 0xFF; // e_shoff + 4*64 wraps to a small value
+    elf_binary_info_t info;
+    ASSERT_INT_EQ(elf_parse_buffer(buf, sizeof(buf), &info), BOOTO_ERR_CORRUPT_DATA, "Wrapping e_shoff must be rejected");
+    elf_free_info(&info);
+    TEST_PASS("test_elf_wrapping_shoff_rejected");
+}
+
+static void test_elf_unterminated_shstrtab(void) {
+    TEST_START("test_elf_unterminated_shstrtab");
+    // Ehdr | 2 section headers | 4-byte .shstrtab "AAAA" with no NUL, ending exactly at the buffer end.
+    size_t len = sizeof(Elf64_Ehdr) + 2 * sizeof(Elf64_Shdr) + 4;
+    uint8_t *buf = calloc(1, len);
+    ASSERT_TRUE(buf != NULL, "alloc");
+    Elf64_Ehdr *eh = (Elf64_Ehdr *)buf;
+    memcpy(eh->e_ident, ELFMAG, SELFMAG);
+    eh->e_ident[EI_CLASS] = ELFCLASS64;
+    eh->e_shentsize = sizeof(Elf64_Shdr);
+    eh->e_shnum = 2;
+    eh->e_shoff = sizeof(Elf64_Ehdr);
+    eh->e_shstrndx = 1;
+    Elf64_Shdr *sh = (Elf64_Shdr *)(buf + eh->e_shoff);
+    sh[1].sh_type = SHT_STRTAB;
+    sh[1].sh_offset = len - 4;
+    sh[1].sh_size = 4;
+    memcpy(buf + len - 4, "AAAA", 4);
+
+    elf_binary_info_t info;
+    booto_error_t err = elf_parse_buffer(buf, len, &info);
+    free(buf);
+    ASSERT_INT_EQ(err, BOOTO_OK, "Unterminated string table must parse without over-read");
+    ASSERT_STR_EQ(info.sections[0].name, "AAAA", "Name must be bounded by the table size");
+    elf_free_info(&info);
+    TEST_PASS("test_elf_unterminated_shstrtab");
+}
+
 int main(void) {
     printf("\n--- Running ELF Parser & Kernel Rootkit Scanner Tests ---\n");
     test_sha256_known_vector();
     test_elf_parser_on_binary();
     test_rootkit_lkm_detection();
+    test_elf_wrapping_shoff_rejected();
+    test_elf_unterminated_shstrtab();
     TEST_SUMMARY();
     return 0;
 }
