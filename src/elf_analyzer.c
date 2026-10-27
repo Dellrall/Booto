@@ -18,6 +18,18 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Overflow-safe check that [off, off+size) lies inside a buffer of len bytes. */
+static bool range_in_bounds(uint64_t off, uint64_t size, size_t len) {
+    return off <= len && size <= (uint64_t)len - off;
+}
+
+/* Copy a string table entry, never reading past the end of its table (entries may lack a NUL). */
+static void copy_table_string(char *dst, size_t dst_size, const char *table, size_t table_size, size_t idx) {
+    size_t avail = table_size - idx;
+    int n = (int)strnlen(table + idx, avail < dst_size ? avail : dst_size - 1);
+    snprintf(dst, dst_size, "%.*s", n, table + idx);
+}
+
 booto_error_t elf_parse_buffer(const uint8_t *buf, size_t len, elf_binary_info_t *info) {
     if (!buf || !info) return BOOTO_ERR_INVALID_ARG;
     if (len < sizeof(Elf64_Ehdr)) return BOOTO_ERR_CORRUPT_DATA;
@@ -52,7 +64,7 @@ booto_error_t elf_parse_buffer(const uint8_t *buf, size_t len, elf_binary_info_t
     }
 
     uint64_t sh_total_size = (uint64_t)ehdr->e_shnum * (uint64_t)sizeof(Elf64_Shdr);
-    if (ehdr->e_shoff + sh_total_size > len) {
+    if (!range_in_bounds(ehdr->e_shoff, sh_total_size, len)) {
         LOG_ERROR("ELF Section headers exceed file bounds");
         return BOOTO_ERR_CORRUPT_DATA;
     }
@@ -64,7 +76,7 @@ booto_error_t elf_parse_buffer(const uint8_t *buf, size_t len, elf_binary_info_t
     size_t shstrtab_size = 0;
     if (ehdr->e_shstrndx < ehdr->e_shnum) {
         const Elf64_Shdr *shstr_hdr = &shdrs[ehdr->e_shstrndx];
-        if (shstr_hdr->sh_offset + shstr_hdr->sh_size <= len) {
+        if (range_in_bounds(shstr_hdr->sh_offset, shstr_hdr->sh_size, len)) {
             shstrtab = (const char *)(buf + shstr_hdr->sh_offset);
             shstrtab_size = shstr_hdr->sh_size;
         }
@@ -88,7 +100,7 @@ booto_error_t elf_parse_buffer(const uint8_t *buf, size_t len, elf_binary_info_t
         sec->addr = sh->sh_addr;
 
         if (shstrtab && sh->sh_name < shstrtab_size) {
-            snprintf(sec->name, sizeof(sec->name), "%s", shstrtab + sh->sh_name);
+            copy_table_string(sec->name, sizeof(sec->name), shstrtab, shstrtab_size, sh->sh_name);
         } else {
             snprintf(sec->name, sizeof(sec->name), "section_%d", i);
         }
@@ -103,7 +115,7 @@ booto_error_t elf_parse_buffer(const uint8_t *buf, size_t len, elf_binary_info_t
     }
 
     // 5. Parse .modinfo (for Linux .ko kernel modules)
-    if (modinfo_hdr && modinfo_hdr->sh_offset + modinfo_hdr->sh_size <= len) {
+    if (modinfo_hdr && range_in_bounds(modinfo_hdr->sh_offset, modinfo_hdr->sh_size, len)) {
         info->modinfo.has_modinfo = true;
         const char *mptr = (const char *)(buf + modinfo_hdr->sh_offset);
         const char *mend = mptr + modinfo_hdr->sh_size;
@@ -133,18 +145,19 @@ booto_error_t elf_parse_buffer(const uint8_t *buf, size_t len, elf_binary_info_t
 
     // 6. Parse Symbol Table (.symtab + .strtab)
     if (symtab_hdr && strtab_hdr &&
-        symtab_hdr->sh_offset + symtab_hdr->sh_size <= len &&
-        strtab_hdr->sh_offset + strtab_hdr->sh_size <= len) {
+        range_in_bounds(symtab_hdr->sh_offset, symtab_hdr->sh_size, len) &&
+        range_in_bounds(strtab_hdr->sh_offset, strtab_hdr->sh_size, len)) {
 
         const Elf64_Sym *syms = (const Elf64_Sym *)(buf + symtab_hdr->sh_offset);
         const char *strtab = (const char *)(buf + strtab_hdr->sh_offset);
         size_t strtab_sz = strtab_hdr->sh_size;
         int total_syms = (int)(symtab_hdr->sh_size / sizeof(Elf64_Sym));
 
-        info->symbol_count = (total_syms > MAX_ELF_SYMBOLS) ? MAX_ELF_SYMBOLS : total_syms;
-        info->symbols = (elf_symbol_info_t *)calloc((size_t)info->symbol_count, sizeof(elf_symbol_info_t));
+        int want = (total_syms > MAX_ELF_SYMBOLS) ? MAX_ELF_SYMBOLS : total_syms;
+        info->symbols = (elf_symbol_info_t *)calloc((size_t)want, sizeof(elf_symbol_info_t));
 
         if (info->symbols) {
+            info->symbol_count = want; // only publish the count once the array exists
             for (int i = 0; i < info->symbol_count; i++) {
                 const Elf64_Sym *s = &syms[i];
                 elf_symbol_info_t *si = &info->symbols[i];
@@ -156,7 +169,7 @@ booto_error_t elf_parse_buffer(const uint8_t *buf, size_t len, elf_binary_info_t
                 si->shndx = s->st_shndx;
 
                 if (s->st_name < strtab_sz) {
-                    snprintf(si->name, sizeof(si->name), "%s", strtab + s->st_name);
+                    copy_table_string(si->name, sizeof(si->name), strtab, strtab_sz, s->st_name);
                 } else {
                     snprintf(si->name, sizeof(si->name), "sym_%d", i);
                 }

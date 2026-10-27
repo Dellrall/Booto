@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - JSON string fields are escaped per RFC 8259, and Markdown cells neutralise `|`, backticks and control characters.
   - `case_id` is restricted to `[A-Za-z0-9_-]{1,50}`, which closes path traversal through the report filename.
 
+- **Parsers (`src/elf_analyzer.c`, `src/uefi_analyzer.c`)**:
+  - ELF section, string and symbol table bounds are checked without integer wraparound.
+  - Section and symbol names are bounded by their table size, which closes an over-read on unterminated entries.
+  - `symbol_count` is published only after the symbol array is allocated.
+  - The PE header and certificate table bounds are computed in 64-bit, so the 32-bit wrap that let a crafted `e_lfanew` read out of bounds is gone.
 ### Fixed
 - `disk_mount_ro()` returns `BOOTO_ERR_MOUNT_FAILED` when no filesystem mounts, instead of `BOOTO_OK`.
 - Non-root mount, unmount and LUKS calls return `BOOTO_ERR_PERMISSION_DENIED` instead of emulating success.
