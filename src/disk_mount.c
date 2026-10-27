@@ -15,12 +15,106 @@
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <linux/fs.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
+
+booto_error_t disk_exec_argv(const char *const argv[], const char *stdin_data, size_t stdin_len, int *exit_status) {
+    if (exit_status) *exit_status = -1;
+    if (!argv || !argv[0]) return BOOTO_ERR_INVALID_ARG;
+
+    int pfd[2] = {-1, -1};
+    if (stdin_data && pipe(pfd) != 0) return BOOTO_ERR_IO;
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        if (stdin_data) { close(pfd[0]); close(pfd[1]); }
+        return BOOTO_ERR_GENERIC;
+    }
+    if (pid == 0) {
+        if (stdin_data) {
+            close(pfd[1]);
+            if (dup2(pfd[0], STDIN_FILENO) < 0) _exit(126);
+            close(pfd[0]);
+        }
+        int devnull = open("/dev/null", O_RDWR);
+        if (devnull >= 0) {
+            dup2(devnull, STDOUT_FILENO);
+            dup2(devnull, STDERR_FILENO);
+            if (devnull > STDERR_FILENO) close(devnull);
+        }
+        execvp(argv[0], (char *const *)argv);
+        _exit(127);
+    }
+
+    if (stdin_data) {
+        close(pfd[0]);
+        /* Ignore SIGPIPE so an early-exiting child only yields EPIPE here. */
+        struct sigaction ign, old;
+        memset(&ign, 0, sizeof(ign));
+        ign.sa_handler = SIG_IGN;
+        sigemptyset(&ign.sa_mask);
+        sigaction(SIGPIPE, &ign, &old);
+        size_t off = 0;
+        while (off < stdin_len) {
+            ssize_t w = write(pfd[1], stdin_data + off, stdin_len - off);
+            if (w < 0) {
+                if (errno == EINTR) continue;
+                break;
+            }
+            off += (size_t)w;
+        }
+        close(pfd[1]);
+        sigaction(SIGPIPE, &old, NULL);
+    }
+
+    int status = 0;
+    pid_t r;
+    do {
+        r = waitpid(pid, &status, 0);
+    } while (r < 0 && errno == EINTR);
+    if (r < 0) return BOOTO_ERR_GENERIC;
+
+    if (!WIFEXITED(status)) return BOOTO_ERR_GENERIC;
+    int code = WEXITSTATUS(status);
+    if (exit_status) *exit_status = code;
+    if (code == 0) return BOOTO_OK;
+    if (code == 127) return BOOTO_ERR_NOT_FOUND;
+    return BOOTO_ERR_GENERIC;
+}
+
+booto_error_t disk_ensure_private_dir(const char *path) {
+    if (!path || !path[0]) return BOOTO_ERR_INVALID_ARG;
+    if (mkdir(path, 0700) == 0) return BOOTO_OK;
+    if (errno != EEXIST) {
+        LOG_ERROR("Failed to create directory '%s': %s", path, strerror(errno));
+        return BOOTO_ERR_IO;
+    }
+    struct stat st;
+    if (lstat(path, &st) != 0) return BOOTO_ERR_IO;
+    if (!S_ISDIR(st.st_mode) || st.st_uid != geteuid() || (st.st_mode & (S_IWGRP | S_IWOTH))) {
+        LOG_ERROR("Refusing unsafe directory '%s' (symlink, foreign owner or group/world-writable)", path);
+        return BOOTO_ERR_PERMISSION_DENIED;
+    }
+    return BOOTO_OK;
+}
+
+static bool valid_mapper_name(const char *name) {
+    size_t n = strlen(name);
+    if (n == 0 || n > 63) return false;
+    for (size_t i = 0; i < n; i++) {
+        unsigned char c = (unsigned char)name[i];
+        if (!isalnum(c) && c != '_' && c != '-') return false;
+    }
+    return true;
+}
 
 bool disk_is_running_as_root(void) {
     return (geteuid() == 0);
@@ -231,15 +325,15 @@ booto_error_t disk_discover_partitions(disk_discovery_result_t *result, bool inc
 
     FILE *fp = fopen("/proc/partitions", "r");
     if (!fp) {
-        LOG_WARN("Unable to open /proc/partitions, falling back to mock discovery");
-        add_mock_partitions(result);
+        LOG_WARN("Unable to open /proc/partitions");
+        if (include_mock) add_mock_partitions(result);
         return BOOTO_OK;
     }
 
     char line[256];
     if (!fgets(line, sizeof(line), fp)) {
         fclose(fp);
-        add_mock_partitions(result);
+        if (include_mock) add_mock_partitions(result);
         return BOOTO_OK;
     }
 
@@ -263,8 +357,8 @@ booto_error_t disk_discover_partitions(disk_discovery_result_t *result, bool inc
             char probed_fs[32] = {0};
             char probed_label[64] = {0};
 
-            if (disk_probe_fs_magic(p->dev_path, probed_fs, sizeof(probed_fs), probed_label, sizeof(probed_label)) == BOOTO_OK &&
-                strcmp(probed_fs, "unknown") != 0) {
+            booto_error_t probe_err = disk_probe_fs_magic(p->dev_path, probed_fs, sizeof(probed_fs), probed_label, sizeof(probed_label));
+            if (probe_err == BOOTO_OK) {
                 snprintf(p->fs_type, sizeof(p->fs_type), "%s", probed_fs);
                 if (probed_label[0] != '\0') {
                     snprintf(p->label, sizeof(p->label), "%s", probed_label);
@@ -287,11 +381,13 @@ booto_error_t disk_discover_partitions(disk_discovery_result_t *result, bool inc
                     p->is_target = true;
                 }
             } else {
-                // Fallback heuristic if unreadable / unmounted virtual environment
-                if (strstr(name, "p1") || strstr(name, "1") || strstr(name, "efi")) {
+                // Device unreadable (e.g. non-root): name-based guess only for explicit pN partition suffixes
+                size_t nlen = strlen(name);
+                bool part_suffix = nlen >= 2 && name[nlen - 2] == 'p' && isdigit((unsigned char)name[nlen - 1]);
+                if (strstr(name, "efi") || (part_suffix && name[nlen - 1] == '1')) {
                     snprintf(p->fs_type, sizeof(p->fs_type), "vfat");
                     snprintf(p->label, sizeof(p->label), "ESP / Boot");
-                } else if (strstr(name, "p2") || strstr(name, "2")) {
+                } else if (part_suffix && name[nlen - 1] == '2') {
                     snprintf(p->fs_type, sizeof(p->fs_type), "ext4");
                     snprintf(p->label, sizeof(p->label), "Linux Rootfs");
                     p->is_target = true;
@@ -308,11 +404,7 @@ booto_error_t disk_discover_partitions(disk_discovery_result_t *result, bool inc
 
     fclose(fp);
 
-    if (result->count == 0 || include_mock) {
-        if (result->count == 0) {
-            add_mock_partitions(result);
-        }
-    }
+    if (include_mock) add_mock_partitions(result);
 
     // Guarantee default target selection
     if (result->count > 0) {
@@ -338,41 +430,53 @@ booto_error_t disk_discover_partitions(disk_discovery_result_t *result, bool inc
     return BOOTO_OK;
 }
 
+/* Journal/log replay options: a journaled fs must never be mounted without these. */
+static const char *fs_noreplay_opts(const char *fs) {
+    if (strcmp(fs, "ext4") == 0 || strcmp(fs, "ext3") == 0) return "noload";
+    if (strcmp(fs, "xfs") == 0) return "norecovery";
+    if (strcmp(fs, "btrfs") == 0) return "nologreplay";
+    return NULL;
+}
+
+static void build_dev_path(const char *dev_path, char *out, size_t out_size) {
+    if (dev_path[0] == '/') {
+        snprintf(out, out_size, "%.255s", dev_path);
+    } else {
+        snprintf(out, out_size, "/dev/%.250s", dev_path);
+    }
+}
+
 booto_error_t disk_mount_ro(const char *dev_path, const char *mount_point, const char *fs_type) {
     if (!dev_path || !mount_point) return BOOTO_ERR_INVALID_ARG;
 
     char full_dev[256];
-    if (dev_path[0] == '/') {
-        snprintf(full_dev, sizeof(full_dev), "%s", dev_path);
-    } else {
-        snprintf(full_dev, sizeof(full_dev), "/dev/%s", dev_path);
-    }
+    build_dev_path(dev_path, full_dev, sizeof(full_dev));
 
     LOG_INFO("Attempting forensic read-only mount: %s -> %s", full_dev, mount_point);
 
     if (!disk_is_running_as_root()) {
-        LOG_WARN("Non-root environment: Emulating safe mock read-only mount for %s", full_dev);
-        return BOOTO_OK;
+        LOG_ERROR("Read-only mount of %s requires root privileges", full_dev);
+        return BOOTO_ERR_PERMISSION_DENIED;
     }
 
-    struct stat st;
-    if (stat(mount_point, &st) != 0) {
-        if (mkdir(mount_point, 0755) != 0 && errno != EEXIST) {
-            LOG_ERROR("Failed to create mount directory '%s': %s", mount_point, strerror(errno));
-            return BOOTO_ERR_IO;
-        }
+    booto_error_t dir_err = disk_ensure_private_dir(mount_point);
+    if (dir_err != BOOTO_OK) return dir_err;
+
+    // Block-level RO flag: MS_RDONLY alone does not stop the kernel writing to the evidence device.
+    int fd = open(full_dev, O_RDONLY | O_CLOEXEC);
+    int one = 1;
+    if (fd < 0 || ioctl(fd, BLKROSET, &one) != 0) {
+        LOG_ERROR("Failed to set block device %s read-only (BLKROSET): %s", full_dev, strerror(errno));
+        if (fd >= 0) close(fd);
+        return BOOTO_ERR_IO;
     }
+    close(fd);
 
     unsigned long flags = MS_RDONLY | MS_NODEV | MS_NOEXEC | MS_NOSUID;
-    const char *data_opts = "noload";
 
     // If specific filesystem requested
     if (fs_type && strlen(fs_type) > 0 && strcmp(fs_type, "unknown") != 0) {
-        int ret = mount(full_dev, mount_point, fs_type, flags, data_opts);
-        if (ret != 0) {
-            ret = mount(full_dev, mount_point, fs_type, flags, NULL);
-        }
-        if (ret == 0) {
+        if (mount(full_dev, mount_point, fs_type, flags, fs_noreplay_opts(fs_type)) == 0) {
             LOG_INFO("Successfully mounted %s at %s (%s) strictly READ-ONLY", full_dev, mount_point, fs_type);
             return BOOTO_OK;
         }
@@ -383,19 +487,15 @@ booto_error_t disk_mount_ro(const char *dev_path, const char *mount_point, const
     size_t num_fs = sizeof(candidate_fs) / sizeof(candidate_fs[0]);
 
     for (size_t i = 0; i < num_fs; i++) {
-        int ret = mount(full_dev, mount_point, candidate_fs[i], flags, data_opts);
-        if (ret != 0) {
-            ret = mount(full_dev, mount_point, candidate_fs[i], flags, NULL);
-        }
-        if (ret == 0) {
+        if (mount(full_dev, mount_point, candidate_fs[i], flags, fs_noreplay_opts(candidate_fs[i])) == 0) {
             LOG_INFO("Successfully mounted %s at %s (%s) strictly READ-ONLY", full_dev, mount_point, candidate_fs[i]);
             return BOOTO_OK;
         }
     }
 
     // If all fail, the disk is an unformatted or raw partition table (e.g. fresh VM disk)
-    LOG_WARN("%s contains no mountable filesystem signature (raw block disk). Direct raw sector inspection enabled.", full_dev);
-    return BOOTO_OK;
+    LOG_WARN("%s could not be mounted read-only (no supported filesystem). Direct raw sector inspection is still possible.", full_dev);
+    return BOOTO_ERR_MOUNT_FAILED;
 }
 
 booto_error_t disk_unmount(const char *mount_point) {
@@ -404,8 +504,8 @@ booto_error_t disk_unmount(const char *mount_point) {
     LOG_INFO("Unmounting %s...", mount_point);
 
     if (!disk_is_running_as_root()) {
-        LOG_INFO("Non-root environment: Emulating clean unmount for %s", mount_point);
-        return BOOTO_OK;
+        LOG_ERROR("Unmount of %s requires root privileges", mount_point);
+        return BOOTO_ERR_PERMISSION_DENIED;
     }
 
     if (umount2(mount_point, MNT_DETACH) != 0) {
@@ -419,49 +519,50 @@ booto_error_t disk_unmount(const char *mount_point) {
 
 booto_error_t disk_luks_open_ro(const char *dev_path, const char *mapper_name, const char *passphrase) {
     if (!dev_path || !mapper_name) return BOOTO_ERR_INVALID_ARG;
+    if (!valid_mapper_name(mapper_name)) {
+        LOG_ERROR("Invalid LUKS mapper name (allowed: [A-Za-z0-9_-]{1,63})");
+        return BOOTO_ERR_INVALID_ARG;
+    }
 
     char full_dev[256];
-    if (dev_path[0] == '/') {
-        snprintf(full_dev, sizeof(full_dev), "%s", dev_path);
-    } else {
-        snprintf(full_dev, sizeof(full_dev), "/dev/%s", dev_path);
-    }
+    build_dev_path(dev_path, full_dev, sizeof(full_dev));
 
     LOG_INFO("Attempting forensic read-only LUKS open: %s -> /dev/mapper/%s", full_dev, mapper_name);
 
     if (!disk_is_running_as_root()) {
-        LOG_WARN("Non-root environment: Emulating safe mock read-only LUKS unlock for %s", full_dev);
-        return BOOTO_OK;
-    }
-
-    char cmd[1024];
-    snprintf(cmd, sizeof(cmd), "printf '%%s' '%s' | cryptsetup open --readonly %s %s >/dev/null 2>&1",
-             passphrase ? passphrase : "", full_dev, mapper_name);
-
-    int ret = system(cmd);
-    if (ret != 0) {
-        LOG_ERROR("Failed to unlock LUKS volume '%s': Invalid passphrase or corrupted keyslot", full_dev);
+        LOG_ERROR("LUKS unlock of %s requires root privileges", full_dev);
         return BOOTO_ERR_PERMISSION_DENIED;
     }
 
-    LOG_INFO("Successfully unlocked LUKS volume '%s' as /dev/mapper/%s (READ-ONLY)", full_dev, mapper_name);
-    return BOOTO_OK;
+    const char *pass = passphrase ? passphrase : "";
+    const char *const argv[] = {"cryptsetup", "open", "--readonly", "--key-file=-", full_dev, mapper_name, NULL};
+    int status = -1;
+    booto_error_t err = disk_exec_argv(argv, pass, strlen(pass), &status);
+    if (err == BOOTO_OK) {
+        LOG_INFO("Successfully unlocked LUKS volume '%s' as /dev/mapper/%s (READ-ONLY)", full_dev, mapper_name);
+        return BOOTO_OK;
+    }
+    if (err == BOOTO_ERR_GENERIC && status == 2) {
+        LOG_ERROR("Failed to unlock LUKS volume '%s': Invalid passphrase", full_dev);
+        return BOOTO_ERR_PERMISSION_DENIED;
+    }
+    LOG_ERROR("Failed to unlock LUKS volume '%s' (cryptsetup exit %d)", full_dev, status);
+    return BOOTO_ERR_IO;
 }
 
 booto_error_t disk_luks_close(const char *mapper_name) {
     if (!mapper_name) return BOOTO_ERR_INVALID_ARG;
+    if (!valid_mapper_name(mapper_name)) return BOOTO_ERR_INVALID_ARG;
 
     LOG_INFO("Closing LUKS mapper device /dev/mapper/%s...", mapper_name);
 
     if (!disk_is_running_as_root()) {
-        LOG_INFO("Non-root environment: Emulating LUKS close for %s", mapper_name);
-        return BOOTO_OK;
+        LOG_ERROR("Closing LUKS mapper %s requires root privileges", mapper_name);
+        return BOOTO_ERR_PERMISSION_DENIED;
     }
 
-    char cmd[512];
-    snprintf(cmd, sizeof(cmd), "cryptsetup close %s >/dev/null 2>&1", mapper_name);
-    int ret = system(cmd);
-    if (ret != 0) {
+    const char *const argv[] = {"cryptsetup", "close", mapper_name, NULL};
+    if (disk_exec_argv(argv, NULL, 0, NULL) != BOOTO_OK) {
         LOG_WARN("Failed to close LUKS mapper device '%s'", mapper_name);
         return BOOTO_ERR_IO;
     }

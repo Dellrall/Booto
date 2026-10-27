@@ -45,24 +45,26 @@ typedef struct {
 /**
  * @brief Discover all block storage devices and partitions on the host.
  * @param result Pointer to output discovery result struct.
- * @param include_mock If true or non-root, injects mock test partitions for verification.
+ * @param include_mock If true, appends the built-in mock partition set (for tests/demo); otherwise only real devices are returned (possibly none).
  * @return BOOTO_OK on success, negative error code on failure.
  */
 booto_error_t disk_discover_partitions(disk_discovery_result_t *result, bool include_mock);
 
 /**
- * @brief Safely mount a partition strictly READ-ONLY (MS_RDONLY, noload).
+ * @brief Safely mount a partition strictly READ-ONLY. Sets BLKROSET on the device first and uses
+ *        per-fs no-replay options (ext3/ext4 noload, xfs norecovery, btrfs nologreplay).
  * @param dev_path Path to device (e.g., /dev/nvme0n1p2).
- * @param mount_point Target directory (e.g., /tmp/booto_target_mnt).
+ * @param mount_point Target directory (created 0700 if missing; must be a private dir owned by euid).
  * @param fs_type Optional filesystem type string (or NULL for auto-detect).
- * @return BOOTO_OK on success, negative error code on failure.
+ * @return BOOTO_OK on success, BOOTO_ERR_PERMISSION_DENIED if not root or unsafe mount dir,
+ *         BOOTO_ERR_IO if the device cannot be set read-only, BOOTO_ERR_MOUNT_FAILED if no mount succeeded.
  */
 booto_error_t disk_mount_ro(const char *dev_path, const char *mount_point, const char *fs_type);
 
 /**
  * @brief Safely unmount a previously mounted target partition.
  * @param mount_point Target directory to unmount.
- * @return BOOTO_OK on success, negative error code on failure.
+ * @return BOOTO_OK on success, BOOTO_ERR_PERMISSION_DENIED if not root, BOOTO_ERR_IO on failure.
  */
 booto_error_t disk_unmount(const char *mount_point);
 
@@ -79,19 +81,36 @@ booto_error_t disk_probe_fs_magic(const char *dev_path, char *fs_buf, size_t fs_
 
 /**
  * @brief Forensically unlock a LUKS1/LUKS2 encrypted target partition strictly READ-ONLY.
+ *        Runs `cryptsetup open --readonly --key-file=-` without a shell; passphrase is passed on stdin.
  * @param dev_path Path to encrypted block device (e.g. /dev/nvme0n1p3).
- * @param mapper_name Mapper target name (e.g. booto_target_decrypted).
- * @param passphrase Decryption passphrase.
- * @return BOOTO_OK on success, BOOTO_ERR_PERMISSION_DENIED on bad passphrase, BOOTO_ERR_IO on failure.
+ * @param mapper_name Mapper target name, must match [A-Za-z0-9_-]{1,63}.
+ * @param passphrase Decryption passphrase (exact bytes, no trailing newline added).
+ * @return BOOTO_OK on success, BOOTO_ERR_INVALID_ARG on bad mapper name,
+ *         BOOTO_ERR_PERMISSION_DENIED on bad passphrase or non-root, BOOTO_ERR_IO on other failure.
  */
 booto_error_t disk_luks_open_ro(const char *dev_path, const char *mapper_name, const char *passphrase);
 
 /**
- * @brief Safely close a decrypted LUKS mapper device.
- * @param mapper_name Mapper target name to close.
- * @return BOOTO_OK on success.
+ * @brief Safely close a decrypted LUKS mapper device (`cryptsetup close`, no shell).
+ * @param mapper_name Mapper target name to close, must match [A-Za-z0-9_-]{1,63}.
+ * @return BOOTO_OK on success, BOOTO_ERR_INVALID_ARG, BOOTO_ERR_PERMISSION_DENIED if not root, BOOTO_ERR_IO on failure.
  */
 booto_error_t disk_luks_close(const char *mapper_name);
+
+/**
+ * @brief Run argv[0] via fork+execvp (no shell). If stdin_data != NULL, its exact stdin_len bytes are
+ *        written to the child's stdin, then closed. Child stdout/stderr go to /dev/null.
+ * @param exit_status Optional; receives the child exit code, or -1 if killed by signal / fork failed.
+ * @return BOOTO_OK on exit 0, BOOTO_ERR_NOT_FOUND if exec failed (exit 127), otherwise BOOTO_ERR_GENERIC.
+ */
+booto_error_t disk_exec_argv(const char *const argv[], const char *stdin_data, size_t stdin_len, int *exit_status);
+
+/**
+ * @brief Create directory with mode 0700 if missing; if it exists it must be a real directory
+ *        (not a symlink) owned by geteuid() without group/other write bits.
+ * @return BOOTO_OK, BOOTO_ERR_PERMISSION_DENIED if unsafe, BOOTO_ERR_IO on other failure.
+ */
+booto_error_t disk_ensure_private_dir(const char *path);
 
 /**
  * @brief Helper to format bytes into human-readable string (KB, MB, GB, TB).

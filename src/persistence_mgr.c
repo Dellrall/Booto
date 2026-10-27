@@ -17,7 +17,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mount.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <unistd.h>
 
 const char *persistence_state_to_string(persistence_state_t state) {
@@ -37,6 +39,10 @@ booto_error_t persistence_init(persistence_mgr_t *mgr, const char *preferred_dev
     memset(mgr, 0, sizeof(*mgr));
 
     if (preferred_dev && strlen(preferred_dev) > 0) {
+        if (strncmp(preferred_dev, "/dev/", 5) != 0) {
+            LOG_ERROR("Rejecting persistence device path outside /dev/: %.127s", preferred_dev);
+            return BOOTO_ERR_INVALID_ARG;
+        }
         snprintf(mgr->dev_path, sizeof(mgr->dev_path), "%.127s", preferred_dev);
         mgr->state = PERSISTENCE_STATE_LOCKED;
     } else {
@@ -55,10 +61,10 @@ booto_error_t persistence_init(persistence_mgr_t *mgr, const char *preferred_dev
     return BOOTO_OK;
 }
 
-static void ensure_dir_0700(const char *dir_path) {
-    struct stat st;
-    if (stat(dir_path, &st) != 0) {
-        mkdir(dir_path, 0700);
+static void close_mapper(void) {
+    const char *const argv[] = {"cryptsetup", "close", PERSISTENCE_MAPPER_NAME, NULL};
+    if (disk_exec_argv(argv, NULL, 0, NULL) != BOOTO_OK) {
+        LOG_ERROR("Failed to close LUKS mapper '%s'", PERSISTENCE_MAPPER_NAME);
     }
 }
 
@@ -68,53 +74,48 @@ booto_error_t persistence_unlock(persistence_mgr_t *mgr, const char *passphrase)
     LOG_INFO("Attempting to unlock LUKS persistence volume on %s...", mgr->dev_path);
 
     if (!disk_is_running_as_root()) {
-        LOG_WARN("Non-root environment: Emulating safe mock LUKS2 container unlock");
-
-        // Use safe mock temp directory for non-root persistence testing
-        snprintf(mgr->mount_path, sizeof(mgr->mount_path), "/tmp/booto_mock_persistence");
-        snprintf(mgr->cases_dir, sizeof(mgr->cases_dir), "/tmp/booto_mock_persistence/cases");
-        snprintf(mgr->rules_dir, sizeof(mgr->rules_dir), "/tmp/booto_mock_persistence/rules");
-        snprintf(mgr->logs_dir, sizeof(mgr->logs_dir), "/tmp/booto_mock_persistence/logs");
-
-        ensure_dir_0700(mgr->mount_path);
-        ensure_dir_0700(mgr->cases_dir);
-        ensure_dir_0700(mgr->rules_dir);
-        ensure_dir_0700(mgr->logs_dir);
-
-        mgr->state = PERSISTENCE_STATE_UNLOCKED;
-        mgr->total_bytes = 1024ULL * 1024ULL * 1024ULL * 32ULL; // 32 GB
-        mgr->free_bytes = 1024ULL * 1024ULL * 1024ULL * 31ULL;  // 31 GB
-
-        LOG_INFO("Persistence volume unlocked successfully (Mock Mode active)");
-        return BOOTO_OK;
+        LOG_ERROR("Root privileges required to unlock LUKS persistence volume");
+        return BOOTO_ERR_PERMISSION_DENIED;
     }
 
-    // Root execution with cryptsetup
-    ensure_dir_0700(DEFAULT_PERSISTENCE_MOUNT);
-
-    // Shell invocation to cryptsetup with passphrase pipe
-    char cmd[512];
-    snprintf(cmd, sizeof(cmd), "echo -n '%s' | cryptsetup open %s %s --type luks >/dev/null 2>&1",
-             passphrase ? passphrase : "", mgr->dev_path, PERSISTENCE_MAPPER_NAME);
-
-    int ret = system(cmd);
-    if (ret != 0) {
-        LOG_ERROR("Failed to open LUKS container '%s': invalid passphrase or corrupted header", mgr->dev_path);
-        return BOOTO_ERR_INVALID_ARG;
+    booto_error_t err = disk_ensure_private_dir(DEFAULT_PERSISTENCE_MOUNT);
+    if (err != BOOTO_OK) {
+        LOG_ERROR("Unsafe or unusable persistence mount point %s", DEFAULT_PERSISTENCE_MOUNT);
+        return err;
     }
 
-    // Mount decrypted device mapper
-    char mnt_cmd[512];
-    snprintf(mnt_cmd, sizeof(mnt_cmd), "mount /dev/mapper/%s %s",
-             PERSISTENCE_MAPPER_NAME, DEFAULT_PERSISTENCE_MOUNT);
-    if (system(mnt_cmd) != 0) {
-        LOG_ERROR("Failed to mount decrypted persistence volume");
+    const char *pass = passphrase ? passphrase : "";
+    const char *const open_argv[] = {"cryptsetup", "open", "--type", "luks", "--key-file=-",
+                                     mgr->dev_path, PERSISTENCE_MAPPER_NAME, NULL};
+    int status = 0;
+    err = disk_exec_argv(open_argv, pass, strlen(pass), &status);
+    if (err != BOOTO_OK) {
+        if (status == 2) {
+            LOG_ERROR("Failed to open LUKS container '%s': invalid passphrase", mgr->dev_path);
+            return BOOTO_ERR_PERMISSION_DENIED;
+        }
+        LOG_ERROR("Failed to open LUKS container '%s' (exit %d)", mgr->dev_path, status);
+        return BOOTO_ERR_IO;
+    }
+
+    if (mount("/dev/mapper/" PERSISTENCE_MAPPER_NAME, DEFAULT_PERSISTENCE_MOUNT, "ext4",
+              MS_NODEV | MS_NOSUID, NULL) != 0) {
+        LOG_ERROR("Failed to mount decrypted persistence volume: %s", strerror(errno));
+        close_mapper();
         return BOOTO_ERR_MOUNT_FAILED;
     }
 
-    ensure_dir_0700(mgr->cases_dir);
-    ensure_dir_0700(mgr->rules_dir);
-    ensure_dir_0700(mgr->logs_dir);
+    if (disk_ensure_private_dir(mgr->cases_dir) != BOOTO_OK ||
+        disk_ensure_private_dir(mgr->rules_dir) != BOOTO_OK ||
+        disk_ensure_private_dir(mgr->logs_dir) != BOOTO_OK) {
+        LOG_WARN("Persistence subdirectories missing or unsafe under %s", DEFAULT_PERSISTENCE_MOUNT);
+    }
+
+    struct statvfs vfs;
+    if (statvfs(DEFAULT_PERSISTENCE_MOUNT, &vfs) == 0) {
+        mgr->total_bytes = (uint64_t)vfs.f_blocks * (uint64_t)vfs.f_frsize;
+        mgr->free_bytes = (uint64_t)vfs.f_bavail * (uint64_t)vfs.f_frsize;
+    }
 
     mgr->state = PERSISTENCE_STATE_UNLOCKED;
     LOG_INFO("LUKS Persistence volume unlocked and mounted at %s", DEFAULT_PERSISTENCE_MOUNT);
@@ -127,20 +128,23 @@ booto_error_t persistence_lock(persistence_mgr_t *mgr) {
     LOG_INFO("Locking LUKS persistence volume...");
 
     if (!disk_is_running_as_root()) {
-        mgr->state = PERSISTENCE_STATE_LOCKED;
-        LOG_INFO("Persistence volume locked (Restored to Amnesic RAM Mode)");
-        return BOOTO_OK;
+        if (mgr->state != PERSISTENCE_STATE_UNLOCKED) return BOOTO_OK;
+        LOG_ERROR("Root privileges required to lock LUKS persistence volume");
+        return BOOTO_ERR_PERMISSION_DENIED;
     }
 
     sync();
 
-    char umnt_cmd[256];
-    snprintf(umnt_cmd, sizeof(umnt_cmd), "umount %s >/dev/null 2>&1", DEFAULT_PERSISTENCE_MOUNT);
-    system(umnt_cmd);
+    if (umount2(DEFAULT_PERSISTENCE_MOUNT, 0) != 0 && errno != EINVAL) {
+        LOG_ERROR("Failed to unmount %s: %s", DEFAULT_PERSISTENCE_MOUNT, strerror(errno));
+        return BOOTO_ERR_IO;
+    }
 
-    char close_cmd[256];
-    snprintf(close_cmd, sizeof(close_cmd), "cryptsetup close %s >/dev/null 2>&1", PERSISTENCE_MAPPER_NAME);
-    system(close_cmd);
+    const char *const argv[] = {"cryptsetup", "close", PERSISTENCE_MAPPER_NAME, NULL};
+    if (disk_exec_argv(argv, NULL, 0, NULL) != BOOTO_OK) {
+        LOG_ERROR("Failed to close LUKS mapper '%s'", PERSISTENCE_MAPPER_NAME);
+        return BOOTO_ERR_IO;
+    }
 
     mgr->state = PERSISTENCE_STATE_LOCKED;
     LOG_INFO("Persistence volume cleanly detached and locked (Amnesic Mode restored)");
