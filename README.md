@@ -20,7 +20,7 @@ Built with **C11**, Booto runs from a trusted Debian Live USB environment so the
 - **Safe Forensic Storage Discovery & Mounter**: Automatic enumeration of NVMe/SATA/USB block devices via `/proc/partitions` and `sysfs`, enforcing strict read-only mounts (`MS_RDONLY | MS_NODEV | MS_NOEXEC | MS_NOSUID` with `noload`).
 - **Low-Level Forensic Detection Modules**:
   - **MBR & VBR Boot Sector Auditor**: Raw sector-level parser for the Master Boot Record (sector 0), the track-0 gap, and partition Volume Boot Records, matched against MBR byte-pattern signatures.
-  - **UEFI & ESP Bootkit Analyzer**: PE32+ (PE/COFF) parser that computes each EFI binary's Authenticode hash and matches it against the Secure Boot DBX revocation rules.
+  - **UEFI & ESP Bootkit Analyzer**: PE32+ (PE/COFF) parser that computes each EFI binary's Authenticode hash and matches it against the Secure Boot DBX revocation rules. If the root filesystem's `/boot/efi` is empty, the EFI System Partition is found in the disk's GPT (or MBR type `0xEF`) and mounted read-only for the scan.
   - **Kernel Image & LKM Hook Scanner**: 64-bit ELF parser and symbol-table audit against LKM rootkit signature rules.
   - **Initramfs Auditor**: Decompresses gzip/xz/zstd/lz4/bzip2 initramfs images (and compressed `.ko` modules) via the system tools, parses the CPIO archive, and audits early-boot scripts.
   - **Userland Preload Scanner**: Checks `/etc/ld.so.preload` and `LD_PRELOAD` in `/etc/environment`. PAM modules are not scanned.
