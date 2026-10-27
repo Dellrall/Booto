@@ -5,7 +5,23 @@
 #include "test_framework.h"
 #include "disk_mount.h"
 
+#include <errno.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+static const char *const MOCK_UUIDS[] = {"e4a2c1f9-90b1-4f8a-a92c-8123ef459a01", "B849-1A2E", "7A4C89E14C899723"};
+
+static int count_mock_entries(const disk_discovery_result_t *res) {
+    int n = 0;
+    for (int i = 0; i < res->count; i++) {
+        for (size_t j = 0; j < sizeof(MOCK_UUIDS) / sizeof(MOCK_UUIDS[0]); j++) {
+            if (strcmp(res->partitions[i].uuid, MOCK_UUIDS[j]) == 0) n++;
+        }
+    }
+    return n;
+}
 
 static void test_size_formatting(void) {
     TEST_START("test_size_formatting");
@@ -29,6 +45,7 @@ static void test_disk_enumeration(void) {
     booto_error_t err = disk_discover_partitions(&res, true);
     ASSERT_INT_EQ(err, BOOTO_OK, "Discovery must return BOOTO_OK");
     ASSERT_TRUE(res.count > 0, "Discovered partition count must be > 0");
+    ASSERT_INT_EQ(count_mock_entries(&res), 3, "include_mock must append the full mock set");
 
     bool has_target = false;
     for (int i = 0; i < res.count; i++) {
@@ -41,14 +58,28 @@ static void test_disk_enumeration(void) {
     TEST_PASS("test_disk_enumeration");
 }
 
-static void test_mock_mount_ro(void) {
-    TEST_START("test_mock_mount_ro");
-    booto_error_t m_err = disk_mount_ro("/dev/nvme0n1p2", "/tmp/test_mock_mnt", "ext4");
-    ASSERT_INT_EQ(m_err, BOOTO_OK, "Mount RO must succeed (real or mock emulated)");
+static void test_discovery_without_mock(void) {
+    TEST_START("test_discovery_without_mock");
+    disk_discovery_result_t res;
+    booto_error_t err = disk_discover_partitions(&res, false);
+    ASSERT_INT_EQ(err, BOOTO_OK, "Discovery must return BOOTO_OK");
+    // Real hosts may legitimately have /dev/sda1 etc., so identify mocks by their fixed UUIDs.
+    ASSERT_INT_EQ(count_mock_entries(&res), 0, "No mock partitions without include_mock");
+    TEST_PASS("test_discovery_without_mock");
+}
 
-    booto_error_t u_err = disk_unmount("/tmp/test_mock_mnt");
-    ASSERT_INT_EQ(u_err, BOOTO_OK, "Unmount must succeed");
-    TEST_PASS("test_mock_mount_ro");
+static void test_nonroot_denied(void) {
+    TEST_START("test_nonroot_denied");
+    if (geteuid() == 0) {
+        printf("    [SKIP] running as root\n");
+        return;
+    }
+    ASSERT_INT_EQ(disk_mount_ro("/dev/nvme0n1p2", "/tmp/booto_never_created", "ext4"), BOOTO_ERR_PERMISSION_DENIED,
+                  "Non-root mount must be denied");
+    ASSERT_INT_EQ(disk_unmount("/tmp/booto_never_created"), BOOTO_ERR_PERMISSION_DENIED, "Non-root unmount must be denied");
+    ASSERT_INT_EQ(disk_luks_open_ro("/dev/nvme0n1p3", "booto_mock_luks", "pw"), BOOTO_ERR_PERMISSION_DENIED,
+                  "Non-root LUKS open must be denied");
+    TEST_PASS("test_nonroot_denied");
 }
 
 static void test_fs_magic_probing(void) {
@@ -199,25 +230,103 @@ static void test_fs_magic_probing(void) {
     TEST_PASS("test_fs_magic_probing");
 }
 
-static void test_luks_open_and_close(void) {
-    TEST_START("test_luks_open_and_close");
+static void test_luks_invalid_mapper_name(void) {
+    TEST_START("test_luks_invalid_mapper_name");
+    ASSERT_INT_EQ(disk_luks_open_ro("/dev/nvme0n1p3", "a b;rm", "pw"), BOOTO_ERR_INVALID_ARG, "Shell metachar name rejected");
+    ASSERT_INT_EQ(disk_luks_open_ro("/dev/nvme0n1p3", "", "pw"), BOOTO_ERR_INVALID_ARG, "Empty name rejected");
+    ASSERT_INT_EQ(disk_luks_close("a b;rm"), BOOTO_ERR_INVALID_ARG, "Close rejects bad name");
+    TEST_PASS("test_luks_invalid_mapper_name");
+}
 
-    booto_error_t o_err = disk_luks_open_ro("/dev/nvme0n1p3", "booto_mock_luks", "CorrectPassphrase123");
-    ASSERT_INT_EQ(o_err, BOOTO_OK, "LUKS read-only open must succeed");
+static void test_exec_argv_stdin_verbatim(void) {
+    TEST_START("test_exec_argv_stdin_verbatim");
+    char dir[] = "/tmp/booto_exec_XXXXXX";
+    ASSERT_TRUE(mkdtemp(dir) != NULL, "mkdtemp");
 
-    booto_error_t c_err = disk_luks_close("booto_mock_luks");
-    ASSERT_INT_EQ(c_err, BOOTO_OK, "LUKS close must succeed");
+    char payload[128];
+    snprintf(payload, sizeof(payload), "x'; touch /tmp/booto_pwned_%ld; '\"$(id)", (long)getpid());
+    char pwned[64];
+    snprintf(pwned, sizeof(pwned), "/tmp/booto_pwned_%ld", (long)getpid());
+    char file[64];
+    snprintf(file, sizeof(file), "%s/payload", dir);
 
-    TEST_PASS("test_luks_open_and_close");
+    FILE *fp = fopen(file, "wb");
+    bool wrote = fp && fwrite(payload, 1, strlen(payload), fp) == strlen(payload);
+    if (fp) fclose(fp);
+
+    const char *const argv[] = {"cmp", "-s", "-", file, NULL};
+    int status = -1;
+    booto_error_t same = disk_exec_argv(argv, payload, strlen(payload), &status);
+    booto_error_t diff = disk_exec_argv(argv, "different", 9, NULL);
+    bool pwned_exists = access(pwned, F_OK) == 0;
+
+    remove(file);
+    rmdir(dir);
+    remove(pwned);
+
+    ASSERT_TRUE(wrote, "Payload file written");
+    ASSERT_INT_EQ(same, BOOTO_OK, "Identical stdin bytes must match");
+    ASSERT_INT_EQ(status, 0, "Exit status 0 reported");
+    ASSERT_TRUE(diff != BOOTO_OK, "Different stdin bytes must not match");
+    ASSERT_TRUE(!pwned_exists, "Shell metacharacters must never be interpreted");
+    TEST_PASS("test_exec_argv_stdin_verbatim");
+}
+
+static void test_exec_argv_not_found(void) {
+    TEST_START("test_exec_argv_not_found");
+    const char *const argv[] = {"booto_definitely_missing_binary_xyz", NULL};
+    int status = 0;
+    ASSERT_INT_EQ(disk_exec_argv(argv, NULL, 0, &status), BOOTO_ERR_NOT_FOUND, "Missing binary -> NOT_FOUND");
+    ASSERT_INT_EQ(status, 127, "Exit status 127");
+    TEST_PASS("test_exec_argv_not_found");
+}
+
+static void test_ensure_private_dir(void) {
+    TEST_START("test_ensure_private_dir");
+    char parent[] = "/tmp/booto_privdir_XXXXXX";
+    ASSERT_TRUE(mkdtemp(parent) != NULL, "mkdtemp");
+
+    char created[96], link[96], open_dir[96];
+    snprintf(created, sizeof(created), "%s/new", parent);
+    snprintf(link, sizeof(link), "%s/link", parent);
+    snprintf(open_dir, sizeof(open_dir), "%s/open", parent);
+
+    booto_error_t c_err = disk_ensure_private_dir(created);
+    struct stat st;
+    bool is_0700 = lstat(created, &st) == 0 && S_ISDIR(st.st_mode) && (st.st_mode & 07777) == 0700;
+    booto_error_t again = disk_ensure_private_dir(created);
+
+    bool link_ok = symlink(created, link) == 0;
+    booto_error_t l_err = disk_ensure_private_dir(link);
+
+    bool open_ok = mkdir(open_dir, 0700) == 0 && chmod(open_dir, 0777) == 0;
+    booto_error_t o_err = disk_ensure_private_dir(open_dir);
+
+    remove(link);
+    rmdir(created);
+    rmdir(open_dir);
+    rmdir(parent);
+
+    ASSERT_INT_EQ(c_err, BOOTO_OK, "Creates missing dir");
+    ASSERT_TRUE(is_0700, "Created dir has mode 0700");
+    ASSERT_INT_EQ(again, BOOTO_OK, "Existing private dir accepted");
+    ASSERT_TRUE(link_ok && open_ok, "Fixture setup");
+    ASSERT_INT_EQ(l_err, BOOTO_ERR_PERMISSION_DENIED, "Symlink rejected");
+    ASSERT_INT_EQ(o_err, BOOTO_ERR_PERMISSION_DENIED, "0777 dir rejected");
+    TEST_PASS("test_ensure_private_dir");
 }
 
 int main(void) {
     printf("\n--- Running Storage Discovery & Mount Tests ---\n");
     test_size_formatting();
     test_disk_enumeration();
-    test_mock_mount_ro();
+    test_discovery_without_mock();
+    test_nonroot_denied();
     test_fs_magic_probing();
-    test_luks_open_and_close();
+    test_luks_invalid_mapper_name();
+    test_exec_argv_stdin_verbatim();
+    test_exec_argv_not_found();
+    test_ensure_private_dir();
     TEST_SUMMARY();
     return 0;
 }

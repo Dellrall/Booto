@@ -38,23 +38,27 @@ typedef struct {
 /**
  * @brief Initialize persistence manager and detect secondary encrypted partition.
  * @param mgr Output manager structure.
- * @param preferred_dev Optional device path (or NULL for auto-detection).
- * @return BOOTO_OK on success.
+ * @param preferred_dev Optional device path under /dev/ (or NULL for auto-detection).
+ * @return BOOTO_OK on success, BOOTO_ERR_INVALID_ARG if preferred_dev is not under /dev/.
  */
 booto_error_t persistence_init(persistence_mgr_t *mgr, const char *preferred_dev);
 
 /**
  * @brief Unlock and mount LUKS persistence container.
  * @param mgr Manager structure.
- * @param passphrase Decryption passphrase (wiped after use).
- * @return BOOTO_OK on success, negative error code on failure.
+ * @param passphrase Decryption passphrase. NOT wiped by this module; the caller owns
+ *                   the buffer and must clear it (e.g. explicit_bzero) after the call.
+ * @return BOOTO_OK on success; BOOTO_ERR_PERMISSION_DENIED when not root or the
+ *         passphrase is wrong; BOOTO_ERR_IO / BOOTO_ERR_MOUNT_FAILED otherwise.
  */
 booto_error_t persistence_unlock(persistence_mgr_t *mgr, const char *passphrase);
 
 /**
  * @brief Safely unmount and close LUKS persistence container.
  * @param mgr Manager structure.
- * @return BOOTO_OK on success.
+ * @return BOOTO_OK on success (or no-op when not unlocked as non-root);
+ *         BOOTO_ERR_PERMISSION_DENIED when non-root and unlocked; BOOTO_ERR_IO if
+ *         unmount/close fails (state stays UNLOCKED).
  */
 booto_error_t persistence_lock(persistence_mgr_t *mgr);
 

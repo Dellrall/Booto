@@ -5,6 +5,24 @@ All notable changes to the **Booto** forensic rootkit & bootkit detection framew
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+- **Storage layer (`src/disk_mount.c`, `src/persistence_mgr.c`)**:
+  - `cryptsetup` is now run via `fork`/`execvp` (`disk_exec_argv()`); passphrases go over stdin with `--key-file=-`. This removes a root shell-injection through LUKS passphrases and keeps them out of `ps`.
+  - Mount directories are created with `disk_ensure_private_dir()`, which creates them as 0700 and rejects symlinks or foreign-owned directories.
+  - The target block device is marked read-only with `BLKROSET` before any mount.
+  - ext4/ext3 are never mounted without `noload`, xfs without `norecovery`, or btrfs without `nologreplay`.
+
+### Fixed
+- `disk_mount_ro()` returns `BOOTO_ERR_MOUNT_FAILED` when no filesystem mounts, instead of `BOOTO_OK`.
+- Non-root mount, unmount and LUKS calls return `BOOTO_ERR_PERMISSION_DENIED` instead of emulating success.
+- Mock partitions are injected only with `--mock-drives`. Partition names such as `nvme0n1` are no longer mislabelled by substring heuristics.
+- `persistence_lock()` checks the `umount`/`cryptsetup close` results and stays `UNLOCKED` on failure. `persistence_unlock()` closes the mapper if mounting fails and reports real capacity via `statvfs`.
+- The TUI wipes the LUKS passphrase buffer with `explicit_bzero`.
+
+---
+
 ## [1.1.2] - 2026-09-03
 
 ### Added

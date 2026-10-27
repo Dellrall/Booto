@@ -366,7 +366,7 @@ int tui_app_run(booto_context_t *ctx) {
                     }
                 } else if (event.type == KEY_ENTER) {
                     booto_error_t err = disk_luks_open_ro(app.luks_target_dev, "booto_target_luks", app.luks_passphrase_input);
-                    memset(app.luks_passphrase_input, 0, sizeof(app.luks_passphrase_input));
+                    explicit_bzero(app.luks_passphrase_input, sizeof(app.luks_passphrase_input));
                     app.luks_passphrase_len = 0;
                     if (err == BOOTO_OK) {
                         tui_app_append_log(&app, LOG_LEVEL_INFO, NULL, "Successfully unlocked target LUKS volume (READ-ONLY)");
