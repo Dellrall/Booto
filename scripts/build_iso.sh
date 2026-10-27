@@ -77,9 +77,9 @@ cp "${vmlinuz_path}" "${CD_DIR}/live/vmlinuz"
 cp "${initrd_path}" "${CD_DIR}/live/initrd.img"
 
 echo "[+] Step 5/6: Compressing root filesystem into SquashFS..."
+# mksquashfs reads the exported SOURCE_DATE_EPOCH itself and rejects -mkfs-time/-all-time alongside it.
 mksquashfs "${ROOTFS_DIR}" "${CD_DIR}/live/filesystem.squashfs" \
-           -comp xz -Xbcj x86 -noappend -wildcards \
-           -mkfs-time "${SOURCE_DATE_EPOCH}" -all-time "${SOURCE_DATE_EPOCH}"
+           -comp xz -Xbcj x86 -noappend -wildcards
 
 echo "[+] Step 6/6: Assembling GRUB2 hybrid boot configuration..."
 cat << 'EOF_GRUB' > "${CD_DIR}/boot/grub/grub.cfg"
