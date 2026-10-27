@@ -27,7 +27,7 @@ Built with low-level **C11**, Booto operates from a trusted Debian Live USB envi
   - **Userland Interceptor Scanner**: `/etc/ld.so.preload` and PAM dynamic linker hook detection (Azazel, Jynx).
   - **Raw Ext4 Inode Differential Engine**: Cross-view validation comparing raw disk superblock & inode tables against VFS directory trees.
 - **Empirical Benchmarking & Academic Validation**: Comprehensive evaluation demonstrating 100% True Positive Rate (TPR), ~7x–9x faster scan speed than in-system tools, and <15 MB peak RAM footprint.
-- **Defensive Fuzzing, ASan & Multi-Compiler CI/CD**: 1,500-iteration mutation fuzzing suite, AddressSanitizer/UBSan validation, and GCC/Clang automated matrix.
+- **Defensive Fuzzing, ASan & Multi-Compiler CI/CD**: Deterministic 1,500-iteration-per-parser mutation fuzzing of the ELF, PE, MBR/VBR/gap and initramfs parsers, AddressSanitizer/UBSan validation, and GCC/Clang automated matrix.
 - **Cryptographic Case Reporting**: Automated export of signed machine-readable JSON and human-readable Markdown reports to `/persistence/cases/` with SHA-256 hash chains.
 - **Automated ISO Generation (`make iso`)**: Standalone live bootable ISO output ready for USB deployment.
 

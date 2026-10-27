@@ -15,6 +15,7 @@
 
 #include <ctype.h>
 #include <dirent.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -41,44 +42,124 @@ static void add_preload_threat(preload_scan_result_t *result,
                  f->threat_name, f->file_path, f->target_library, f->rule_id);
 }
 
-static void scan_ld_so_preload(const char *rootfs, preload_scan_result_t *result) {
+#define PRELOAD_MAX_FILE_BYTES (1024u * 1024u)
+
+// Reads path fully into a NUL-terminated heap buffer; absent -> NOT_FOUND, oversized -> CORRUPT_DATA.
+static booto_error_t read_config_file(const char *path, char **out, size_t *out_len) {
+    FILE *fp = fopen(path, "rb");
+    if (!fp) return errno == ENOENT ? BOOTO_ERR_NOT_FOUND : BOOTO_ERR_IO;
+    char *buf = malloc(PRELOAD_MAX_FILE_BYTES + 1);
+    if (!buf) {
+        fclose(fp);
+        return BOOTO_ERR_OUT_OF_MEMORY;
+    }
+    size_t n = fread(buf, 1, PRELOAD_MAX_FILE_BYTES + 1, fp);
+    bool failed = ferror(fp) != 0;
+    fclose(fp);
+    if (failed || n > PRELOAD_MAX_FILE_BYTES) {
+        free(buf);
+        return failed ? BOOTO_ERR_IO : BOOTO_ERR_CORRUPT_DATA;
+    }
+    buf[n] = '\0';
+    *out = buf;
+    *out_len = n;
+    return BOOTO_OK;
+}
+
+static bool is_preload_separator(char c) {
+    return c == ':' || c == '\0' || c == '"' || c == '\'' || isspace((unsigned char)c);
+}
+
+// Hashes and reports every library in s[0..len): ld.so separates entries by whitespace or ':' and
+// treats '#' as a comment to end of line.
+static void report_preload_tokens(const char *rootfs, const char *cfg_path, const char *s, size_t len,
+                                  const char *threat_name, const char *rule_id, const char *description,
+                                  preload_scan_result_t *result) {
+    size_t i = 0;
+    while (i < len) {
+        if (s[i] == '#') {
+            while (i < len && s[i] != '\n') i++;
+            continue;
+        }
+        if (is_preload_separator(s[i])) {
+            i++;
+            continue;
+        }
+        size_t start = i;
+        while (i < len && s[i] != '#' && !is_preload_separator(s[i])) i++;
+
+        char lib[256];
+        size_t tok_len = i - start < sizeof(lib) - 1 ? i - start : sizeof(lib) - 1;
+        memcpy(lib, s + start, tok_len);
+        lib[tok_len] = '\0';
+
+        char target_full[1024];
+        snprintf(target_full, sizeof(target_full), "%.700s%s%s", rootfs, lib[0] == '/' ? "" : "/", lib);
+        char sha256[65] = "0000000000000000000000000000000000000000000000000000000000000000";
+        sha256_file_hex(target_full, sha256);
+
+        add_preload_threat(result, cfg_path, threat_name, lib, sha256, rule_id, description);
+    }
+}
+
+static booto_error_t scan_ld_so_preload(const char *rootfs, preload_scan_result_t *result) {
     char preload_path[512];
     snprintf(preload_path, sizeof(preload_path), "%.400s/etc/ld.so.preload", rootfs);
 
-    FILE *fp = fopen(preload_path, "r");
-    if (!fp) return;
-
-    result->files_scanned++;
-    char line[512];
-
-    while (fgets(line, sizeof(line), fp)) {
-        char *ptr = line;
-        while (*ptr && isspace((unsigned char)*ptr)) ptr++;
-        if (*ptr == '\0' || *ptr == '#') continue;
-
-        size_t len = strlen(ptr);
-        while (len > 0 && isspace((unsigned char)ptr[len - 1])) {
-            ptr[--len] = '\0';
-        }
-
-        if (len > 0) {
-            char target_full[1024];
-            snprintf(target_full, sizeof(target_full), "%.500s%.500s", rootfs, ptr);
-
-            char sha256[65] = "0000000000000000000000000000000000000000000000000000000000000000";
-            sha256_file_hex(target_full, sha256);
-
-            add_preload_threat(result,
-                               preload_path,
-                               "Active Userland LD_PRELOAD Rootkit",
-                               ptr,
-                               sha256,
-                               "PRELOAD_ACTIVE_HOOK",
-                               "Active dynamic linker shared object hook configured in /etc/ld.so.preload");
-        }
+    char *buf = NULL;
+    size_t len = 0;
+    booto_error_t err = read_config_file(preload_path, &buf, &len);
+    if (err == BOOTO_ERR_NOT_FOUND) return BOOTO_OK;
+    if (err != BOOTO_OK) {
+        LOG_ERROR("Cannot read '%s' (err: %d); preload hooks not audited", preload_path, err);
+        return err;
     }
 
-    fclose(fp);
+    result->files_scanned++;
+    report_preload_tokens(rootfs, preload_path, buf, len,
+                          "Active Userland LD_PRELOAD Rootkit", "PRELOAD_ACTIVE_HOOK",
+                          "Active dynamic linker shared object hook configured in /etc/ld.so.preload", result);
+    free(buf);
+    return BOOTO_OK;
+}
+
+// pam_env reads KEY=VALUE lines (optionally prefixed by "export") from /etc/environment.
+static booto_error_t scan_environment(const char *rootfs, preload_scan_result_t *result) {
+    char env_path[512];
+    snprintf(env_path, sizeof(env_path), "%.400s/etc/environment", rootfs);
+
+    char *buf = NULL;
+    size_t len = 0;
+    booto_error_t err = read_config_file(env_path, &buf, &len);
+    if (err == BOOTO_ERR_NOT_FOUND) return BOOTO_OK;
+    if (err != BOOTO_OK) {
+        LOG_ERROR("Cannot read '%s' (err: %d); LD_PRELOAD environment not audited", env_path, err);
+        return err;
+    }
+
+    result->files_scanned++;
+    static const char key[] = "LD_PRELOAD=";
+    const size_t key_len = sizeof(key) - 1;
+    size_t pos = 0;
+    while (pos < len) {
+        const char *nl = memchr(buf + pos, '\n', len - pos);
+        size_t eol = nl ? (size_t)(nl - buf) : len;
+        size_t p = pos;
+        while (p < eol && isspace((unsigned char)buf[p])) p++;
+        if (eol - p > 7 && strncmp(buf + p, "export", 6) == 0 && isspace((unsigned char)buf[p + 6])) {
+            p += 7;
+            while (p < eol && isspace((unsigned char)buf[p])) p++;
+        }
+        if (eol - p >= key_len && strncmp(buf + p, key, key_len) == 0) {
+            report_preload_tokens(rootfs, env_path, buf + p + key_len, eol - p - key_len,
+                                  "Persistent LD_PRELOAD Environment Hook", "PRELOAD_ENV_HOOK",
+                                  "LD_PRELOAD shared object injected into every login session via /etc/environment",
+                                  result);
+        }
+        pos = eol + 1;
+    }
+    free(buf);
+    return BOOTO_OK;
 }
 
 static void scan_ld_conf_dir(const char *rootfs, preload_scan_result_t *result) {
@@ -126,10 +207,12 @@ booto_error_t preload_scan_rootfs(const char *target_rootfs, preload_scan_result
 
     LOG_INFO("Scanning userland preload configurations in rootfs: %s", target_rootfs);
 
-    scan_ld_so_preload(target_rootfs, result);
+    booto_error_t err = scan_ld_so_preload(target_rootfs, result);
+    booto_error_t env_err = scan_environment(target_rootfs, result);
     scan_ld_conf_dir(target_rootfs, result);
+    if (err == BOOTO_OK) err = env_err;
 
     LOG_INFO("Preload scanner complete: %d config files audited, %d userland threats flagged",
              result->files_scanned, result->threats_detected);
-    return BOOTO_OK;
+    return err;
 }

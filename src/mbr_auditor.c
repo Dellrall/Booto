@@ -243,61 +243,124 @@ booto_error_t mbr_audit_buffer(const uint8_t *buffer, size_t len, const char *de
     return BOOTO_OK;
 }
 
+// GRUB 2 diskboot.img (core.img sector 0): push dx; push si; mov si,imm16; call rel16; pop si;
+// mov di,0x81F4 (firstlist); first blocklist segment 0x0820 in the last word of the sector.
+static bool gap_starts_with_grub_core(const uint8_t *g, size_t len) {
+    return len >= MBR_SECTOR_SIZE &&
+           g[0] == 0x52 && g[1] == 0x56 && g[2] == 0xBE && g[5] == 0xE8 && g[8] == 0x5E &&
+           g[9] == 0xBF && g[10] == 0xF4 && g[11] == 0x81 &&
+           g[0x1FE] == 0x20 && g[0x1FF] == 0x08;
+}
+
+// Syslinux ldlinux.sys: "\r\n<NAME>LINUX " banner, then LDLINUX_MAGIC (0x3EB202FE) 8-byte aligned.
+static bool gap_starts_with_ldlinux(const uint8_t *g, size_t len) {
+    if (len < 64 || g[0] != '\r' || g[1] != '\n' || memcmp(&g[5], "LINUX ", 6) != 0) return false;
+    static const uint8_t magic[4] = { 0xFE, 0x02, 0xB2, 0x3E };
+    for (size_t off = 8; off + sizeof(magic) <= 64; off += 8) {
+        if (memcmp(&g[off], magic, sizeof(magic)) == 0) return true;
+    }
+    return false;
+}
+
+typedef struct {
+    const char *bytes;
+    size_t len;
+} gap_pattern_t;
+#define GAP_PATTERN(s) { s, sizeof(s) - 1 }
+
+// INT 13h call, INT 13h IVT vector overwrite (0000:004C), far jump to the relocated MBR at 0000:7C00.
+static const gap_pattern_t k_gap_hook_patterns[] = {
+    GAP_PATTERN("\xCD\x13"), GAP_PATTERN("\xA3\x4C\x00"), GAP_PATTERN("\xC7\x06\x4C\x00"),
+    GAP_PATTERN("\xEA\x00\x7C\x00\x00"),
+};
+// Real-mode segment/stack setup: mov ss,ax / mov ds,ax / mov es,ax / mov sp,7C00h.
+static const gap_pattern_t k_gap_setup_patterns[] = {
+    GAP_PATTERN("\x8E\xD0"), GAP_PATTERN("\x8E\xD8"), GAP_PATTERN("\x8E\xC0"), GAP_PATTERN("\xBC\x00\x7C"),
+};
+
+static bool gap_has_any(const uint8_t *buf, size_t len, const gap_pattern_t *pats, size_t count) {
+    for (size_t i = 0; i < count; i++) {
+        if (mem_search(buf, len, (const uint8_t *)pats[i].bytes, pats[i].len)) return true;
+    }
+    return false;
+}
+
+// log2 without libm (the project links nothing): scale into [1,2), then ln via the atanh series.
+static double log2_nolibm(double x) {
+    double exponent = 0.0;
+    while (x >= 2.0) { x /= 2.0; exponent += 1.0; }
+    while (x < 1.0) { x *= 2.0; exponent -= 1.0; }
+    double z = (x - 1.0) / (x + 1.0), z2 = z * z, term = z, sum = 0.0;
+    for (int k = 1; k < 40; k += 2) {
+        sum += term / (double)k;
+        term *= z2;
+    }
+    return exponent + 2.0 * sum / 0.69314718055994530942;
+}
+
+// Shannon entropy (bits/byte) over the sectors holding any non-zero byte; *region_len gets their size.
+static double gap_nonzero_entropy(const uint8_t *g, size_t len, size_t *region_len) {
+    size_t hist[256] = { 0 };
+    size_t n = 0;
+    for (size_t off = 0; off < len; off += MBR_SECTOR_SIZE) {
+        size_t chunk = (len - off < MBR_SECTOR_SIZE) ? len - off : MBR_SECTOR_SIZE;
+        bool nonzero = false;
+        for (size_t i = 0; i < chunk && !nonzero; i++) nonzero = g[off + i] != 0;
+        if (!nonzero) continue;
+        for (size_t i = 0; i < chunk; i++) hist[g[off + i]]++;
+        n += chunk;
+    }
+    *region_len = n;
+    if (n == 0) return 0.0;
+    double weighted = 0.0;
+    for (size_t b = 0; b < 256; b++) {
+        if (hist[b]) weighted += (double)hist[b] * log2_nolibm((double)hist[b]);
+    }
+    return log2_nolibm((double)n) - weighted / (double)n;
+}
+
+#define GAP_PACKED_ENTROPY_BITS 7.2
+
 booto_error_t mbr_audit_gap_buffer(const uint8_t *gap_data, size_t gap_len, uint64_t start_lba, const char *device_path, mbr_scan_result_t *result) {
     if (!gap_data || gap_len == 0 || !result) return BOOTO_ERR_INVALID_ARG;
 
     char dev_str[256];
     snprintf(dev_str, sizeof(dev_str), "%.255s", device_path ? device_path : "/dev/unknown");
 
-    // Check if entire gap is empty (zeroes)
-    bool is_all_zero = true;
-    for (size_t i = 0; i < gap_len; i++) {
-        if (gap_data[i] != 0x00) {
-            is_all_zero = false;
-            break;
-        }
-    }
-
-    if (is_all_zero) {
+    size_t region_len = 0;
+    double entropy = gap_nonzero_entropy(gap_data, gap_len, &region_len);
+    if (region_len == 0) {
         LOG_INFO("MBR gap (LBA %llu..%llu) is clean (all zero bytes)",
                  (unsigned long long)start_lba, (unsigned long long)(start_lba + (gap_len / MBR_SECTOR_SIZE) - 1));
         return BOOTO_OK;
     }
 
-    // Check if gap contains known GRUB 2 core.img / kernel image
-    if (mem_search(gap_data, gap_len, (const uint8_t *)"GRUB ", 5) ||
-        mem_search(gap_data, gap_len, (const uint8_t *)"grub_core", 9) ||
-        mem_search(gap_data, gap_len, (const uint8_t *)"disk/i386/pc", 12)) {
-        LOG_INFO("MBR gap contains legitimate GRUB core.img payload");
+    // Allow-list only structurally recognised loaders at the gap start; strings elsewhere are attacker-controlled.
+    if (gap_starts_with_grub_core(gap_data, gap_len)) {
+        LOG_INFO("MBR gap starts with legitimate GRUB core.img (diskboot.img) payload");
+        return BOOTO_OK;
+    }
+    if (gap_starts_with_ldlinux(gap_data, gap_len)) {
+        LOG_INFO("MBR gap starts with legitimate Syslinux ldlinux stage payload");
         return BOOTO_OK;
     }
 
-    // Check if gap contains known Syslinux ldlinux core
-    if (mem_search(gap_data, gap_len, (const uint8_t *)"SYSLINUX", 8) ||
-        mem_search(gap_data, gap_len, (const uint8_t *)"ldlinux", 7)) {
-        LOG_INFO("MBR gap contains legitimate Syslinux stage payload");
-        return BOOTO_OK;
-    }
+    bool code_like = gap_has_any(gap_data, gap_len, k_gap_hook_patterns,
+                                 sizeof(k_gap_hook_patterns) / sizeof(k_gap_hook_patterns[0])) &&
+                     gap_has_any(gap_data, gap_len, k_gap_setup_patterns,
+                                 sizeof(k_gap_setup_patterns) / sizeof(k_gap_setup_patterns[0]));
+    bool packed = region_len >= MBR_SECTOR_SIZE && entropy >= GAP_PACKED_ENTROPY_BITS;
 
-    // Check for executable opcodes / hook patterns in the gap
-    bool contains_executable_code = false;
-    for (size_t i = 0; i + 2 < gap_len; i += MBR_SECTOR_SIZE) {
-        uint8_t op = gap_data[i];
-        if (op == 0xEB || op == 0xE9 || op == 0xEA || op == 0xFA || // jmp / cli
-            (op == 0xCD && gap_data[i + 1] == 0x13)) {               // int 13h
-            contains_executable_code = true;
-            break;
-        }
-    }
-
-    if (contains_executable_code) {
+    if (code_like || packed) {
         char gap_sha256[65];
         sha256_buffer_hex(gap_data, gap_len, gap_sha256);
         result->mbr_info.has_mbr_gap_payload = true;
 
         add_mbr_threat(result, "Hidden Executable Payload in MBR Gap", dev_str, gap_sha256,
                        "MBR_GAP_ANOMALOUS_PAYLOAD", start_lba, MBR_SEVERITY_HIGH,
-                       "Unpartitioned Track 0 slack space contains unrecognized executable machine code / INT 13h hooks");
+                       code_like
+                           ? "Unpartitioned Track 0 slack space contains unrecognized real-mode code with INT 13h / IVT hook patterns"
+                           : "Unpartitioned Track 0 slack space contains unrecognized high-entropy (packed/encrypted) payload");
     }
 
     return BOOTO_OK;

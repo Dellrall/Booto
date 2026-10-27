@@ -36,14 +36,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Section and symbol names are bounded by their table size, which closes an over-read on unterminated entries.
   - `symbol_count` is published only after the symbol array is allocated.
   - The PE header and certificate table bounds are computed in 64-bit, so the 32-bit wrap that let a crafted `e_lfanew` read out of bounds is gone.
-
-- `scripts/update_rules.sh` closes the `EOF_LKM` heredoc, which previously swallowed the rest of the script into the LKM rules file. It now regenerates all three rule files and seals byte-for-byte, and fetches nothing from the network.
 ### Changed
 - **Ext4 engine is stats-only**: it reports superblock inode counts with `cross_view_performed = false`. The fabricated "hidden inode #1849201" mock and its fallback were removed.
 - **Case reports** now carry the scan verdict and each module's real status instead of hardcoded `CLEAN`/`ALERT` labels.
 - The TUI Threat Inspector shows `CLEAN`, `THREATS` or `INCOMPLETE` from the real report.
 - F6 exports the last real scan, or refuses if none has run yet.
 - The LUKS banner reflects real unlock state; the fake F2 toggle was removed.
+
 
 ### Fixed
 - `disk_mount_ro()` returns `BOOTO_ERR_MOUNT_FAILED` when no filesystem mounts, instead of `BOOTO_OK`.
@@ -54,6 +53,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Case report write, close and seal failures now propagate as `BOOTO_ERR_IO` instead of returning `BOOTO_OK`.
 - `mbr_audit_device()` returns an error when the device cannot be read, instead of a fabricated clean GRUB result; `mbr_audit_mock()` was removed.
 - `--update-rules` returns the updater script's exit status.
+- `scripts/update_rules.sh` closes the `EOF_LKM` heredoc, which previously swallowed the rest of the script into the LKM rules file. It now regenerates all three rule files and seals byte-for-byte, and fetches nothing from the network.
+- **Initramfs**: gzip, zstd, xz, lzma, lz4 and bzip2 images and early-microcode + compressed concatenations are now decompressed through system tools and scanned. A missing decompressor is an error, never clean. Compressed `.ko.xz`, `.ko.zst` and `.ko.gz` modules are inspected.
+- **MBR gap**: embedding a `GRUB`/`SYSLINUX` string no longer suppresses analysis, and data sectors that merely start with jump bytes no longer alarm. High-entropy or INT 13h hook payloads are flagged.
+- **`ld.so.preload`** entries are whitespace-tokenised (all entries audited, no 512-byte line cap). `LD_PRELOAD` in `etc/environment` is also checked.
+- **Fuzzing**: deterministic mutation fuzzing from valid ELF, PE32/PE32+, MBR/VBR/gap and initramfs seeds (1,500 iterations per parser) replaces 500 purely random buffers.
 
 ---
 

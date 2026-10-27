@@ -32,10 +32,12 @@ typedef struct {
 } preload_scan_result_t;
 
 /**
- * @brief Run full userland preload and PAM interceptor scan on target rootfs.
+ * @brief Audit every library listed in <root>/etc/ld.so.preload (whitespace/':' separated, '#' comments),
+ *        LD_PRELOAD in <root>/etc/environment, and suspicious ld.so.conf.d search paths.
  * @param target_rootfs Path to mounted target rootfs (e.g. /tmp/booto_target_mnt).
  * @param result Output structure to record findings.
- * @return BOOTO_OK on success, negative error code on failure.
+ * @return BOOTO_OK on success; BOOTO_ERR_IO if a present preload/environment file cannot be read,
+ *         BOOTO_ERR_CORRUPT_DATA if it exceeds 1 MiB, other negative codes on failure.
  */
 booto_error_t preload_scan_rootfs(const char *target_rootfs, preload_scan_result_t *result);
 

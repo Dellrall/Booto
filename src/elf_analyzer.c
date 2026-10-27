@@ -37,7 +37,10 @@ booto_error_t elf_parse_buffer(const uint8_t *buf, size_t len, elf_binary_info_t
     memset(info, 0, sizeof(*info));
     sha256_buffer_hex(buf, len, info->sha256);
 
-    const Elf64_Ehdr *ehdr = (const Elf64_Ehdr *)buf;
+    // Input offsets are attacker-controlled and need not be aligned: copy structs out with memcpy.
+    Elf64_Ehdr eh;
+    memcpy(&eh, buf, sizeof(eh));
+    const Elf64_Ehdr *ehdr = &eh;
 
     // 1. Verify Magic
     if (ehdr->e_ident[EI_MAG0] != ELFMAG0 ||
@@ -69,28 +72,32 @@ booto_error_t elf_parse_buffer(const uint8_t *buf, size_t len, elf_binary_info_t
         return BOOTO_ERR_CORRUPT_DATA;
     }
 
-    const Elf64_Shdr *shdrs = (const Elf64_Shdr *)(buf + ehdr->e_shoff);
+    const uint8_t *shdr_base = buf + ehdr->e_shoff;
 
     // 3. Extract Section Header String Table (.shstrtab)
     const char *shstrtab = NULL;
     size_t shstrtab_size = 0;
     if (ehdr->e_shstrndx < ehdr->e_shnum) {
-        const Elf64_Shdr *shstr_hdr = &shdrs[ehdr->e_shstrndx];
-        if (range_in_bounds(shstr_hdr->sh_offset, shstr_hdr->sh_size, len)) {
-            shstrtab = (const char *)(buf + shstr_hdr->sh_offset);
-            shstrtab_size = shstr_hdr->sh_size;
+        Elf64_Shdr shstr_hdr;
+        memcpy(&shstr_hdr, shdr_base + (size_t)ehdr->e_shstrndx * sizeof(Elf64_Shdr), sizeof(shstr_hdr));
+        if (range_in_bounds(shstr_hdr.sh_offset, shstr_hdr.sh_size, len)) {
+            shstrtab = (const char *)(buf + shstr_hdr.sh_offset);
+            shstrtab_size = shstr_hdr.sh_size;
         }
     }
 
     // 4. Record Section Headers
     info->section_count = (ehdr->e_shnum > MAX_ELF_SECTIONS) ? MAX_ELF_SECTIONS : (int)ehdr->e_shnum;
 
+    Elf64_Shdr symtab_copy, strtab_copy, modinfo_copy;
     const Elf64_Shdr *symtab_hdr = NULL;
     const Elf64_Shdr *strtab_hdr = NULL;
     const Elf64_Shdr *modinfo_hdr = NULL;
 
     for (int i = 0; i < info->section_count; i++) {
-        const Elf64_Shdr *sh = &shdrs[i];
+        Elf64_Shdr sh_copy;
+        memcpy(&sh_copy, shdr_base + (size_t)i * sizeof(Elf64_Shdr), sizeof(sh_copy));
+        const Elf64_Shdr *sh = &sh_copy;
         elf_section_info_t *sec = &info->sections[i];
 
         sec->type = sh->sh_type;
@@ -106,11 +113,14 @@ booto_error_t elf_parse_buffer(const uint8_t *buf, size_t len, elf_binary_info_t
         }
 
         if (sh->sh_type == SHT_SYMTAB) {
-            symtab_hdr = sh;
+            symtab_copy = sh_copy;
+            symtab_hdr = &symtab_copy;
         } else if (sh->sh_type == SHT_STRTAB && strcmp(sec->name, ".strtab") == 0) {
-            strtab_hdr = sh;
+            strtab_copy = sh_copy;
+            strtab_hdr = &strtab_copy;
         } else if (strcmp(sec->name, ".modinfo") == 0) {
-            modinfo_hdr = sh;
+            modinfo_copy = sh_copy;
+            modinfo_hdr = &modinfo_copy;
         }
     }
 
@@ -148,7 +158,7 @@ booto_error_t elf_parse_buffer(const uint8_t *buf, size_t len, elf_binary_info_t
         range_in_bounds(symtab_hdr->sh_offset, symtab_hdr->sh_size, len) &&
         range_in_bounds(strtab_hdr->sh_offset, strtab_hdr->sh_size, len)) {
 
-        const Elf64_Sym *syms = (const Elf64_Sym *)(buf + symtab_hdr->sh_offset);
+        const uint8_t *syms = buf + symtab_hdr->sh_offset;
         const char *strtab = (const char *)(buf + strtab_hdr->sh_offset);
         size_t strtab_sz = strtab_hdr->sh_size;
         int total_syms = (int)(symtab_hdr->sh_size / sizeof(Elf64_Sym));
@@ -159,7 +169,9 @@ booto_error_t elf_parse_buffer(const uint8_t *buf, size_t len, elf_binary_info_t
         if (info->symbols) {
             info->symbol_count = want; // only publish the count once the array exists
             for (int i = 0; i < info->symbol_count; i++) {
-                const Elf64_Sym *s = &syms[i];
+                Elf64_Sym sym_copy;
+                memcpy(&sym_copy, syms + (size_t)i * sizeof(Elf64_Sym), sizeof(sym_copy));
+                const Elf64_Sym *s = &sym_copy;
                 elf_symbol_info_t *si = &info->symbols[i];
 
                 si->value = s->st_value;
