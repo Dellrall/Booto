@@ -139,8 +139,7 @@ static void test_malformed_json(void) {
         /* trailing garbage */
         "{\"signatures\": []} x",
         /* name longer than its 64-byte field */
-        "{\"signatures\": [{\"name\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\","
-        " \"rule_id\": \"b\", \"severity\": \"HIGH\", \"description\": \"d\", \"symbols\": [\"s\"]}]}",
+        "{\"signatures\": [{\"name\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"rule_id\": \"b\", \"severity\": \"HIGH\", \"description\": \"d\", \"symbols\": [\"s\"]}]}",
         /* nesting deeper than 16 */
         "{\"x\": [[[[[[[[[[[[[[[[[[1]]]]]]]]]]]]]]]]]], \"signatures\": []}",
         /* invalid severity */
