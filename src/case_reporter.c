@@ -144,7 +144,22 @@ booto_error_t case_report_generate_json(const forensic_case_summary_t *summary,
         fputs(": ", fp); json_put_string(fp, summary->module_status[i]);
         fputs(i + 1 < SCAN_MOD_COUNT ? ",\n" : "\n", fp);
     }
-    fprintf(fp, "  }\n");
+    fprintf(fp, "  },\n");
+    fputs("  \"host_firmware\": ", fp);
+    if (!summary->firmware_ran) {
+        fputs("null\n", fp);
+    } else {
+        fprintf(fp, "{\n    \"scope\": \"machine running Booto\",\n    \"uefi_boot\": %s,\n    \"checks\": [\n",
+                summary->firmware.uefi_boot ? "true" : "false");
+        for (int i = 0; i < FW_CHECK_COUNT; i++) {
+            const fw_check_t *c = &summary->firmware.checks[i];
+            fputs("      {\"name\": ", fp); json_put_string(fp, firmware_check_name((fw_check_id_t)i));
+            fputs(", \"result\": ", fp); json_put_string(fp, firmware_result_str(c->result));
+            fputs(", \"detail\": ", fp); json_put_string(fp, c->detail);
+            fputs(i + 1 < FW_CHECK_COUNT ? "},\n" : "}\n", fp);
+        }
+        fputs("    ]\n  }\n", fp);
+    }
     fprintf(fp, "}\n");
 
     booto_error_t err = finish_report(fp, filename);
@@ -206,6 +221,22 @@ booto_error_t case_report_generate_markdown(const forensic_case_summary_t *summa
     md_module_row(fp, "Userland `ld.so.preload` Scanner", summary->preload_threats_count, summary->module_status[SCAN_MOD_PRELOAD]);
     md_module_row(fp, "Ext4 Superblock Stats", 0, summary->module_status[SCAN_MOD_EXT4]);
     fputs("\n", fp);
+
+    fprintf(fp, "## Host firmware\n\n");
+    if (!summary->firmware_ran) {
+        fprintf(fp, "Not run (no raw target device).\n\n");
+    } else {
+        fprintf(fp, "These checks describe the machine Booto booted on and do not affect the disk verdict.\n\n");
+        fprintf(fp, "| Check | Result | Detail |\n| :--- | :--- | :--- |\n");
+        for (int i = 0; i < FW_CHECK_COUNT; i++) {
+            const fw_check_t *c = &summary->firmware.checks[i];
+            fputs("| ", fp); md_put_cell(fp, firmware_check_name((fw_check_id_t)i));
+            fputs(" | ", fp); md_put_cell(fp, firmware_result_str(c->result));
+            fputs(" | ", fp); md_put_cell(fp, c->detail);
+            fputs(" |\n", fp);
+        }
+        fputs("\n", fp);
+    }
 
     fprintf(fp, "## 3. Cryptographic Chain of Custody\n\n");
     fprintf(fp, "This report was generated in an amnesic Live RAM environment and saved to the LUKS2 encrypted persistence container. Integrity hashes are verified with SHA-256.\n");

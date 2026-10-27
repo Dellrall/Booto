@@ -138,6 +138,14 @@ static int run_cli(booto_context_t *ctx) {
                rep->note[i]);
     }
     printf("\nVerdict: %s\n", forensic_scan_verdict_str(rep->verdict));
+    if (rep->firmware_ran) {
+        printf("\nHost firmware (this machine, not part of the verdict)\n");
+        printf("%-30s | %-7s | %s\n", "Check", "Result", "Detail");
+        for (int i = 0; i < FW_CHECK_COUNT; i++) {
+            printf("%-30s | %-7s | %s\n", firmware_check_name((fw_check_id_t)i),
+                   firmware_result_str(rep->firmware.checks[i].result), rep->firmware.checks[i].detail);
+        }
+    }
 
     if (ctx->persistence_dir[0]) write_reports(rep, ctx->persistence_dir);
 
@@ -158,6 +166,7 @@ static void print_dry_run(const booto_context_t *ctx) {
            ctx->target_rootfs[0] ? ctx->target_rootfs : "/tmp/booto_scan_target");
     printf("  Modules       :");
     for (int i = 0; i < SCAN_MOD_COUNT; i++) printf(" %s%s", forensic_scan_module_name((scan_module_id_t)i), i + 1 < SCAN_MOD_COUNT ? "," : "\n");
+    printf("  Firmware      : Secure Boot keys, dbx and DMA protection of this machine (device mode only)\n");
     printf("  Report dir    : %s\n", ctx->persistence_dir[0] ? ctx->persistence_dir : "(none)");
 }
 

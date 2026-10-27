@@ -39,6 +39,8 @@ typedef struct {
     ext4_diff_result_t ext4;
     int total_threats;
     scan_verdict_t verdict;
+    bool firmware_ran;          /* device mode only; describes this machine, never the verdict */
+    firmware_report_t firmware;
 } forensic_scan_report_t;
 
 /* step is 1..SCAN_MOD_COUNT, called before each module runs. */

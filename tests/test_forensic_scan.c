@@ -47,11 +47,13 @@ static void test_rootfs_dir_scan(void) {
     ASSERT_STR_EQ(r->esp_dev, "", "No ESP recorded");
     ASSERT_INT_EQ(r->total_threats, 0, "Empty rootfs has no threats");
     ASSERT_INT_EQ(r->verdict, SCAN_VERDICT_CLEAN, "Engines that ran are OK, the rest honestly SKIPPED: CLEAN");
+    ASSERT_TRUE(!r->firmware_ran, "rootfs-only scan must not audit host firmware");
 
     forensic_case_summary_t sum;
     forensic_scan_fill_case_summary(r, "CASE-T", "tester", &sum);
     ASSERT_STR_EQ(sum.verdict, "CLEAN", "Summary verdict");
     ASSERT_STR_EQ(sum.module_status[SCAN_MOD_MBR], "SKIPPED", "Summary module status");
+    ASSERT_TRUE(!sum.firmware_ran, "Summary firmware_ran copied");
     free(r);
     TEST_PASS("test_rootfs_dir_scan");
 }
@@ -113,6 +115,8 @@ static void test_unreadable_partition_table(void) {
     ASSERT_INT_EQ(r->status[SCAN_MOD_UEFI], SCAN_STATUS_ERROR, "Unreadable partition table: UEFI error");
     ASSERT_TRUE(strncmp(r->note[SCAN_MOD_UEFI], "cannot read partition table:", 28) == 0, "UEFI error reason");
     ASSERT_INT_EQ(r->verdict, SCAN_VERDICT_INCOMPLETE, "UEFI error must be INCOMPLETE");
+    ASSERT_TRUE(r->firmware_ran, "Device mode must audit host firmware");
+    ASSERT_INT_EQ(r->total_threats, 0, "Firmware findings never count as disk threats");
     free(r);
     TEST_PASS("test_unreadable_partition_table");
 }

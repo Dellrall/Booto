@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Host firmware audit, pass 1 (`src/firmware_auditor.c`)**: read-only checks of the machine Booto booted on.
+  - Secure Boot on and setup mode off, from efivars.
+  - Platform key enrolled.
+  - PKfail test keys ("DO NOT TRUST" / "DO NOT SHIP") in `PK`, `KEK` or `db`.
+  - `dbx` revocation count.
+  - ACPI `DMAR`/`IVRS` IOMMU tables, and Thunderbolt DMA protection.
+  - Each check is pass / fail / unknown / n/a. It runs only in device mode and is shown in the CLI, the TUI Findings pane and both case reports. It never changes the disk verdict.
 - **ESP auto-discovery**:
   - When the scanned root filesystem has no EFI files in `/boot/efi`, the UEFI engine reads the target disk's partition table and finds the EFI System Partition: GPT type `C12A7328-…` (header and entry-array CRC32 verified) or MBR type `0xEF`.
   - It maps the partition to its device through sysfs, mounts it read-only at `/tmp/booto_esp_target`, scans it and unmounts it.
