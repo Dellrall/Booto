@@ -275,6 +275,12 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
         if (ue != BOOTO_OK) LOG_WARN("Failed to unmount %s: %s", SCAN_MOUNT_POINT, err_name(ue));
     }
 
+    if (target_dev) {
+        firmware_audit(NULL, &out->firmware);
+        out->firmware_ran = true;
+        LOG_INFO("Firmware: %d issue(s), %d unknown", out->firmware.fail_count, out->firmware.unknown_count);
+    }
+
     out->total_threats = 0;
     for (int i = 0; i < SCAN_MOD_COUNT; i++) out->total_threats += forensic_scan_module_threats(out, (scan_module_id_t)i);
 
@@ -313,4 +319,6 @@ void forensic_scan_fill_case_summary(const forensic_scan_report_t *r, const char
     for (int i = 0; i < SCAN_MOD_COUNT; i++) {
         snprintf(sum->module_status[i], sizeof(sum->module_status[i]), "%s", forensic_scan_status_str(r->status[i]));
     }
+    sum->firmware_ran = r->firmware_ran;
+    sum->firmware = r->firmware;
 }

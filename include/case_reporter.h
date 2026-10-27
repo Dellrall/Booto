@@ -6,6 +6,7 @@
 #define BOOTO_CASE_REPORTER_H
 
 #include "booto.h"
+#include "firmware_auditor.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -29,6 +30,8 @@ typedef struct {
     char module_status[6][16];        /**< Per-module status, indexed by scan_module_id_t */
     int total_threats;
     char highest_severity[16];
+    bool firmware_ran;                /**< Host firmware audit ran (device mode only) */
+    firmware_report_t firmware;       /**< Machine running Booto; not part of the verdict */
 } forensic_case_summary_t;
 
 /**

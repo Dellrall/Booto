@@ -12,6 +12,7 @@
 #include "tui/pane.h"
 #include "disk_mount.h"
 #include "logger.h"
+#include "firmware_auditor.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -387,16 +388,33 @@ static void render_findings_pane(wm_node_t *n, bool focused, tui_app_state_t *ap
         if (show_note) term_puts_clip(nx, y, right - nx, r->note[m], A_MUTED);
     }
 
-    if (r->total_threats <= 0) return;
+    if (r->total_threats > 0) {
+        y++;
+        char sha[80];
+        snprintf(sha, sizeof(sha), "SHA-256 %s", app->threat.sha256);
+        put_row(x0, &y, bottom, iw, "First finding", A_MUTED);
+        put_row(x0, &y, bottom, iw, app->threat.threat_name, A_STRONG);
+        put_row(x0, &y, bottom, iw, app->threat.severity, A_BAD);
+        put_row(x0, &y, bottom, iw, app->threat.infected_file, A_TEXT);
+        put_row(x0, &y, bottom, iw, app->threat.hook_type, A_TEXT);
+        put_row(x0, &y, bottom, iw, sha, A_MUTED);
+    }
+
+    if (!r->firmware_ran) return;
     y++;
-    char sha[80];
-    snprintf(sha, sizeof(sha), "SHA-256 %s", app->threat.sha256);
-    put_row(x0, &y, bottom, iw, "First finding", A_MUTED);
-    put_row(x0, &y, bottom, iw, app->threat.threat_name, A_STRONG);
-    put_row(x0, &y, bottom, iw, app->threat.severity, A_BAD);
-    put_row(x0, &y, bottom, iw, app->threat.infected_file, A_TEXT);
-    put_row(x0, &y, bottom, iw, app->threat.hook_type, A_TEXT);
-    put_row(x0, &y, bottom, iw, sha, A_MUTED);
+    put_row(x0, &y, bottom, iw, "Firmware of this machine (not part of the verdict)", A_MUTED);
+    /* Check names run to 27 columns, wider than the engine column. */
+    int frx = x0 + 29, fdx = frx + 9;
+    bool show_fres = frx + 4 <= right, show_fdet = fdx + 4 <= right;
+    int fnw = show_fres ? frx - x0 - 1 : iw;
+    for (int c = 0; c < FW_CHECK_COUNT && y < bottom; c++, y++) {
+        const fw_check_t *k = &r->firmware.checks[c];
+        uint32_t ra = k->result == FW_RESULT_PASS ? A_OK : k->result == FW_RESULT_FAIL ? A_BAD
+                    : k->result == FW_RESULT_UNKNOWN ? A_WARN : A_MUTED;
+        term_puts_clip(x0, y, fnw, firmware_check_name((fw_check_id_t)c), A_TEXT);
+        if (show_fres) term_puts_clip(frx, y, fdx - frx - 1, firmware_result_str(k->result), ra);
+        if (show_fdet) term_puts_clip(fdx, y, right - fdx, k->detail, A_MUTED);
+    }
 }
 
 static void render_persistence_pane(wm_node_t *n, bool focused, tui_app_state_t *app) {

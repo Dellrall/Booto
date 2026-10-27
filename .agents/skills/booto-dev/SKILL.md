@@ -208,16 +208,17 @@ The following improvements are architectural priorities for Booto. Items marked 
   - For every allocated inode, read `ext4_inode` and check `i_links_count`.
   - Inodes with allocated data blocks but `i_links_count == 0` that do not appear in a VFS `nftw()` directory walk are flagged as hidden zero-day rootkit binaries.
 
-### 6. Native C11 "Mini-CHIPSEC" Hardware Silicon & Firmware Auditor (`src/hardware_auditor.c`)
-- **Problem**: Full Intel CHIPSEC requires Python 3 and heavy dependencies (~50 MB+), contradicting Booto's zero-dependency <150 KB C11 architecture.
-- **Specification**:
-  - **NVRAM Secure Boot & Key State**: Direct binary parsing of `/sys/firmware/efi/efivars/` variables (`SecureBoot-8be4df61-...`, `SetupMode-...`, `PK`, `KEK`, `db`, `dbx`) to detect compromised platform keychains or disabled Secure Boot enforcement.
-  - **CPU Model Specific Registers (MSRs)**: Read `/dev/cpu/0/msr` for `MSR_IA32_FEATURE_CONTROL` (0x3A) bit 0 (Lock bit) to verify SMM lock state against rogue SMM implants.
-  - **PCI Config Space BIOS Protection**: Inspect `/sys/bus/pci/devices/0000:00:1f.0/config` (LPC/eSPI bridge) for the `BIOS_CNTL` register:
-    - Verify `SMM_BWP` (SMM BIOS Write Protect, bit 5 == 1).
-    - Verify `BLE` (BIOS Lock Enable, bit 1 == 1).
-    - Flag unprotected firmware chips susceptible to ring-0 SPI flash rewrites.
-  - **IOMMU / DMA Attack Protection**: Audit `/sys/class/iommu/` and kernel ACPI DMAR tables to verify VT-d / AMD-Vi protections against malicious Thunderbolt / PCIe DMA implants (e.g., PCILeech).
+### 6. Native C11 "Mini-CHIPSEC" Firmware Auditor (`src/firmware_auditor.c`)
+- **Problem**: Full Intel CHIPSEC requires Python 3 and heavy dependencies (~50 MB+), contradicting Booto's zero-dependency C11 architecture. CHIPSEC is GPLv2: build from Intel/AMD datasheets and the SDM, never copy its code or register definitions.
+- **Scope**: these checks describe the machine Booto booted on, not the scanned disk. They run only in device mode, appear in a separate "Firmware" section, and never change the disk verdict. Every check is PASS / FAIL / UNKNOWN (unreadable) / N/A; UNKNOWN never counts as a pass.
+- **Pass 1 — (Done)**: efivars `SecureBoot`, `SetupMode`, `PK`, test keys in `PK`/`KEK`/`db` ("DO NOT TRUST", PKfail CVE-2024-8105), `dbx` SHA-256 count; ACPI `DMAR`/`IVRS` presence (+ DMAR opt-in flag); Thunderbolt `iommu_dma_protection`. efivars files cannot be read at an offset: read the whole file and skip the 4-byte attribute header.
+- **Pass 2 — silicon locks (not started)**, read-only, vendor-switched:
+  - Intel: SMRR (`IA32_SMRR_PHYSBASE/MASK` 0x1F2/0x1F3, only if `IA32_MTRRCAP` bit 11 reports SMRR) and `MSR_SMM_FEATURE_CONTROL` 0x4E0 (LOCK, SMM_CODE_CHK_EN; may be unreadable outside SMM → UNKNOWN). `IA32_FEATURE_CONTROL` 0x3A bit 0 locks VMX settings, **not** SMM — do not use it as an SMM check.
+  - AMD: `HWCR` C001_0015 bit 0 (SmmLock).
+  - MSRs need the `msr` module (`/dev/cpu/N/msr`).
+  - BIOS write protection: on Intel 100-series and newer PCHs `BIOS_CNTL` (BLE bit 1, SMM_BWP/EISS bit 5) lives in the SPI controller at `00:1f.5` offset 0xDC, which firmware often hides; `00:1f.0` holds it only on older chipsets. Report UNKNOWN when the device is hidden — unhiding it is a write and breaks forensic read-only.
+- **Out of scope**: SPI Protected Range registers (PR0–PR4) and anything needing MMIO or `/dev/mem` (blocked by kernel lockdown under Secure Boot) or any register write.
+- **Validation**: parser tests on fixture files; at least one real Intel and one AMD machine before trusting results (VMs emulate or omit these registers).
 
 ---
 
@@ -231,7 +232,6 @@ The following improvements are architectural priorities for Booto. Items marked 
   - Pure C mathematical Shannon entropy ($H = -\sum p_i \log_2 p_i$) and section heuristic classifier for zero-day polymorphic rootkits.
 - **Stage 13: Self-Hosted Runner Infrastructure & Zero-Quota Local Builds**:
   - Local Linux x86_64 runners (`runs-on: [self-hosted, linux]`) providing 0-minute cloud billing and sub-minute ISO creation.
-- **Stage 14: Native C11 "Mini-CHIPSEC" Hardware Silicon & Firmware Auditor (`hardware_auditor`)**:
-  - Zero-dependency x86_64 silicon register probing, SMM/SMRAM lock auditing, SPI flash controller write-protection checks, and NVRAM Secure Boot state validation.
+- **Stage 14: Firmware auditor pass 2 (silicon locks)**: see §6.6.
 
 

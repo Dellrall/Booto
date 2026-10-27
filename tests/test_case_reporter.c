@@ -78,6 +78,40 @@ static void test_json_and_markdown_escaping(void) {
     TEST_PASS("test_json_and_markdown_escaping");
 }
 
+static void test_host_firmware_section(void) {
+    TEST_START("test_host_firmware_section");
+    forensic_case_summary_t sum;
+    fill_summary(&sum, "FW-1");
+    char path[512], buf[8192];
+
+    ASSERT_INT_EQ(case_report_generate_json(&sum, g_dir, path, sizeof(path)), BOOTO_OK, "JSON generation must succeed");
+    slurp(path, buf, sizeof(buf));
+    ASSERT_TRUE(strstr(buf, "\"host_firmware\": null") != NULL, "JSON must carry null firmware when not run");
+    ASSERT_INT_EQ(case_report_generate_markdown(&sum, g_dir, path, sizeof(path)), BOOTO_OK, "Markdown generation must succeed");
+    slurp(path, buf, sizeof(buf));
+    ASSERT_TRUE(strstr(buf, "Not run (no raw target device).") != NULL, "Markdown must say firmware not run");
+
+    sum.firmware_ran = true;
+    sum.firmware.uefi_boot = true;
+    for (int i = 0; i < FW_CHECK_COUNT; i++) sum.firmware.checks[i].result = FW_RESULT_PASS;
+    sum.firmware.checks[FW_CHECK_SECURE_BOOT].result = FW_RESULT_FAIL;
+    snprintf(sum.firmware.checks[FW_CHECK_SECURE_BOOT].detail, sizeof(sum.firmware.checks[0].detail), "say \"hi\" a|b");
+
+    ASSERT_INT_EQ(case_report_generate_json(&sum, g_dir, path, sizeof(path)), BOOTO_OK, "JSON generation must succeed");
+    slurp(path, buf, sizeof(buf));
+    ASSERT_TRUE(strstr(buf, "\"scope\": \"machine running Booto\"") != NULL, "JSON must carry firmware scope");
+    ASSERT_TRUE(strstr(buf, "\"uefi_boot\": true") != NULL, "JSON must carry uefi_boot");
+    ASSERT_TRUE(strstr(buf, "\"result\": \"fail\", \"detail\": \"say \\\"hi\\\" a|b\"") != NULL, "JSON must escape firmware detail");
+    ASSERT_TRUE(strstr(buf, "\"verdict\": \"THREATS\"") != NULL, "Verdict must be untouched");
+
+    ASSERT_INT_EQ(case_report_generate_markdown(&sum, g_dir, path, sizeof(path)), BOOTO_OK, "Markdown generation must succeed");
+    slurp(path, buf, sizeof(buf));
+    ASSERT_TRUE(strstr(buf, "## Host firmware") != NULL, "Markdown must have firmware section");
+    ASSERT_TRUE(strstr(buf, "do not affect the disk verdict") != NULL, "Markdown must state scope");
+    ASSERT_TRUE(strstr(buf, "| `fail` | `say \"hi\" a\\|b` |") != NULL, "Markdown must escape firmware detail");
+    TEST_PASS("test_host_firmware_section");
+}
+
 static void test_unsafe_case_id_rejected(void) {
     TEST_START("test_unsafe_case_id_rejected");
     const char *bad[] = {"../../etc/x", "a/b", "", "has space"};
@@ -108,6 +142,7 @@ int main(void) {
     }
     test_report_generation();
     test_json_and_markdown_escaping();
+    test_host_firmware_section();
     test_unsafe_case_id_rejected();
     test_unwritable_dir_fails();
     char cmd[128];

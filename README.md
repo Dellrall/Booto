@@ -25,6 +25,7 @@ Built with **C11**, Booto runs from a trusted Debian Live USB environment so the
   - **Initramfs Auditor**: Decompresses gzip/xz/zstd/lz4/bzip2 initramfs images (and compressed `.ko` modules) via the system tools, parses the CPIO archive, and audits early-boot scripts.
   - **Userland Preload Scanner**: Checks `/etc/ld.so.preload` and `LD_PRELOAD` in `/etc/environment`. PAM modules are not scanned.
   - **Ext4 Superblock Engine**: Reads raw ext4 superblock statistics. It does not perform hidden-inode cross-view analysis.
+  - **Host Firmware Audit** (device mode only, not part of the disk verdict): Secure Boot and setup mode, enrolled platform key, PKfail test keys in `PK`/`KEK`/`db`, `dbx` revocation count, ACPI DMAR/IVRS IOMMU tables and Thunderbolt DMA protection. Read-only; ACPI tables need root (otherwise reported as `unknown`).
 - **Verdicts**: Every scan ends as `CLEAN`, `THREATS`, or `INCOMPLETE`, with a per-module status; an engine that errors makes the scan `INCOMPLETE` instead of silently passing.
 - **Sealed Detection Rules**: Signatures live in `rules/*.json`, each with a SHA-256 seal (`*.json.sha256`); a file whose seal does not match is refused.
 - **Defensive Fuzzing, ASan & Multi-Compiler CI**: Deterministic 1,500-iteration-per-parser mutation fuzzing of the ELF, PE, MBR/VBR/gap and initramfs parsers, AddressSanitizer/UBSan builds, and a GCC/Clang matrix.

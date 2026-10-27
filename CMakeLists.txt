@@ -74,6 +74,7 @@ set(BOOT_LIB_SOURCES
     src/forensic_scan.c
     src/disk_mount.c
     src/rules_loader.c
+    src/firmware_auditor.c
     src/tui/terminal.c
     src/tui/wm.c
     src/tui/pane.c
@@ -154,6 +155,10 @@ add_test(NAME test_forensic_scan COMMAND test_forensic_scan)
 add_executable(test_fuzz tests/test_fuzz.c)
 target_link_libraries(test_fuzz PRIVATE booto_core)
 add_test(NAME test_fuzz COMMAND test_fuzz)
+
+add_executable(test_firmware_auditor tests/test_firmware_auditor.c)
+target_link_libraries(test_firmware_auditor PRIVATE booto_core)
+add_test(NAME test_firmware_auditor COMMAND test_firmware_auditor)
 
 # Custom Target for ISO generation
 add_custom_target(iso

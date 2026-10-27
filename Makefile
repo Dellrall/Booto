@@ -25,6 +25,7 @@ SOURCES = $(SRCDIR)/logger.c \
           $(SRCDIR)/forensic_scan.c \
           $(SRCDIR)/disk_mount.c \
           $(SRCDIR)/rules_loader.c \
+          $(SRCDIR)/firmware_auditor.c \
           $(SRCDIR)/tui/terminal.c \
           $(SRCDIR)/tui/wm.c \
           $(SRCDIR)/tui/pane.c \
