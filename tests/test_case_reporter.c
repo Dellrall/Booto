@@ -22,6 +22,9 @@ static void fill_summary(forensic_case_summary_t *sum, const char *case_id) {
     sum->mbr_threats_count = 1;
     sum->total_threats = 1;
     snprintf(sum->highest_severity, sizeof(sum->highest_severity), "CRITICAL");
+    snprintf(sum->verdict, sizeof(sum->verdict), "THREATS");
+    for (int i = 0; i < 6; i++) snprintf(sum->module_status[i], sizeof(sum->module_status[i]), "OK");
+    snprintf(sum->module_status[5], sizeof(sum->module_status[5]), "SKIPPED");
 }
 
 static void slurp(const char *path, char *buf, size_t size) {
@@ -41,9 +44,16 @@ static void test_report_generation(void) {
     char json_path[512];
     ASSERT_INT_EQ(case_report_generate_json(&sum, g_dir, json_path, sizeof(json_path)), BOOTO_OK, "JSON generation must return BOOTO_OK");
     ASSERT_TRUE(strstr(json_path, "case_TEST-CASE-001.json") != NULL, "JSON filename must match Case ID");
+    char buf[4096];
+    slurp(json_path, buf, sizeof(buf));
+    ASSERT_TRUE(strstr(buf, "\"verdict\": \"THREATS\"") != NULL, "JSON must carry the verdict");
+    ASSERT_TRUE(strstr(buf, "\"Ext4 stats\": \"SKIPPED\"") != NULL, "JSON must carry per-module status");
 
     char md_path[512];
     ASSERT_INT_EQ(case_report_generate_markdown(&sum, g_dir, md_path, sizeof(md_path)), BOOTO_OK, "Markdown generation must return BOOTO_OK");
+    slurp(md_path, buf, sizeof(buf));
+    ASSERT_TRUE(strstr(buf, "| **Ext4 Superblock Stats** | 0 | `SKIPPED` |") != NULL, "Markdown must show module status");
+    ASSERT_TRUE(strstr(buf, "| **Scan Verdict** | `THREATS` |") != NULL, "Markdown must show the verdict");
 
     char seal[65];
     ASSERT_INT_EQ(case_report_sign_and_seal(md_path, seal), BOOTO_OK, "Seal computation must return BOOTO_OK");

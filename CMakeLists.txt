@@ -70,6 +70,7 @@ set(BOOT_LIB_SOURCES
     src/ext4_diff.c
     src/persistence_mgr.c
     src/case_reporter.c
+    src/forensic_scan.c
     src/disk_mount.c
     src/tui/terminal.c
     src/tui/wm.c
@@ -133,6 +134,10 @@ add_test(NAME test_persistence_mgr COMMAND test_persistence_mgr)
 add_executable(test_case_reporter tests/test_case_reporter.c)
 target_link_libraries(test_case_reporter PRIVATE booto_core)
 add_test(NAME test_case_reporter COMMAND test_case_reporter)
+
+add_executable(test_forensic_scan tests/test_forensic_scan.c)
+target_link_libraries(test_forensic_scan PRIVATE booto_core)
+add_test(NAME test_forensic_scan COMMAND test_forensic_scan)
 
 add_executable(test_fuzz tests/test_fuzz.c)
 target_link_libraries(test_fuzz PRIVATE booto_core)

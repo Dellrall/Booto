@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Shared scan orchestrator (`src/forensic_scan.c`)**: records a per-engine status (`OK`/`ERROR`/`SKIPPED`) and a verdict (`CLEAN`/`THREATS`/`INCOMPLETE`). `CLEAN` is reported only when every engine ran and nothing was found; a failed mount yields `INCOMPLETE`.
+- **Real headless CLI**:
+  - `booto -c [-t <dev> | -s <rootfs>] [-p <report-dir>]` scans and prints a per-module table.
+  - Writes JSON and Markdown reports.
+  - Exits `0` for clean, `1` for threats and `2` for incomplete scans.
+- `--dry-run` prints the planned scan without touching any disk. `-V` now also applies to the TUI.
+
 ### Security
 - **Storage layer (`src/disk_mount.c`, `src/persistence_mgr.c`)**:
   - `cryptsetup` is now run via `fork`/`execvp` (`disk_exec_argv()`); passphrases go over stdin with `--key-file=-`. This removes a root shell-injection through LUKS passphrases and keeps them out of `ps`.
@@ -16,12 +24,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Case reporter (`src/case_reporter.c`)**:
   - JSON string fields are escaped per RFC 8259, and Markdown cells neutralise `|`, backticks and control characters.
   - `case_id` is restricted to `[A-Za-z0-9_-]{1,50}`, which closes path traversal through the report filename.
-
 - **Parsers (`src/elf_analyzer.c`, `src/uefi_analyzer.c`)**:
   - ELF section, string and symbol table bounds are checked without integer wraparound.
   - Section and symbol names are bounded by their table size, which closes an over-read on unterminated entries.
   - `symbol_count` is published only after the symbol array is allocated.
   - The PE header and certificate table bounds are computed in 64-bit, so the 32-bit wrap that let a crafted `e_lfanew` read out of bounds is gone.
+
+### Changed
+- **Ext4 engine is stats-only**: it reports superblock inode counts with `cross_view_performed = false`. The fabricated "hidden inode #1849201" mock and its fallback were removed.
+- **Case reports** now carry the scan verdict and each module's real status instead of hardcoded `CLEAN`/`ALERT` labels.
+- The TUI Threat Inspector shows `CLEAN`, `THREATS` or `INCOMPLETE` from the real report.
+- F6 exports the last real scan, or refuses if none has run yet.
+- The LUKS banner reflects real unlock state; the fake F2 toggle was removed.
+
 ### Fixed
 - `disk_mount_ro()` returns `BOOTO_ERR_MOUNT_FAILED` when no filesystem mounts, instead of `BOOTO_OK`.
 - Non-root mount, unmount and LUKS calls return `BOOTO_ERR_PERMISSION_DENIED` instead of emulating success.
@@ -29,6 +44,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `persistence_lock()` checks the `umount`/`cryptsetup close` results and stays `UNLOCKED` on failure. `persistence_unlock()` closes the mapper if mounting fails and reports real capacity via `statvfs`.
 - The TUI wipes the LUKS passphrase buffer with `explicit_bzero`.
 - Case report write, close and seal failures now propagate as `BOOTO_ERR_IO` instead of returning `BOOTO_OK`.
+- `mbr_audit_device()` returns an error when the device cannot be read, instead of a fabricated clean GRUB result; `mbr_audit_mock()` was removed.
+- `--update-rules` returns the updater script's exit status.
 
 ---
 

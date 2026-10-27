@@ -1,6 +1,6 @@
 /**
  * @file ext4_diff.h
- * @brief Raw Ext4 disk inode vs VFS directory table cross-view differential scanner.
+ * @brief Raw Ext4 superblock statistics (hidden-inode cross-view is not implemented).
  */
 #ifndef BOOTO_EXT4_DIFF_H
 #define BOOTO_EXT4_DIFF_H
@@ -14,39 +14,21 @@
 extern "C" {
 #endif
 
-#define MAX_HIDDEN_INODES 32
-
-typedef struct {
-    uint32_t inode_num;
-    uint16_t mode;
-    uint32_t uid;
-    uint32_t gid;
-    uint64_t size_bytes;
-    uint32_t links_count;
-    char description[256];
-} ext4_unlinked_inode_t;
-
 typedef struct {
     uint32_t total_disk_inodes;
     uint32_t allocated_raw_inodes;
-    uint32_t vfs_visible_inodes;
-    int hidden_inodes_count;
-    ext4_unlinked_inode_t hidden_inodes[MAX_HIDDEN_INODES];
+    bool cross_view_performed; /**< Always false: raw-inode vs VFS cross-view is not implemented. */
 } ext4_diff_result_t;
 
 /**
- * @brief Perform cross-view differential analysis between raw block device and mounted VFS rootfs.
+ * @brief Read Ext4 superblock inode statistics from a raw block device.
  * @param block_dev Path to raw block device (e.g. /dev/nvme0n1p2).
- * @param vfs_mount_point Path to mounted read-only directory (e.g. /tmp/booto_target_mnt).
- * @param result Output structure to record hidden inode anomalies.
- * @return BOOTO_OK on success, negative error code on failure.
+ * @param vfs_mount_point Reserved for the future cross-view walk; currently unused.
+ * @param result Output statistics.
+ * @return BOOTO_OK on success; BOOTO_ERR_CORRUPT_DATA if not Ext4 or the superblock is inconsistent;
+ *         BOOTO_ERR_PERMISSION_DENIED / BOOTO_ERR_NOT_FOUND / BOOTO_ERR_IO if the device cannot be read.
  */
 booto_error_t ext4_diff_scan(const char *block_dev, const char *vfs_mount_point, ext4_diff_result_t *result);
-
-/**
- * @brief Mock differential scan for non-root verification environments.
- */
-booto_error_t ext4_diff_mock(ext4_diff_result_t *result);
 
 #ifdef __cplusplus
 }

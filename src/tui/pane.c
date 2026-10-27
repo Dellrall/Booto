@@ -81,14 +81,14 @@ void tui_app_state_init(tui_app_state_t *app, booto_context_t *ctx) {
     snprintf(app->modules[5].status_text, sizeof(app->modules[5].status_text), "READY");
     app->modules[5].status_color = MAKE_ATTR(COLOR_GREEN, COLOR_DEFAULT, ATTR_BOLD);
 
-    // Initial clean/idle threat inspector state
-    snprintf(app->threat.threat_name, sizeof(app->threat.threat_name), "None (System Idle)");
-    snprintf(app->threat.infected_file, sizeof(app->threat.infected_file), "Waiting for target scan analysis");
+    // Neutral threat inspector state until a real scan completes
+    snprintf(app->threat.threat_name, sizeof(app->threat.threat_name), "No scan yet");
+    snprintf(app->threat.infected_file, sizeof(app->threat.infected_file), "-");
     snprintf(app->threat.hook_type, sizeof(app->threat.hook_type), "Press F5 to initiate forensic scan");
-    snprintf(app->threat.sha256, sizeof(app->threat.sha256), "0000000000000000000000000000000000000000000000000000000000000000");
-    snprintf(app->threat.severity, sizeof(app->threat.severity), "CLEAN / IDLE");
-    app->threat.severity_color = MAKE_ATTR(COLOR_GREEN, COLOR_DEFAULT, ATTR_BOLD);
-    snprintf(app->threat.hex_dump, sizeof(app->threat.hex_dump), "Ready to inspect host storage for Ring-0/Ring-3 rootkits.");
+    snprintf(app->threat.sha256, sizeof(app->threat.sha256), "-");
+    snprintf(app->threat.severity, sizeof(app->threat.severity), "NOT SCANNED");
+    app->threat.severity_color = MAKE_ATTR(COLOR_WHITE, COLOR_DEFAULT, ATTR_NONE);
+    snprintf(app->threat.hex_dump, sizeof(app->threat.hex_dump), "No scan results available.");
 
     // Initial logs
     tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "Booto forensic TUI window manager initialized");
@@ -273,7 +273,7 @@ static void render_persistence_pane(wm_node_t *node, bool is_focused, tui_app_st
               app->luks_unlocked ? MAKE_ATTR(COLOR_GREEN, COLOR_DEFAULT, ATTR_BOLD) : MAKE_ATTR(COLOR_RED, COLOR_DEFAULT, ATTR_BOLD));
 
     row++;
-    term_puts(node->x + 2, row++, "[F2] Unlock LUKS Volume", MAKE_ATTR(COLOR_BRIGHT_CYAN, COLOR_DEFAULT, ATTR_UNDERLINE));
+    term_puts(node->x + 2, row++, "[F3] Unlock LUKS Target", MAKE_ATTR(COLOR_BRIGHT_CYAN, COLOR_DEFAULT, ATTR_UNDERLINE));
     term_puts(node->x + 2, row++, "[F6] Export Signed Case Report", MAKE_ATTR(COLOR_BRIGHT_GREEN, COLOR_DEFAULT, ATTR_UNDERLINE));
 }
 
@@ -338,12 +338,21 @@ bool pane_handle_input(wm_node_t *node, const input_event_t *event, tui_app_stat
                     tui_app_append_log(app, LOG_LEVEL_INFO, NULL,
                                        "Forensically mounted target storage strictly READ-ONLY (MS_RDONLY, noload)");
                 } else {
-                    tui_app_append_log(app, LOG_LEVEL_ERROR, NULL, "Failed to mount target storage");
+                    char msg[160];
+                    snprintf(msg, sizeof(msg), "Failed to mount %.100s read-only (error %d)",
+                             app->drives[app->drive_cursor].name, (int)err);
+                    tui_app_append_log(app, LOG_LEVEL_ERROR, NULL, msg);
                 }
             } else {
-                disk_unmount(DEFAULT_RO_MOUNT_POINT);
-                app->drives[app->drive_cursor].is_ro_mounted = false;
-                tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "Cleanly unmounted target storage");
+                booto_error_t uerr = disk_unmount(DEFAULT_RO_MOUNT_POINT);
+                if (uerr == BOOTO_OK) {
+                    app->drives[app->drive_cursor].is_ro_mounted = false;
+                    tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "Cleanly unmounted target storage");
+                } else {
+                    char msg[96];
+                    snprintf(msg, sizeof(msg), "Failed to unmount target storage (error %d)", (int)uerr);
+                    tui_app_append_log(app, LOG_LEVEL_ERROR, NULL, msg);
+                }
             }
             return true;
         }

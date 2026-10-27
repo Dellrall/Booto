@@ -8,6 +8,7 @@
 #include "tui/wm.h"
 #include "booto.h"
 #include "logger.h"
+#include "forensic_scan.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -74,6 +75,7 @@ typedef struct {
 
     // Threat state
     threat_detail_t threat;
+    forensic_scan_report_t *last_scan;  // heap-allocated on first scan, freed at exit
 
     // Persistence state
     bool luks_unlocked;
