@@ -15,8 +15,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
 #include <time.h>
 
+/* Guards every g_* below; held while dispatching so the callback is serialised. */
+static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static log_level_t g_min_level = LOG_LEVEL_INFO;
 static FILE *g_log_file = NULL;
 static log_callback_fn g_callback = NULL;
@@ -45,23 +48,32 @@ static const char *level_to_color(log_level_t level) {
 }
 
 int logger_init(log_level_t min_level, const char *log_file) {
+    int rc = 0;
+    pthread_mutex_lock(&g_lock);
     g_min_level = min_level;
     if (log_file != NULL && strlen(log_file) > 0) {
+        if (g_log_file) {
+            fclose(g_log_file);
+        }
         g_log_file = fopen(log_file, "a");
         if (!g_log_file) {
             fprintf(stderr, "Warning: Failed to open log file '%s'\n", log_file);
-            return -1;
+            rc = -1;
         }
     }
-    return 0;
+    pthread_mutex_unlock(&g_lock);
+    return rc;
 }
 
 void logger_set_callback(log_callback_fn callback, void *user_data) {
+    pthread_mutex_lock(&g_lock);
     g_callback = callback;
     g_callback_user_data = user_data;
+    pthread_mutex_unlock(&g_lock);
 }
 
 void logger_shutdown(void) {
+    pthread_mutex_lock(&g_lock);
     if (g_log_file) {
         fflush(g_log_file);
         fclose(g_log_file);
@@ -69,10 +81,13 @@ void logger_shutdown(void) {
     }
     g_callback = NULL;
     g_callback_user_data = NULL;
+    pthread_mutex_unlock(&g_lock);
 }
 
 void log_message(log_level_t level, const char *fmt, ...) {
+    pthread_mutex_lock(&g_lock);
     if (level < g_min_level) {
+        pthread_mutex_unlock(&g_lock);
         return;
     }
 
@@ -88,9 +103,11 @@ void log_message(log_level_t level, const char *fmt, ...) {
     vsnprintf(msg_buf, sizeof(msg_buf), fmt, args);
     va_end(args);
 
-    // 1. Output to Console if no callback handles UI
-    const char *color = level_to_color(level);
-    fprintf(stderr, "%s[%s] [%s]\033[0m %s\n", color, time_buf, level_to_string(level), msg_buf);
+    // 1. Console only when no UI callback owns the screen (raw stderr would paint over the TUI)
+    if (!g_callback) {
+        fprintf(stderr, "%s[%s] [%s]\033[0m %s\n", level_to_color(level), time_buf,
+                level_to_string(level), msg_buf);
+    }
 
     // 2. Output to log file if configured
     if (g_log_file) {
@@ -102,4 +119,5 @@ void log_message(log_level_t level, const char *fmt, ...) {
     if (g_callback) {
         g_callback(level, time_buf, msg_buf, g_callback_user_data);
     }
+    pthread_mutex_unlock(&g_lock);
 }

@@ -22,6 +22,9 @@ typedef enum {
 
 /**
  * @brief Callback function type for UI / TUI log capture.
+ * May be invoked from ANY thread that logs (calls are serialised by the logger
+ * mutex). It MUST NOT call back into the logger (deadlock). While a callback is
+ * registered nothing is written to stderr.
  */
 typedef void (*log_callback_fn)(log_level_t level, const char *timestamp, const char *msg, void *user_data);
 

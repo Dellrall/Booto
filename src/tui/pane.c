@@ -19,6 +19,10 @@
 void tui_app_state_init(tui_app_state_t *app, booto_context_t *ctx) {
     if (!app) return;
     memset(app, 0, sizeof(*app));
+    pthread_mutex_init(&app->log_lock, NULL);
+    atomic_init(&app->scan_active, false);
+    atomic_init(&app->scan_done, false);
+    atomic_init(&app->scan_step, 0);
     app->ctx = ctx;
     app->running = true;
     app->luks_unlocked = false;
@@ -99,6 +103,7 @@ void tui_app_state_init(tui_app_state_t *app, booto_context_t *ctx) {
 
 void tui_app_append_log(tui_app_state_t *app, log_level_t level, const char *timestamp, const char *msg) {
     if (!app) return;
+    pthread_mutex_lock(&app->log_lock);
     int idx = (app->log_head + app->log_count) % MAX_LOG_LINES;
     if (app->log_count == MAX_LOG_LINES) {
         app->log_head = (app->log_head + 1) % MAX_LOG_LINES;
@@ -136,6 +141,7 @@ void tui_app_append_log(tui_app_state_t *app, log_level_t level, const char *tim
             entry->color = MAKE_ATTR(COLOR_WHITE, COLOR_DEFAULT, ATTR_NONE);
             break;
     }
+    pthread_mutex_unlock(&app->log_lock);
 }
 
 static void render_storage_pane(wm_node_t *node, bool is_focused, tui_app_state_t *app) {
@@ -200,13 +206,12 @@ static void render_logs_pane(wm_node_t *node, bool is_focused, tui_app_state_t *
     uint32_t border_attr = is_focused ? MAKE_ATTR(COLOR_BRIGHT_CYAN, COLOR_DEFAULT, ATTR_BOLD) : MAKE_ATTR(COLOR_WHITE, COLOR_DEFAULT, ATTR_NONE);
     uint32_t title_attr = is_focused ? MAKE_ATTR(COLOR_BRIGHT_CYAN, COLOR_DEFAULT, ATTR_BOLD | ATTR_REVERSE) : MAKE_ATTR(COLOR_WHITE, COLOR_DEFAULT, ATTR_BOLD);
 
+    pthread_mutex_lock(&app->log_lock);
     char title[128];
     snprintf(title, sizeof(title), " Live Scan & Event Stream (%d lines) ", app->log_count);
     term_draw_box(node->x, node->y, node->w, node->h, title, border_attr, title_attr);
 
     int max_visible = node->h - 2;
-    if (max_visible <= 0) return;
-
     int start = app->log_count - max_visible - app->log_scroll;
     if (start < 0) start = 0;
 
@@ -231,6 +236,7 @@ static void render_logs_pane(wm_node_t *node, bool is_focused, tui_app_state_t *
         }
         row++;
     }
+    pthread_mutex_unlock(&app->log_lock);
 }
 
 static void render_threat_pane(wm_node_t *node, bool is_focused, tui_app_state_t *app) {
@@ -372,11 +378,15 @@ bool pane_handle_input(wm_node_t *node, const input_event_t *event, tui_app_stat
         }
     } else if (node->pane_type == PANE_LIVE_LOGS) {
         if (event->type == KEY_UP || (event->type == KEY_CHAR && event->ch == 'k')) {
+            pthread_mutex_lock(&app->log_lock);
             if (app->log_scroll < app->log_count - 5) app->log_scroll++;
+            pthread_mutex_unlock(&app->log_lock);
             return true;
         }
         if (event->type == KEY_DOWN || (event->type == KEY_CHAR && event->ch == 'j')) {
+            pthread_mutex_lock(&app->log_lock);
             if (app->log_scroll > 0) app->log_scroll--;
+            pthread_mutex_unlock(&app->log_lock);
             return true;
         }
     }

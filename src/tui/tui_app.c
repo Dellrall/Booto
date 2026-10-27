@@ -58,15 +58,25 @@ static void render_top_bar(tui_app_state_t *app, int cols) {
 }
 
 static void render_bottom_bar(tui_app_state_t *app, int rows, int cols) {
-    (void)app;
     uint32_t bar_attr = MAKE_ATTR(COLOR_BLACK, COLOR_WHITE, ATTR_NONE);
 
     for (int x = 0; x < cols; x++) {
         term_putc(x, rows - 1, ' ', bar_attr);
     }
 
-    const char *help = " Alt+Arrow: Focus | Alt+M: Move/Swap | Alt+Z: Zoom | F3: Decrypt LUKS | F5: Scan | F10/Q: Exit";
-    term_puts(0, rows - 1, help, bar_attr);
+    // Alt+M has no direction: it swaps the focused pane with the next pane in Tab order.
+    const char *help = "Alt+Arrow: Focus | Alt+M: Swap w/ Next | Alt+Z: Zoom | F3: Decrypt LUKS | F5: Scan | F6: Export | F10/Q: Exit";
+    char line[512];
+    if (atomic_load(&app->scan_active)) {
+        struct timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        char spin = "|/-\\"[(ts.tv_nsec / 125000000L) % 4];
+        snprintf(line, sizeof(line), " %c Scanning [%d/%d] | %.200s | %s", spin, atomic_load(&app->scan_step),
+                 (int)SCAN_MOD_COUNT, app->status_msg, help);
+    } else {
+        snprintf(line, sizeof(line), " %.200s | %s", app->status_msg, help);
+    }
+    term_puts(0, rows - 1, line, bar_attr);
 }
 
 static void render_exit_modal(tui_app_state_t *app, int rows, int cols) {
@@ -172,9 +182,11 @@ static void render_tree_leaves(wm_node_t *node, wm_node_t *focused, tui_app_stat
 }
 
 static void scan_progress_cb(int step, int total, const char *msg, void *user) {
+    tui_app_state_t *app = user;
+    atomic_store(&app->scan_step, step);
     char log_buf[256];
     snprintf(log_buf, sizeof(log_buf), "[%d/%d] %.200s", step, total, msg ? msg : "");
-    tui_app_append_log((tui_app_state_t *)user, LOG_LEVEL_INFO, NULL, log_buf);
+    tui_app_append_log(app, LOG_LEVEL_INFO, NULL, log_buf);
 }
 
 static scan_module_id_t pane_module_to_scan_id(const char *name) {
@@ -198,7 +210,20 @@ static int module_threats(const forensic_scan_report_t *r, int m) {
     }
 }
 
-static void execute_forensic_scan(tui_app_state_t *app) {
+/* Worker thread: touches only its own pending_* / scan_* inputs, the log (locked) and the atomics. */
+static void *scan_worker(void *arg) {
+    tui_app_state_t *app = arg;
+    app->pending_err = forensic_scan_run(app->scan_target, NULL, app->scan_enabled, scan_progress_cb, app,
+                                         app->pending_scan);
+    atomic_store(&app->scan_done, true);
+    return NULL;
+}
+
+static void start_forensic_scan(tui_app_state_t *app) {
+    if (atomic_load(&app->scan_active)) {
+        snprintf(app->status_msg, sizeof(app->status_msg), "Scan already running");
+        return;
+    }
     const char *target_dev = NULL;
     for (int i = 0; i < app->drive_count; i++) {
         if (app->drives[i].is_target) {
@@ -212,36 +237,60 @@ static void execute_forensic_scan(tui_app_state_t *app) {
         return;
     }
 
-    if (!app->last_scan) {
-        app->last_scan = calloc(1, sizeof(*app->last_scan));
-        if (!app->last_scan) {
-            tui_app_append_log(app, LOG_LEVEL_ERROR, NULL, "Out of memory allocating scan report");
-            snprintf(app->status_msg, sizeof(app->status_msg), "Scan failed: out of memory.");
-            return;
-        }
+    app->pending_scan = calloc(1, sizeof(*app->pending_scan));
+    if (!app->pending_scan) {
+        tui_app_append_log(app, LOG_LEVEL_ERROR, NULL, "Out of memory allocating scan report");
+        snprintf(app->status_msg, sizeof(app->status_msg), "Scan failed: out of memory.");
+        return;
     }
-    forensic_scan_report_t *r = app->last_scan;
-
-    bool enabled[SCAN_MOD_COUNT];
-    memset(enabled, 0, sizeof(enabled));
+    // Copy inputs so the UI may keep editing drives/modules while the worker runs.
+    snprintf(app->scan_target, sizeof(app->scan_target), "%s", target_dev);
+    memset(app->scan_enabled, 0, sizeof(app->scan_enabled));
     for (int i = 0; i < app->module_count; i++) {
         scan_module_id_t id = pane_module_to_scan_id(app->modules[i].name);
-        if (id < SCAN_MOD_COUNT) enabled[id] = app->modules[i].enabled;
+        if (id < SCAN_MOD_COUNT) app->scan_enabled[id] = app->modules[i].enabled;
     }
 
     char log_buf[256];
-    snprintf(log_buf, sizeof(log_buf), "=== Starting Forensic Scan on %.120s (Strict Read-Only) ===", target_dev);
+    snprintf(log_buf, sizeof(log_buf), "=== Starting Forensic Scan on %.120s (Strict Read-Only) ===", app->scan_target);
     tui_app_append_log(app, LOG_LEVEL_INFO, NULL, log_buf);
 
-    booto_error_t err = forensic_scan_run(target_dev, NULL, enabled, scan_progress_cb, app, r);
+    atomic_store(&app->scan_step, 0);
+    atomic_store(&app->scan_done, false);
+    atomic_store(&app->scan_active, true);
+    int rc = pthread_create(&app->scan_thread, NULL, scan_worker, app);
+    if (rc != 0) {
+        atomic_store(&app->scan_active, false);
+        free(app->pending_scan);
+        app->pending_scan = NULL;
+        snprintf(log_buf, sizeof(log_buf), "Could not start scan thread (%s)", strerror(rc));
+        tui_app_append_log(app, LOG_LEVEL_ERROR, NULL, log_buf);
+        snprintf(app->status_msg, sizeof(app->status_msg), "Scan failed to start (%.200s).", strerror(rc));
+        return;
+    }
+    snprintf(app->status_msg, sizeof(app->status_msg), "Scanning %.120s ...", app->scan_target);
+}
+
+/* Main thread only: joins the worker (blocking if it is still running) and publishes its report. */
+static void finish_forensic_scan(tui_app_state_t *app) {
+    pthread_join(app->scan_thread, NULL);
+    atomic_store(&app->scan_done, false);
+    atomic_store(&app->scan_active, false);
+
+    forensic_scan_report_t *r = app->pending_scan;
+    app->pending_scan = NULL;
+    const char *target_dev = app->scan_target;
+    char log_buf[256];
+    booto_error_t err = app->pending_err;
     if (err != BOOTO_OK) {
-        free(app->last_scan);
-        app->last_scan = NULL;
+        free(r);
         snprintf(log_buf, sizeof(log_buf), "Forensic scan could not run (error %d)", (int)err);
         tui_app_append_log(app, LOG_LEVEL_ERROR, NULL, log_buf);
         snprintf(app->status_msg, sizeof(app->status_msg), "Scan failed to run (error %d).", (int)err);
         return;
     }
+    free(app->last_scan);
+    app->last_scan = r;
 
     int ok_count = 0;
     for (int m = 0; m < SCAN_MOD_COUNT; m++) {
@@ -352,6 +401,15 @@ static void export_case_report(tui_app_state_t *app) {
     snprintf(app->status_msg, sizeof(app->status_msg), "Case Report Saved: %.200s", saved_md);
 }
 
+/* Quit/power paths: never exit (or free last_scan) under a running worker; block until it finishes. */
+static void wait_scan_before_exit(tui_app_state_t *app, int rows, int cols) {
+    if (!atomic_load(&app->scan_active)) return;
+    snprintf(app->status_msg, sizeof(app->status_msg), "Waiting for the running scan to finish before exiting...");
+    render_bottom_bar(app, rows, cols);
+    term_present();
+    finish_forensic_scan(app);
+}
+
 int tui_app_run(booto_context_t *ctx) {
     if (term_init() != 0) {
         fprintf(stderr, "Error: Terminal initialization failed (requires interactive TTY)\n");
@@ -369,6 +427,8 @@ int tui_app_run(booto_context_t *ctx) {
     logger_set_callback(tui_logger_hook, NULL);
 
     while (app.running) {
+        if (atomic_load(&app.scan_done)) finish_forensic_scan(&app);
+
         term_get_dimensions(&rows, &cols);
         wm_recalculate_layout(app.wm, 0, 1, cols, rows - 2);
 
@@ -395,16 +455,18 @@ int tui_app_run(booto_context_t *ctx) {
         // 4. Differential screen flush
         term_present();
 
-        // 5. Input event polling
+        // 5. Input event polling (the timeout keeps the loop redrawing ~20x/s while a scan runs)
         input_event_t event;
         if (term_poll_event(&event, 50)) {
             if (app.show_exit_modal) {
                 if (event.type == KEY_CHAR && (event.ch == 'p' || event.ch == 'P' || event.ch == '1')) {
+                    wait_scan_before_exit(&app, rows, cols);
                     term_shutdown();
                     int res = system("systemctl poweroff -i 2>/dev/null || poweroff -f 2>/dev/null || halt -p 2>/dev/null");
                     (void)res;
                     exit(0);
                 } else if (event.type == KEY_CHAR && (event.ch == 'r' || event.ch == 'R' || event.ch == '2')) {
+                    wait_scan_before_exit(&app, rows, cols);
                     term_shutdown();
                     int res = system("systemctl reboot -i 2>/dev/null || reboot -f 2>/dev/null");
                     (void)res;
@@ -462,6 +524,8 @@ int tui_app_run(booto_context_t *ctx) {
 
             if (event.type == KEY_F10 || (event.type == KEY_CHAR && (event.ch == 'q' || event.ch == 'Q'))) {
                 app.show_exit_modal = true;
+            } else if (event.type == KEY_F3 && atomic_load(&app.scan_active)) {
+                snprintf(app.status_msg, sizeof(app.status_msg), "Scan in progress: LUKS unlock disabled");
             } else if (event.type == KEY_F3) {
                 const char *target = (app.drive_count > 0) ? app.drives[app.drive_cursor].name : "/dev/nvme0n1p3";
                 snprintf(app.luks_target_dev, sizeof(app.luks_target_dev), "%s", target);
@@ -477,8 +541,19 @@ int tui_app_run(booto_context_t *ctx) {
             } else if (event.type == KEY_ALT_Z) {
                 wm_toggle_zoom(app.wm);
             } else if (event.type == KEY_ALT_M) {
-                wm_swap_focused_adjacent(app.wm, KEY_RIGHT);
-                tui_app_append_log(&app, LOG_LEVEL_INFO, NULL, "Swapped active pane layout (Alt+M)");
+                // Alt+M carries no direction: swap the focused pane with the next leaf in Tab order.
+                wm_node_t *orig = app.wm->focused_leaf;
+                wm_focus_next(app.wm);
+                wm_node_t *next = app.wm->focused_leaf;
+                if (orig && next && next != orig) {
+                    pane_type_t tmp_type = orig->pane_type;
+                    void *tmp_data = orig->pane_data;
+                    orig->pane_type = next->pane_type;
+                    orig->pane_data = next->pane_data;
+                    next->pane_type = tmp_type;
+                    next->pane_data = tmp_data;
+                    tui_app_append_log(&app, LOG_LEVEL_INFO, NULL, "Swapped focused pane with next pane (Alt+M)");
+                }
             } else if (event.type == KEY_ALT_H) {
                 pane_type_t next_type = (pane_type_t)((app.wm->focused_leaf->pane_type + 1) % PANE_COUNT);
                 wm_split_focused(app.wm, SPLIT_HORIZONTAL, next_type);
@@ -492,14 +567,21 @@ int tui_app_run(booto_context_t *ctx) {
             } else if (event.type == KEY_ALT_RBRACKET) {
                 wm_adjust_split_ratio(app.wm, +0.05f);
             } else if (event.type == KEY_F5) {
-                execute_forensic_scan(&app);
+                start_forensic_scan(&app);
             } else if (event.type == KEY_F6) {
-                export_case_report(&app);
+                if (atomic_load(&app.scan_active)) {
+                    snprintf(app.status_msg, sizeof(app.status_msg), "Scan in progress");
+                } else {
+                    export_case_report(&app);
+                }
             } else if (event.type == KEY_MOUSE_CLICK) {
                 wm_node_t *clicked = wm_find_leaf_at(app.wm->root, event.mouse_x, event.mouse_y);
                 if (clicked) {
                     app.wm->focused_leaf = clicked;
                 }
+            } else if (atomic_load(&app.scan_active) && event.type == KEY_ENTER && app.wm->focused_leaf &&
+                       app.wm->focused_leaf->pane_type == PANE_STORAGE_DEVICES) {
+                snprintf(app.status_msg, sizeof(app.status_msg), "Scan in progress: mount/unmount and LUKS unlock disabled");
             } else {
                 if (app.wm->focused_leaf) {
                     pane_handle_input(app.wm->focused_leaf, &event, &app);
@@ -508,11 +590,13 @@ int tui_app_run(booto_context_t *ctx) {
         }
     }
 
+    wait_scan_before_exit(&app, rows, cols);
     logger_set_callback(NULL, NULL);
     g_current_app = NULL;
 
     wm_tree_destroy(app.wm);
     free(app.last_scan);
+    pthread_mutex_destroy(&app.log_lock);
     term_shutdown();
     return 0;
 }

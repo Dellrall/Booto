@@ -22,9 +22,21 @@
 #include <termios.h>
 #include <unistd.h>
 
+/* Disable mouse tracking, reset attributes, show cursor, leave alternate screen. */
+static const char RESTORE_SEQ[] = "\033[?1006l\033[?1002l\033[?1000l\033[0m\033[?25h\033[?1049l";
+static const char ENTER_SEQ[] = "\033[?1049h\033[?25l\033[?1000h\033[?1002h\033[?1006h";
+
 static struct termios g_orig_termios;
 static bool g_raw_active = false;
+static bool g_atexit_registered = false;
+/* 1 while the tty is in raw/alt-screen state; cleared by whichever restore path runs first. */
+static volatile sig_atomic_t g_tty_dirty = 0;
 static volatile sig_atomic_t g_resized = 0;
+
+static const int FATAL_SIGNALS[] = { SIGTERM, SIGHUP, SIGINT, SIGQUIT, SIGSEGV, SIGBUS, SIGABRT, SIGFPE };
+#define FATAL_SIGNAL_COUNT (sizeof(FATAL_SIGNALS) / sizeof(FATAL_SIGNALS[0]))
+static struct sigaction g_old_fatal_sa[FATAL_SIGNAL_COUNT];
+static struct sigaction g_old_winch_sa;
 
 static int g_rows = 24;
 static int g_cols = 80;
@@ -34,38 +46,76 @@ static uint32_t *g_front_attrs = NULL;
 static char *g_back_chars = NULL;
 static uint32_t *g_back_attrs = NULL;
 
+/* Unparsed input bytes left over from a read that returned several keys. */
+static unsigned char g_pending[64];
+static size_t g_pending_len = 0;
+
+/* Async-signal-safe: only tcsetattr() and write(). */
+static void restore_tty(int when) {
+    if (!g_tty_dirty) return;
+    g_tty_dirty = 0;
+    ssize_t w = write(STDOUT_FILENO, RESTORE_SEQ, sizeof(RESTORE_SEQ) - 1);
+    (void)w;
+    tcsetattr(STDIN_FILENO, when, &g_orig_termios);
+}
+
+static void restore_tty_atexit(void) {
+    restore_tty(TCSANOW);
+}
+
+static void handle_fatal_signal(int sig) {
+    restore_tty(TCSANOW);
+    struct sigaction dfl;
+    memset(&dfl, 0, sizeof(dfl));
+    dfl.sa_handler = SIG_DFL;
+    sigemptyset(&dfl.sa_mask);
+    sigaction(sig, &dfl, NULL);
+    raise(sig); /* delivered with the default action once this handler returns */
+}
+
 static void handle_sigwinch(int sig) {
     (void)sig;
     g_resized = 1;
 }
 
+/* All-or-nothing: on any allocation failure the old buffers and dimensions stay committed. */
 static void update_dimensions(void) {
+    int rows = 24;
+    int cols = 80;
     struct winsize ws;
     if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0 && ws.ws_row > 0) {
-        g_rows = ws.ws_row;
-        g_cols = ws.ws_col;
-    } else {
-        g_rows = 24;
-        g_cols = 80;
+        rows = ws.ws_row;
+        cols = ws.ws_col;
     }
 
-    size_t cells = (size_t)(g_rows * g_cols);
-    char *new_fc = (char *)realloc(g_front_chars, cells);
-    uint32_t *new_fa = (uint32_t *)realloc(g_front_attrs, cells * sizeof(uint32_t));
-    char *new_bc = (char *)realloc(g_back_chars, cells);
-    uint32_t *new_ba = (uint32_t *)realloc(g_back_attrs, cells * sizeof(uint32_t));
-
-    if (new_fc) g_front_chars = new_fc;
-    if (new_fa) g_front_attrs = new_fa;
-    if (new_bc) g_back_chars = new_bc;
-    if (new_ba) g_back_attrs = new_ba;
-
-    if (g_front_chars && g_front_attrs && g_back_chars && g_back_attrs) {
-        memset(g_front_chars, 0, cells);
-        memset(g_front_attrs, 0xFF, cells * sizeof(uint32_t));
-        memset(g_back_chars, ' ', cells);
-        memset(g_back_attrs, 0, cells * sizeof(uint32_t));
+    size_t cells = (size_t)rows * (size_t)cols;
+    char *fc = malloc(cells);
+    uint32_t *fa = malloc(cells * sizeof(uint32_t));
+    char *bc = malloc(cells);
+    uint32_t *ba = malloc(cells * sizeof(uint32_t));
+    if (!fc || !fa || !bc || !ba) {
+        free(fc);
+        free(fa);
+        free(bc);
+        free(ba);
+        return;
     }
+
+    free(g_front_chars);
+    free(g_front_attrs);
+    free(g_back_chars);
+    free(g_back_attrs);
+    g_front_chars = fc;
+    g_front_attrs = fa;
+    g_back_chars = bc;
+    g_back_attrs = ba;
+    g_rows = rows;
+    g_cols = cols;
+
+    memset(g_front_chars, 0, cells);
+    memset(g_front_attrs, 0xFF, cells * sizeof(uint32_t));
+    memset(g_back_chars, ' ', cells);
+    memset(g_back_attrs, 0, cells * sizeof(uint32_t));
 }
 
 int term_init(void) {
@@ -82,17 +132,34 @@ int term_init(void) {
     raw.c_cc[VMIN] = 0;
     raw.c_cc[VTIME] = 1;
 
-    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) return -1;
-    g_raw_active = true;
+    if (!g_atexit_registered) {
+        if (atexit(restore_tty_atexit) != 0) return -1;
+        g_atexit_registered = true;
+    }
 
-    // Install SIGWINCH handler
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
+    sigemptyset(&sa.sa_mask);
+    sa.sa_handler = handle_fatal_signal;
+    for (size_t i = 0; i < FATAL_SIGNAL_COUNT; i++) {
+        sigaction(FATAL_SIGNALS[i], &sa, &g_old_fatal_sa[i]);
+    }
     sa.sa_handler = handle_sigwinch;
-    sigaction(SIGWINCH, &sa, NULL);
+    sigaction(SIGWINCH, &sa, &g_old_winch_sa);
 
-    // Enable alternate screen buffer, hide cursor, enable mouse tracking (SGR 1006)
-    write(STDOUT_FILENO, "\033[?1049h\033[?25l\033[?1000h\033[?1002h\033[?1006h", 35);
+    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) {
+        for (size_t i = 0; i < FATAL_SIGNAL_COUNT; i++) {
+            sigaction(FATAL_SIGNALS[i], &g_old_fatal_sa[i], NULL);
+        }
+        sigaction(SIGWINCH, &g_old_winch_sa, NULL);
+        return -1;
+    }
+    g_raw_active = true;
+    g_tty_dirty = 1;
+    g_pending_len = 0;
+
+    ssize_t w = write(STDOUT_FILENO, ENTER_SEQ, sizeof(ENTER_SEQ) - 1);
+    (void)w;
 
     update_dimensions();
     return 0;
@@ -101,11 +168,13 @@ int term_init(void) {
 void term_shutdown(void) {
     if (!g_raw_active) return;
 
-    // Disable mouse tracking, show cursor, leave alternate screen
-    write(STDOUT_FILENO, "\033[?1006l\033[?1002l\033[?1000l\033[?25h\033[?1049l\033[0m", 37);
-
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, &g_orig_termios);
+    restore_tty(TCSAFLUSH);
     g_raw_active = false;
+
+    for (size_t i = 0; i < FATAL_SIGNAL_COUNT; i++) {
+        sigaction(FATAL_SIGNALS[i], &g_old_fatal_sa[i], NULL);
+    }
+    sigaction(SIGWINCH, &g_old_winch_sa, NULL);
 
     free(g_front_chars);
     free(g_front_attrs);
@@ -115,6 +184,7 @@ void term_shutdown(void) {
     g_front_attrs = NULL;
     g_back_chars = NULL;
     g_back_attrs = NULL;
+    g_pending_len = 0;
 }
 
 void term_get_dimensions(int *rows, int *cols) {
@@ -128,7 +198,7 @@ void term_get_dimensions(int *rows, int *cols) {
 
 void term_clear(void) {
     if (!g_back_chars || !g_back_attrs) return;
-    size_t cells = (size_t)(g_rows * g_cols);
+    size_t cells = (size_t)g_rows * (size_t)g_cols;
     memset(g_back_chars, ' ', cells);
     memset(g_back_attrs, 0, cells * sizeof(uint32_t));
 }
@@ -137,7 +207,7 @@ void term_putc(int x, int y, char c, uint32_t attr) {
     if (x < 0 || x >= g_cols || y < 0 || y >= g_rows) return;
     if (!g_back_chars || !g_back_attrs) return;
 
-    int idx = y * g_cols + x;
+    size_t idx = (size_t)y * (size_t)g_cols + (size_t)x;
     g_back_chars[idx] = c;
     g_back_attrs[idx] = attr;
 }
@@ -237,7 +307,7 @@ void term_present(void) {
 
     for (int y = 0; y < g_rows; y++) {
         for (int x = 0; x < g_cols; x++) {
-            int idx = y * g_cols + x;
+            size_t idx = (size_t)y * (size_t)g_cols + (size_t)x;
             if (g_back_chars[idx] != g_front_chars[idx] || g_back_attrs[idx] != g_front_attrs[idx]) {
                 if (cursor_y != y || cursor_x != x) {
                     int w = snprintf(ptr, rem, "\033[%d;%dH", y + 1, x + 1);
@@ -272,6 +342,126 @@ void term_present(void) {
     }
 }
 
+/* Decodes a complete CSI sequence s[0..len) (ESC '[' params final, len >= 3); leaves KEY_NONE if unknown. */
+static void parse_csi(const unsigned char *s, size_t len, input_event_t *event) {
+    unsigned char final = s[len - 1];
+    const unsigned char *p = s + 2;
+    size_t plen = len - 3;
+
+    if (plen > 0 && p[0] == '<') {
+        if (final != 'M' && final != 'm') return;
+        char tmp[sizeof(g_pending)];
+        memcpy(tmp, p + 1, plen - 1);
+        tmp[plen - 1] = '\0';
+        int btn = 0, mx = 0, my = 0;
+        if (sscanf(tmp, "%d;%d;%d", &btn, &mx, &my) == 3) {
+            event->type = KEY_MOUSE_CLICK;
+            event->mouse_btn = btn;
+            event->mouse_x = mx - 1;
+            event->mouse_y = my - 1;
+        }
+        return;
+    }
+
+    int p1 = 0, p2 = 0;
+    size_t i = 0;
+    for (; i < plen && p[i] >= '0' && p[i] <= '9'; i++) {
+        if (p1 < 10000) p1 = p1 * 10 + (p[i] - '0');
+    }
+    if (i < plen && p[i] == ';') {
+        for (i++; i < plen && p[i] >= '0' && p[i] <= '9'; i++) {
+            if (p2 < 10000) p2 = p2 * 10 + (p[i] - '0');
+        }
+    }
+    bool alt = (p2 == 3);
+
+    switch (final) {
+        case 'A': event->type = alt ? KEY_ALT_UP : KEY_UP; return;
+        case 'B': event->type = alt ? KEY_ALT_DOWN : KEY_DOWN; return;
+        case 'C': event->type = alt ? KEY_ALT_RIGHT : KEY_RIGHT; return;
+        case 'D': event->type = alt ? KEY_ALT_LEFT : KEY_LEFT; return;
+        case 'H': event->type = KEY_HOME; return;
+        case 'F': event->type = KEY_END; return;
+        default: return;
+        case '~':
+            switch (p1) {
+                case 1:  event->type = KEY_HOME; return;
+                case 3:  event->type = KEY_BACKSPACE; return;
+                case 5:  event->type = KEY_PGUP; return;
+                case 6:  event->type = KEY_PGDN; return;
+                case 15: event->type = KEY_F5; return;
+                case 17: event->type = KEY_F6; return;
+                case 18: event->type = KEY_F7; return;
+                case 19: event->type = KEY_F8; return;
+                case 20: event->type = KEY_F9; return;
+                case 21: event->type = KEY_F10; return;
+                case 23: event->type = KEY_F11; return;
+                case 24: event->type = KEY_F12; return;
+                default: return;
+            }
+    }
+}
+
+/* Decodes the first key in buf[0..n) (n >= 1); returns bytes consumed (>= 1). KEY_NONE = unrecognised. */
+static size_t parse_input(const unsigned char *buf, size_t n, input_event_t *event) {
+    if (buf[0] != 27) {
+        switch (buf[0]) {
+            case '\r': case '\n': event->type = KEY_ENTER; break;
+            case '\t':            event->type = KEY_TAB; break;
+            case 127: case '\b':  event->type = KEY_BACKSPACE; break;
+            /* Ctrl+C, Ctrl+Q, Ctrl+X -> exit menu */
+            case 3: case 17: case 24: event->type = KEY_F10; break;
+            default:
+                event->type = KEY_CHAR;
+                event->ch = buf[0];
+                break;
+        }
+        return 1;
+    }
+
+    if (n == 1 || buf[1] == 27) {
+        event->type = KEY_ESC;
+        return 1;
+    }
+
+    if (buf[1] == '[' && n > 2) {
+        if (buf[2] == '[') {
+            /* Linux console F1-F5: ESC [ [ A..E */
+            static const key_type_t console_fkeys[] = { KEY_F1, KEY_F2, KEY_F3, KEY_F4, KEY_F5 };
+            if (n < 4) return n;
+            if (buf[3] >= 'A' && buf[3] <= 'E') event->type = console_fkeys[buf[3] - 'A'];
+            return 4;
+        }
+        size_t end = 2;
+        while (end < n && (buf[end] < 0x40 || buf[end] > 0x7E)) end++;
+        if (end == n) return n; /* truncated sequence: drop it */
+        parse_csi(buf, end + 1, event);
+        return end + 1;
+    }
+
+    if (buf[1] == 'O' && n > 2) {
+        switch (buf[2]) {
+            case 'P': event->type = KEY_F1; break;
+            case 'Q': event->type = KEY_F2; break;
+            case 'R': event->type = KEY_F3; break;
+            case 'S': event->type = KEY_F4; break;
+            default: break;
+        }
+        return 3;
+    }
+
+    switch (buf[1]) {
+        case 'h': case 'H': event->type = KEY_ALT_H; break;
+        case 'v': case 'V': event->type = KEY_ALT_V; break;
+        case 'm': case 'M': event->type = KEY_ALT_M; break;
+        case 'z': case 'Z': event->type = KEY_ALT_Z; break;
+        case '[':           event->type = KEY_ALT_LBRACKET; break;
+        case ']':           event->type = KEY_ALT_RBRACKET; break;
+        default: break;
+    }
+    return 2;
+}
+
 bool term_poll_event(input_event_t *event, int timeout_ms) {
     if (!event) return false;
     memset(event, 0, sizeof(*event));
@@ -283,140 +473,29 @@ bool term_poll_event(input_event_t *event, int timeout_ms) {
         return true;
     }
 
-    fd_set fds;
-    FD_ZERO(&fds);
-    FD_SET(STDIN_FILENO, &fds);
+    if (g_pending_len == 0) {
+        fd_set fds;
+        FD_ZERO(&fds);
+        FD_SET(STDIN_FILENO, &fds);
 
-    struct timeval tv;
-    tv.tv_sec = timeout_ms / 1000;
-    tv.tv_usec = (timeout_ms % 1000) * 1000;
+        struct timeval tv;
+        tv.tv_sec = timeout_ms / 1000;
+        tv.tv_usec = (timeout_ms % 1000) * 1000;
 
-    int ret = select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv);
-    if (ret <= 0) {
-        return false;
+        if (select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv) <= 0) return false;
+
+        memset(g_pending, 0, sizeof(g_pending));
+        ssize_t n = read(STDIN_FILENO, g_pending, sizeof(g_pending));
+        if (n <= 0) return false;
+        g_pending_len = (size_t)n;
     }
 
-    unsigned char seq[64];
-    ssize_t n = read(STDIN_FILENO, seq, sizeof(seq) - 1);
-    if (n <= 0) return false;
-    seq[n] = '\0';
-
-    if (seq[0] == 27) {
-        if (n == 1) {
-            event->type = KEY_ESC;
-            return true;
-        }
-
-        if (n == 2) {
-            switch (seq[1]) {
-                case 'h': case 'H': event->type = KEY_ALT_H; return true;
-                case 'v': case 'V': event->type = KEY_ALT_V; return true;
-                case 'm': case 'M': event->type = KEY_ALT_M; return true;
-                case 'z': case 'Z': event->type = KEY_ALT_Z; return true;
-                case '[':           event->type = KEY_ALT_LBRACKET; return true;
-                case ']':           event->type = KEY_ALT_RBRACKET; return true;
-                default: break;
-            }
-        }
-
-        if (seq[1] == 'O') {
-            switch (seq[2]) {
-                case 'P': event->type = KEY_F1; return true;
-                case 'Q': event->type = KEY_F2; return true;
-                case 'R': event->type = KEY_F3; return true;
-                case 'S': event->type = KEY_F4; return true;
-                default: break;
-            }
-        }
-
-        if (seq[1] == '[') {
-            if (seq[2] == '[') {
-                // Linux console function keys \e[[A to \e[[E
-                switch (seq[3]) {
-                    case 'A': event->type = KEY_F1; return true;
-                    case 'B': event->type = KEY_F2; return true;
-                    case 'C': event->type = KEY_F3; return true;
-                    case 'D': event->type = KEY_F4; return true;
-                    case 'E': event->type = KEY_F5; return true;
-                    default: break;
-                }
-            }
-
-            if (seq[2] == '<') {
-                int btn = 0, mx = 0, my = 0;
-                char action = 'M';
-                if (sscanf((char *)seq + 3, "%d;%d;%d%c", &btn, &mx, &my, &action) >= 3) {
-                    if (action == 'M' || action == 'm') {
-                        event->type = KEY_MOUSE_CLICK;
-                        event->mouse_btn = btn;
-                        event->mouse_x = mx - 1;
-                        event->mouse_y = my - 1;
-                        return true;
-                    }
-                }
-            }
-
-            switch (seq[2]) {
-                case 'A': event->type = KEY_UP; return true;
-                case 'B': event->type = KEY_DOWN; return true;
-                case 'C': event->type = KEY_RIGHT; return true;
-                case 'D': event->type = KEY_LEFT; return true;
-                case 'H': event->type = KEY_HOME; return true;
-                case 'F': event->type = KEY_END; return true;
-                case '1':
-                    if (n >= 4 && seq[3] == ';') {
-                        if (seq[4] == '3') {
-                            if (seq[5] == 'A') { event->type = KEY_ALT_UP; return true; }
-                            if (seq[5] == 'B') { event->type = KEY_ALT_DOWN; return true; }
-                            if (seq[5] == 'C') { event->type = KEY_ALT_RIGHT; return true; }
-                            if (seq[5] == 'D') { event->type = KEY_ALT_LEFT; return true; }
-                        }
-                    }
-                    if (n >= 4 && seq[3] == '~') { event->type = KEY_HOME; return true; }
-                    if (n >= 4 && seq[3] == '5') { event->type = KEY_F5; return true; }
-                    if (n >= 4 && seq[3] == '7') { event->type = KEY_F6; return true; }
-                    if (n >= 4 && seq[3] == '8') { event->type = KEY_F7; return true; }
-                    if (n >= 4 && seq[3] == '9') { event->type = KEY_F8; return true; }
-                    break;
-                case '2':
-                    if (n >= 4 && seq[3] == '0') { event->type = KEY_F9; return true; }
-                    if (n >= 4 && seq[3] == '1') { event->type = KEY_F10; return true; }
-                    if (n >= 4 && seq[3] == '3') { event->type = KEY_F10; return true; } // F11 -> exit/power
-                    if (n >= 4 && seq[3] == '4') { event->type = KEY_F10; return true; } // F12 -> exit/power
-                    break;
-                case '3':
-                    if (n >= 4 && seq[3] == '~') { event->type = KEY_BACKSPACE; return true; }
-                    break;
-                case '5':
-                    if (n >= 4 && seq[3] == '~') { event->type = KEY_PGUP; return true; }
-                    break;
-                case '6':
-                    if (n >= 4 && seq[3] == '~') { event->type = KEY_PGDN; return true; }
-                    break;
-                default: break;
-            }
-        }
+    while (g_pending_len > 0) {
+        size_t used = parse_input(g_pending, g_pending_len, event);
+        g_pending_len -= used;
+        memmove(g_pending, g_pending + used, g_pending_len);
+        if (event->type != KEY_NONE) return true;
+        memset(event, 0, sizeof(*event));
     }
-
-    if (seq[0] == '\r' || seq[0] == '\n') {
-        event->type = KEY_ENTER;
-        return true;
-    }
-    if (seq[0] == '\t') {
-        event->type = KEY_TAB;
-        return true;
-    }
-    if (seq[0] == 127 || seq[0] == '\b') {
-        event->type = KEY_BACKSPACE;
-        return true;
-    }
-    // Ctrl+C (3), Ctrl+Q (17), Ctrl+X (24) -> KEY_F10 exit menu
-    if (seq[0] == 3 || seq[0] == 17 || seq[0] == 24) {
-        event->type = KEY_F10;
-        return true;
-    }
-
-    event->type = KEY_CHAR;
-    event->ch = seq[0];
-    return true;
+    return false;
 }

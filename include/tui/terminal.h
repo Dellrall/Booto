@@ -104,6 +104,10 @@ typedef struct {
 
 /**
  * @brief Initialize terminal in raw mode, enabling mouse tracking.
+ *
+ * Installs SIGWINCH plus fatal-signal handlers (TERM/HUP/INT/QUIT/SEGV/BUS/ABRT/FPE)
+ * and an atexit hook that restore the terminal; term_shutdown() reinstates the
+ * previous signal dispositions.
  */
 int term_init(void);
 

@@ -18,6 +18,8 @@ const char *wm_pane_type_name(pane_type_t type) {
     }
 }
 
+#define WM_MAX_LEAVES 32
+
 static wm_node_t *create_leaf(int id, pane_type_t type) {
     wm_node_t *node = (wm_node_t *)calloc(1, sizeof(wm_node_t));
     if (!node) return NULL;
@@ -130,9 +132,9 @@ static void collect_leaves(wm_node_t *node, wm_node_t **leaves, int *count, int 
 
 void wm_focus_next(wm_tree_t *tree) {
     if (!tree || !tree->root) return;
-    wm_node_t *leaves[32];
+    wm_node_t *leaves[WM_MAX_LEAVES];
     int count = 0;
-    collect_leaves(tree->root, leaves, &count, 32);
+    collect_leaves(tree->root, leaves, &count, WM_MAX_LEAVES);
     if (count <= 1) return;
 
     for (int i = 0; i < count; i++) {
@@ -146,9 +148,9 @@ void wm_focus_next(wm_tree_t *tree) {
 
 void wm_focus_direction(wm_tree_t *tree, key_type_t dir) {
     if (!tree || !tree->focused_leaf) return;
-    wm_node_t *leaves[32];
+    wm_node_t *leaves[WM_MAX_LEAVES];
     int count = 0;
-    collect_leaves(tree->root, leaves, &count, 32);
+    collect_leaves(tree->root, leaves, &count, WM_MAX_LEAVES);
     if (count <= 1) return;
 
     wm_node_t *curr = tree->focused_leaf;
@@ -201,6 +203,13 @@ bool wm_split_focused(wm_tree_t *tree, split_direction_t dir, pane_type_t new_pa
     if (!tree || !tree->focused_leaf) return false;
     wm_node_t *curr = tree->focused_leaf;
     wm_node_t *parent = curr->parent;
+
+    /* collect_leaves callers use 32-slot arrays; also keep each half usable. */
+    wm_node_t *leaves[WM_MAX_LEAVES];
+    int count = 0;
+    collect_leaves(tree->root, leaves, &count, WM_MAX_LEAVES);
+    if (count >= WM_MAX_LEAVES) return false;
+    if (dir == SPLIT_VERTICAL ? curr->w / 2 < 10 : curr->h / 2 < 3) return false;
 
     wm_node_t *new_leaf = create_leaf(tree->next_id++, new_pane);
     if (!new_leaf) return false;
@@ -280,8 +289,11 @@ bool wm_close_focused(wm_tree_t *tree) {
     parent->left = NULL;
     parent->right = NULL;
     free_node(parent);
+    if (tree->zoomed_leaf == curr) tree->zoomed_leaf = NULL;
     free(curr);
 
+    /* sibling may be a split subtree; focus must always be a leaf. */
+    while (sibling->type == NODE_SPLIT) sibling = sibling->left;
     tree->focused_leaf = sibling;
     wm_recalculate_layout(tree, 0, 1, tree->screen_w, tree->screen_h - 2);
     return true;

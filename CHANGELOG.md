@@ -58,6 +58,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **MBR gap**: embedding a `GRUB`/`SYSLINUX` string no longer suppresses analysis, and data sectors that merely start with jump bytes no longer alarm. High-entropy or INT 13h hook payloads are flagged.
 - **`ld.so.preload`** entries are whitespace-tokenised (all entries audited, no 512-byte line cap). `LD_PRELOAD` in `etc/environment` is also checked.
 - **Fuzzing**: deterministic mutation fuzzing from valid ELF, PE32/PE32+, MBR/VBR/gap and initramfs seeds (1,500 iterations per parser) replaces 500 purely random buffers.
+- **TUI robustness**:
+  - The terminal is restored (termios, cursor, alternate screen) on SIGTERM, SIGINT, SIGHUP, SIGQUIT, SIGSEGV, SIGBUS, SIGABRT, SIGFPE and at exit.
+  - Resize buffers are swapped only after every allocation succeeds.
+  - Escape-sequence parsing is bounded by the bytes actually read; F11 and F12 are distinct keys.
+  - Closing a zoomed pane no longer leaves a dangling `zoomed_leaf`. Splits stop at 32 panes or the minimum pane size.
+- **Logger**: genuinely thread-safe (mutex). It no longer writes to stderr while the TUI callback is registered, so log lines stopped painting over the UI. Re-initialising closes the previous log file.
+- **F5 scans run on a worker thread**: the UI keeps rendering with a `Scanning [k/6]` spinner. Export, mount and LUKS actions are refused, and quitting waits for the worker. `Alt+M` swaps with the next pane instead of always "right".
 
 ---
 
