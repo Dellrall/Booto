@@ -128,6 +128,25 @@ booto_error_t disk_ensure_private_dir(const char *path);
  */
 const char *disk_format_size(uint64_t bytes, char *buf, size_t buf_size);
 
+#define DISK_MAX_ESP 8
+
+/**
+ * @brief Pure parser: find EFI System Partitions in a GPT (validated incl. CRC32s) or classic MBR.
+ * @param buf Disk bytes from LBA 0. @param sector_size Logical sector size.
+ * @return BOOTO_OK (*n may be 0 if no table), BOOTO_ERR_CORRUPT_DATA on bad GPT / protective MBR without GPT.
+ */
+booto_error_t disk_parse_esp_partitions(const uint8_t *buf, size_t len, uint32_t sector_size,
+                                        uint32_t *part_numbers, int max, int *n);
+
+/** @brief Read disk_path read-only (block device or image) and return ESP partition numbers. */
+booto_error_t disk_find_esp_partitions(const char *disk_path, uint32_t *part_numbers, int max, int *n);
+
+/** @brief "/dev/nvme0n1p2" -> "/dev/nvme0n1" via sysfs. BOOTO_ERR_NOT_FOUND if not a partition. */
+booto_error_t disk_partition_parent(const char *part_dev, char *parent, size_t parent_size);
+
+/** @brief "/dev/nvme0n1" + 1 -> "/dev/nvme0n1p1" via sysfs. BOOTO_ERR_NOT_FOUND if absent. */
+booto_error_t disk_partition_by_number(const char *disk_dev, uint32_t number, char *out, size_t out_size);
+
 /**
  * @brief Check if the current process has effective root / CAP_SYS_ADMIN privileges.
  */

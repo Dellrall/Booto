@@ -176,7 +176,7 @@ The following improvements are architectural priorities for Booto. Items marked 
   - **`xfs`**: Magic header `"XFSB"` at offset 0 (4 bytes).
   - **`iso9660`**: Volume descriptor identifier `"CD001"` at offset 32,768 (32 KB).
 
-### 2. Multi-Partition ESP Auto-Discovery (`src/tui/tui_app.c`)
+### 2. Multi-Partition ESP Auto-Discovery (`src/forensic_scan.c`, `src/disk_mount.c`) — **(Done)**: GPT/MBR ESP lookup via `disk_find_esp_partitions()`, sysfs mapping, read-only mount at `/tmp/booto_esp_target`.
 - **Problem**: When mounting a Linux rootfs offline (e.g. `/dev/sda2`), `/boot/efi` is an unmounted empty directory because the EFI partition resides on `/dev/sda1`.
 - **Specification**:
   - Detect if `$scan_root/boot/efi` is empty or missing `.efi` binaries.

@@ -14,12 +14,14 @@
 #include "logger.h"
 
 #include <dirent.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
 
 #define SCAN_MOUNT_POINT "/tmp/booto_scan_target"
+#define ESP_MOUNT_POINT "/tmp/booto_esp_target"
 
 static const char *err_name(booto_error_t e) {
     switch (e) {
@@ -125,6 +127,86 @@ static bool find_initramfs(const char *root, char *out, size_t out_size) {
     return true;
 }
 
+/* UEFI engine: <root>/boot/efi if it holds EFI files, else the ESP(s) on target_dev's disk, mounted read-only. */
+static void run_uefi(forensic_scan_report_t *out, const char *target_dev, bool have_root) {
+    char note[96];
+    if (have_root) {
+        char path[512];
+        snprintf(path, sizeof(path), "%.256s/boot/efi", out->scan_root);
+        booto_error_t e = uefi_inspect_esp_directory(path, &out->uefi);
+        if (e == BOOTO_OK && out->uefi.efi_files_scanned > 0) {
+            snprintf(out->esp_dev, sizeof(out->esp_dev), "%.118s/boot/efi", out->scan_root);
+            snprintf(note, sizeof(note), "ESP: %.90s", out->esp_dev);
+            set_status(out, SCAN_MOD_UEFI, SCAN_STATUS_OK, e, note);
+            return;
+        }
+    }
+    if (!target_dev) {
+        set_status(out, SCAN_MOD_UEFI, SCAN_STATUS_SKIPPED, BOOTO_OK, "no EFI system partition found");
+        return;
+    }
+
+    char disk[128];
+    booto_error_t e = disk_partition_parent(target_dev, disk, sizeof(disk));
+    if (e == BOOTO_ERR_NOT_FOUND) snprintf(disk, sizeof(disk), "%.127s", target_dev);  /* already a whole disk */
+    else if (e != BOOTO_OK) {
+        snprintf(note, sizeof(note), "cannot resolve parent disk: %s", err_name(e));
+        set_status(out, SCAN_MOD_UEFI, SCAN_STATUS_ERROR, e, note);
+        return;
+    }
+
+    uint32_t nums[DISK_MAX_ESP];
+    int n = 0;
+    e = disk_find_esp_partitions(disk, nums, DISK_MAX_ESP, &n);
+    if (e == BOOTO_ERR_CORRUPT_DATA) {
+        set_status(out, SCAN_MOD_UEFI, SCAN_STATUS_ERROR, e, "partition table corrupt (GPT checksum mismatch)");
+        return;
+    }
+    if (e != BOOTO_OK) {
+        snprintf(note, sizeof(note), "cannot read partition table: %s", err_name(e));
+        set_status(out, SCAN_MOD_UEFI, SCAN_STATUS_ERROR, e, note);
+        return;
+    }
+
+    booto_error_t last_err = BOOTO_OK;
+    char last_dev[64] = "";
+    for (int i = 0; i < n && i < DISK_MAX_ESP; i++) {
+        char esp[128];
+        e = disk_partition_by_number(disk, nums[i], esp, sizeof(esp));
+        if (e != BOOTO_OK) {
+            last_err = e;
+            snprintf(last_dev, sizeof(last_dev), "partition %" PRIu32, nums[i]);
+            continue;
+        }
+        if (strcmp(esp, target_dev) == 0) continue;
+        e = disk_mount_ro(esp, ESP_MOUNT_POINT, "vfat");
+        if (e != BOOTO_OK) {
+            LOG_WARN("Cannot mount ESP %s read-only: %s", esp, err_name(e));
+            last_err = e;
+            snprintf(last_dev, sizeof(last_dev), "%.63s", esp);
+            continue;
+        }
+        memset(&out->uefi, 0, sizeof(out->uefi));
+        e = uefi_inspect_esp_directory(ESP_MOUNT_POINT, &out->uefi);
+        booto_error_t ue = disk_unmount(ESP_MOUNT_POINT);
+        if (ue != BOOTO_OK) LOG_WARN("Failed to unmount %s: %s", ESP_MOUNT_POINT, err_name(ue));
+        snprintf(out->esp_dev, sizeof(out->esp_dev), "%.127s", esp);
+        if (e != BOOTO_OK) {
+            set_result(out, SCAN_MOD_UEFI, e);
+            return;
+        }
+        snprintf(note, sizeof(note), "ESP: %.60s (auto-discovered)", esp);
+        set_status(out, SCAN_MOD_UEFI, SCAN_STATUS_OK, e, note);
+        return;
+    }
+    if (last_dev[0]) {
+        snprintf(note, sizeof(note), "ESP %.40s not mounted: %s", last_dev, err_name(last_err));
+        set_status(out, SCAN_MOD_UEFI, SCAN_STATUS_ERROR, last_err, note);
+        return;
+    }
+    set_status(out, SCAN_MOD_UEFI, SCAN_STATUS_SKIPPED, BOOTO_OK, "no EFI system partition found");
+}
+
 booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, const bool *enabled,
                                 forensic_scan_progress_cb cb, void *user, forensic_scan_report_t *out) {
     if (!out || (!target_dev && !rootfs_dir)) return BOOTO_ERR_INVALID_ARG;
@@ -151,14 +233,7 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
         else set_result(out, SCAN_MOD_MBR, mbr_audit_device(target_dev, &out->mbr));
     }
 
-    if (begin(out, SCAN_MOD_UEFI, enabled, cb, user)) {
-        if (!have_root) {
-            set_status(out, SCAN_MOD_UEFI, SCAN_STATUS_ERROR, out->mount_err, rootfs_note);
-        } else {
-            snprintf(path, sizeof(path), "%.256s/boot/efi", root);
-            set_result(out, SCAN_MOD_UEFI, uefi_inspect_esp_directory(path, &out->uefi));
-        }
-    }
+    if (begin(out, SCAN_MOD_UEFI, enabled, cb, user)) run_uefi(out, target_dev, have_root);
 
     if (begin(out, SCAN_MOD_KERNEL, enabled, cb, user)) {
         if (!have_root) {

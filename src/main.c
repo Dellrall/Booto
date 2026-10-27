@@ -154,6 +154,8 @@ static void print_dry_run(const booto_context_t *ctx) {
     else printf("  Target device : auto-discover first target partition%s\n", ctx->mock_drives ? " (mock drives included)" : "");
     if (ctx->target_rootfs[0]) printf("  Rootfs        : %s\n", ctx->target_rootfs);
     else printf("  Rootfs        : device mounted read-only at /tmp/booto_scan_target\n");
+    printf("  ESP           : %s/boot/efi, else auto-discover on the target's disk (mounted read-only at /tmp/booto_esp_target)\n",
+           ctx->target_rootfs[0] ? ctx->target_rootfs : "/tmp/booto_scan_target");
     printf("  Modules       :");
     for (int i = 0; i < SCAN_MOD_COUNT; i++) printf(" %s%s", forensic_scan_module_name((scan_module_id_t)i), i + 1 < SCAN_MOD_COUNT ? "," : "\n");
     printf("  Report dir    : %s\n", ctx->persistence_dir[0] ? ctx->persistence_dir : "(none)");

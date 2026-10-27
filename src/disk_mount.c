@@ -13,8 +13,10 @@
 #include "logger.h"
 
 #include <ctype.h>
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <linux/fs.h>
 #include <poll.h>
 #include <signal.h>
@@ -702,4 +704,192 @@ booto_error_t disk_luks_close(const char *mapper_name) {
     }
 
     return BOOTO_OK;
+}
+
+/* ---- ESP discovery (GPT / MBR) ---- */
+
+static const uint8_t ESP_TYPE_GUID[16] = {0x28, 0x73, 0x2A, 0xC1, 0x1F, 0xF8, 0xD2, 0x11,
+                                          0xBA, 0x4B, 0x00, 0xA0, 0xC9, 0x3E, 0xC9, 0x3B};
+#define GPT_MAX_ENTRIES   1024u
+#define GPT_MAX_READ      (1024u * 1024u)
+
+static uint32_t esp_crc32(const uint8_t *p, size_t len) {
+    uint32_t crc = 0xFFFFFFFFu;
+    for (size_t i = 0; i < len; i++) {
+        crc ^= p[i];
+        for (int k = 0; k < 8; k++) crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
+    }
+    return ~crc;
+}
+
+static uint32_t rd_le32(const uint8_t *p) {
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+static uint64_t rd_le64(const uint8_t *p) {
+    return (uint64_t)rd_le32(p) | ((uint64_t)rd_le32(p + 4) << 32);
+}
+
+static bool has_gpt_sig(const uint8_t *buf, size_t len, uint32_t ss) {
+    return ss >= 512 && len >= (size_t)ss * 2 && memcmp(buf + ss, "EFI PART", 8) == 0;
+}
+
+/* Validates the GPT header at LBA 1 and returns entry-array location; does not need the array itself. */
+static booto_error_t gpt_header(const uint8_t *buf, uint32_t ss, uint64_t *arr_off, uint32_t *count, uint32_t *esize) {
+    const uint8_t *h = buf + ss;
+    uint32_t hsize = rd_le32(h + 12);
+    if (hsize < 92 || hsize > ss) return BOOTO_ERR_CORRUPT_DATA;
+    uint8_t tmp[4096];
+    if (hsize > sizeof(tmp)) return BOOTO_ERR_CORRUPT_DATA;
+    memcpy(tmp, h, hsize);
+    memset(tmp + 16, 0, 4);
+    if (esp_crc32(tmp, hsize) != rd_le32(h + 16)) return BOOTO_ERR_CORRUPT_DATA;
+    uint64_t lba = rd_le64(h + 72);
+    *count = rd_le32(h + 80);
+    *esize = rd_le32(h + 84);
+    if (*count > GPT_MAX_ENTRIES || *esize < 128 || *esize % 8 != 0 || *esize > 4096) return BOOTO_ERR_CORRUPT_DATA;
+    if (lba > GPT_MAX_READ / ss) return BOOTO_ERR_CORRUPT_DATA;
+    *arr_off = lba * ss;
+    return BOOTO_OK;
+}
+
+booto_error_t disk_parse_esp_partitions(const uint8_t *buf, size_t len, uint32_t sector_size,
+                                        uint32_t *part_numbers, int max, int *n) {
+    if (!buf || !part_numbers || !n || max < 0 || sector_size < 512 || sector_size > 65536) return BOOTO_ERR_INVALID_ARG;
+    *n = 0;
+    if (has_gpt_sig(buf, len, sector_size)) {
+        uint64_t off;
+        uint32_t count, esize;
+        booto_error_t err = gpt_header(buf, sector_size, &off, &count, &esize);
+        if (err != BOOTO_OK) return err;
+        size_t arr = (size_t)count * esize;
+        if (off > len || arr > len - (size_t)off) return BOOTO_ERR_CORRUPT_DATA;
+        const uint8_t *e = buf + off;
+        if (esp_crc32(e, arr) != rd_le32(buf + sector_size + 88)) return BOOTO_ERR_CORRUPT_DATA;
+        for (uint32_t i = 0; i < count && *n < max; i++) {
+            if (memcmp(e + (size_t)i * esize, ESP_TYPE_GUID, 16) == 0) part_numbers[(*n)++] = i + 1;
+        }
+        return BOOTO_OK;
+    }
+    if (len < 512 || buf[510] != 0x55 || buf[511] != 0xAA) return BOOTO_OK;
+    for (uint32_t i = 0; i < 4; i++) {
+        uint8_t type = buf[446 + 16 * i + 4];
+        if (type == 0xEE) { *n = 0; return BOOTO_ERR_CORRUPT_DATA; }
+        if (type == 0xEF && *n < max) part_numbers[(*n)++] = i + 1;
+    }
+    return BOOTO_OK;
+}
+
+booto_error_t disk_find_esp_partitions(const char *disk_path, uint32_t *part_numbers, int max, int *n) {
+    if (!disk_path || !part_numbers || !n || max < 0) return BOOTO_ERR_INVALID_ARG;
+    *n = 0;
+    int fd = open(disk_path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) {
+        if (errno == EACCES || errno == EPERM) return BOOTO_ERR_PERMISSION_DENIED;
+        if (errno == ENOENT || errno == ENOTDIR) return BOOTO_ERR_NOT_FOUND;
+        return BOOTO_ERR_IO;
+    }
+    uint32_t ss = 0;
+    struct stat st;
+    int bss = 0;
+    if (fstat(fd, &st) == 0 && S_ISBLK(st.st_mode) && ioctl(fd, BLKSSZGET, &bss) == 0 && bss >= 512 && bss <= 65536)
+        ss = (uint32_t)bss;
+
+    /* Probe LBA 0..1 at the known size, else at 512 then 4096 (images have no BLKSSZGET). */
+    uint8_t *buf = malloc(GPT_MAX_READ);
+    if (!buf) { close(fd); return BOOTO_ERR_OUT_OF_MEMORY; }
+    ssize_t got = pread(fd, buf, 8192, 0);
+    if (got < 0) { free(buf); close(fd); return BOOTO_ERR_IO; }
+    size_t len = (size_t)got;
+    if (ss == 0) ss = (!has_gpt_sig(buf, len, 512) && has_gpt_sig(buf, len, 4096)) ? 4096 : 512;
+    if (len > (size_t)ss * 2) len = (size_t)ss * 2;
+
+    booto_error_t err = BOOTO_OK;
+    if (has_gpt_sig(buf, len, ss)) {
+        uint64_t off;
+        uint32_t count, esize;
+        err = gpt_header(buf, ss, &off, &count, &esize);
+        if (err == BOOTO_OK) {
+            uint64_t need = off + (uint64_t)count * esize;
+            if (need > GPT_MAX_READ) {
+                err = BOOTO_ERR_CORRUPT_DATA;
+            } else if (need > len) {
+                got = pread(fd, buf + len, (size_t)need - len, (off_t)len);
+                if (got < 0) err = BOOTO_ERR_IO;
+                else len += (size_t)got;
+            }
+        }
+    }
+    if (err == BOOTO_OK) err = disk_parse_esp_partitions(buf, len, ss, part_numbers, max, n);
+    free(buf);
+    close(fd);
+    return err;
+}
+
+/* "/dev/<name>" -> name, rejecting path tricks. */
+static booto_error_t dev_name(const char *dev, const char **name) {
+    if (!dev || strncmp(dev, "/dev/", 5) != 0) return BOOTO_ERR_INVALID_ARG;
+    const char *nm = dev + 5;
+    if (*nm == '\0' || strchr(nm, '/') || strstr(nm, "..")) return BOOTO_ERR_INVALID_ARG;
+    *name = nm;
+    return BOOTO_OK;
+}
+
+static bool read_partition_number(const char *dir, uint32_t *num) {
+    char p[PATH_MAX];
+    if (snprintf(p, sizeof(p), "%s/partition", dir) >= (int)sizeof(p)) return false;
+    FILE *f = fopen(p, "re");
+    if (!f) return false;
+    unsigned long v = 0;
+    int ok = fscanf(f, "%lu", &v);
+    fclose(f);
+    if (ok != 1 || v > UINT32_MAX) return false;
+    *num = (uint32_t)v;
+    return true;
+}
+
+booto_error_t disk_partition_parent(const char *part_dev, char *parent, size_t parent_size) {
+    // A path outside /dev (e.g. a disk image file) has no sysfs entry: it is a whole disk, not a partition.
+    if (part_dev && strncmp(part_dev, "/dev/", 5) != 0) return BOOTO_ERR_NOT_FOUND;
+    const char *nm;
+    booto_error_t err = dev_name(part_dev, &nm);
+    if (err != BOOTO_OK) return err;
+    if (!parent || parent_size == 0) return BOOTO_ERR_INVALID_ARG;
+    char link[PATH_MAX], resolved[PATH_MAX];
+    if (snprintf(link, sizeof(link), "/sys/class/block/%s", nm) >= (int)sizeof(link)) return BOOTO_ERR_INVALID_ARG;
+    uint32_t num;
+    if (!realpath(link, resolved) || !read_partition_number(resolved, &num)) return BOOTO_ERR_NOT_FOUND;
+    char *slash = strrchr(resolved, '/');
+    if (!slash || slash == resolved) return BOOTO_ERR_NOT_FOUND;
+    *slash = '\0';
+    const char *pname = strrchr(resolved, '/');
+    pname = pname ? pname + 1 : resolved;
+    if (*pname == '\0') return BOOTO_ERR_NOT_FOUND;
+    if (snprintf(parent, parent_size, "/dev/%s", pname) >= (int)parent_size) return BOOTO_ERR_INVALID_ARG;
+    return BOOTO_OK;
+}
+
+booto_error_t disk_partition_by_number(const char *disk_dev, uint32_t number, char *out, size_t out_size) {
+    const char *nm;
+    booto_error_t err = dev_name(disk_dev, &nm);
+    if (err != BOOTO_OK) return err;
+    if (!out || out_size == 0) return BOOTO_ERR_INVALID_ARG;
+    char dir[PATH_MAX];
+    if (snprintf(dir, sizeof(dir), "/sys/class/block/%s", nm) >= (int)sizeof(dir)) return BOOTO_ERR_INVALID_ARG;
+    DIR *d = opendir(dir);
+    if (!d) return BOOTO_ERR_NOT_FOUND;
+    err = BOOTO_ERR_NOT_FOUND;
+    struct dirent *de;
+    while ((de = readdir(d)) != NULL) {
+        if (de->d_name[0] == '.') continue;
+        char child[PATH_MAX];
+        uint32_t num;
+        if (snprintf(child, sizeof(child), "%s/%s", dir, de->d_name) >= (int)sizeof(child)) continue;
+        if (read_partition_number(child, &num) && num == number) {
+            err = snprintf(out, out_size, "/dev/%s", de->d_name) >= (int)out_size ? BOOTO_ERR_INVALID_ARG : BOOTO_OK;
+            break;
+        }
+    }
+    closedir(d);
+    return err;
 }
