@@ -2,7 +2,8 @@ CC ?= gcc
 CFLAGS ?= -std=c11 -Wall -Wextra -Wpedantic -Werror -Wshadow -Wformat=2 -Wconversion -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE -pthread
 LDFLAGS ?= -pie -Wl,-z,relro,-z,now -pthread
 
-VERSION ?= $(shell git describe --tags --always 2>/dev/null | sed 's/^v//' || echo "1.0.4")
+GIT_VERSION := $(shell git describe --tags --always 2>/dev/null | sed 's/^v//')
+VERSION ?= $(if $(GIT_VERSION),$(GIT_VERSION),0.0.0-unknown)
 INCLUDES = -Iinclude
 
 SRCDIR = src

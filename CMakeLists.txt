@@ -1,7 +1,19 @@
 cmake_minimum_required(VERSION 3.16)
 
+# Version single source: git tags (same as Makefile)
+execute_process(
+    COMMAND git describe --tags --always
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    OUTPUT_VARIABLE BOOTO_VERSION
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+)
+string(REGEX REPLACE "^v" "" BOOTO_VERSION "${BOOTO_VERSION}")
+if(NOT BOOTO_VERSION)
+    set(BOOTO_VERSION "0.0.0-unknown")
+endif()
+
 project(booto
-    VERSION 1.1.2
     DESCRIPTION "Debian-Based Tails-Inspired Live Linux Forensic Rootkit & Bootkit Detection Suite"
     LANGUAGES C
 )
@@ -28,29 +40,18 @@ add_compile_options(
 
 add_link_options(-pie -Wl,-z,relro,-z,now)
 
-# Extract Git commit hash if available
+# Generate include/version.h exactly like the Makefile does
 execute_process(
-    COMMAND git rev-parse --short HEAD
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/scripts/gen_version.sh
+            ${CMAKE_CURRENT_SOURCE_DIR}/include/version.h.in
+            ${CMAKE_CURRENT_BINARY_DIR}/generated/version.h
+            ${BOOTO_VERSION}
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    OUTPUT_VARIABLE GIT_COMMIT_HASH
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_QUIET
+    RESULT_VARIABLE GEN_VERSION_RESULT
 )
-if(NOT GIT_COMMIT_HASH)
-    set(GIT_COMMIT_HASH "unknown")
+if(NOT GEN_VERSION_RESULT EQUAL 0)
+    message(FATAL_ERROR "scripts/gen_version.sh failed")
 endif()
-
-string(TIMESTAMP BUILD_TIMESTAMP "%Y-%m-%dT%H:%M:%SZ" UTC)
-set(PROJECT_VERSION_MAJOR ${PROJECT_VERSION_MAJOR})
-set(PROJECT_VERSION_MINOR ${PROJECT_VERSION_MINOR})
-set(PROJECT_VERSION_PATCH ${PROJECT_VERSION_PATCH})
-
-# Generate include/version.h
-configure_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/version.h.in
-    ${CMAKE_CURRENT_BINARY_DIR}/generated/version.h
-    @ONLY
-)
 
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include

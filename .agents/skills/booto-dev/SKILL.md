@@ -1,6 +1,6 @@
 ---
 name: booto-dev
-description: Specialized instructions and workflows for developing, building, testing, versioning, and packaging the Booto C rootkit/bootkit detection engine, Zellij-style movable ncurses TUI, and Debian-based Tails-like Live USB ISO with optional encrypted persistence.
+description: Specialized instructions and workflows for developing, building, testing, versioning, and packaging the Booto C rootkit/bootkit detection engine, Zellij-style movable raw termios/ANSI TUI, and Debian-based Tails-like Live USB ISO with optional encrypted persistence.
 ---
 
 # Booto Development & Forensic Verification Skill
@@ -40,7 +40,7 @@ graph LR
     S4 --> S5[5. Fuzzing Harness]
     S5 --> S6[6. Case Reporter]
     S6 --> S7[7. TUI Live Scan]
-    S7 --> S8[8. Mock Disk & Updater]
+    S7 --> S8[8. Mock Disk & Rules Generator]
 ```
 
 ### Step-by-Step Implementation Checklist:
@@ -49,16 +49,17 @@ graph LR
    - Define severity enum (`<module>_severity_t`: INFO, LOW, MEDIUM, HIGH, CRITICAL).
    - Define finding struct (`<module>_threat_finding_t` with `threat_name`, `target`, `sha256`, `rule_id`, `severity`, `description`).
    - Define aggregated result struct (`<module>_scan_result_t` with `threats_detected`, count metrics, and array of findings).
-   - Declare parsing functions (`<module>_audit_buffer`, `<module>_audit_device`), string conversion helper (`<module>_severity_to_string`), and mock fallback (`<module>_audit_mock`).
+   - Declare parsing functions (`<module>_audit_buffer`, `<module>_audit_device`) and string conversion helper (`<module>_severity_to_string`). Do **not** add a `<module>_audit_mock` fallback: mocks were removed because they produced fabricated results.
 
 2. **Core Implementation (`src/<module>.c`)**:
    - Implement low-level buffer parsing and invariant heuristics (e.g. byte patterns, opcode validation, symbol references).
-   - Provide a safe mock fallback (`<module>_audit_mock(scenario, result)`) to support non-root unit testing and CI testbeds.
+   - On failure (missing input, unreadable device, missing tool), return a `booto_error_t`; `src/forensic_scan.c` then marks the module ERROR and the verdict INCOMPLETE. Never fake a clean result.
    - Log critical alerts using `LOG_CRITICAL("[MODULE ALERT] ...")` and audit info using `LOG_INFO(...)`.
 
-3. **Threat Signatures Database (`rules/<module>_signatures.json`)**:
-   - Store signature JSON with schema: `name`, `rule_id`, `pattern_hex` / `symbols`, `severity`.
-   - Generate SHA-256 seal: `sha256sum rules/<module>_signatures.json > rules/<module>_signatures.json.sha256`.
+3. **Threat Signatures (`rules/<module>_*.json`, loaded by `src/rules_loader.c`)**:
+   - Signatures live in sealed runtime rule files searched in `$BOOTO_RULES_DIR`, `/persistence/rules`, `/usr/share/booto/rules`, `./rules`; a seal mismatch makes the loader refuse the file.
+   - Follow the schema of the existing rules files and add a parser for the new file in `src/rules_loader.c`.
+   - Generate the file and its SHA-256 seal (`.json.sha256`) from `scripts/update_rules.sh`; never hand-edit a sealed file.
 
 4. **Standalone Unit Test Suite (`tests/test_<module>.c`)**:
    - Test clean baseline scenarios (e.g., standard GRUB, clean kernel modules).
@@ -74,11 +75,11 @@ graph LR
 
 7. **TUI Live Scan & Modules Display (`src/tui/tui_app.c` & `src/tui/pane.c`)**:
    - In `src/tui/pane.c`: Add the module to `app->modules[...]` and increment `app->module_count`.
-   - In `src/tui/tui_app.c`: Invoke the module inside `execute_forensic_scan()`, aggregate threats, and update the Threat Inspector card.
+   - In `src/tui/tui_app.c` / `src/forensic_scan.c`: Run the module from the shared scan pipeline so it gets a per-module status (OK/THREATS/ERROR) and contributes to the CLEAN/THREATS/INCOMPLETE verdict.
 
-8. **Synthetic Disk & Tooling Integration (`scripts/gen_mock_disk.sh` & `scripts/update_rules.sh`)**:
-   - In `scripts/gen_mock_disk.sh`: Inject a synthetic mock sample into the loopback image.
-   - In `scripts/update_rules.sh`: Add rule generation and SHA-256 sealing for the new module.
+8. **Synthetic Disk & Rules Generator (`scripts/gen_mock_disk.sh` & `scripts/update_rules.sh`)**:
+   - In `scripts/gen_mock_disk.sh`: Inject a synthetic sample into the loopback image.
+   - In `scripts/update_rules.sh`: Add rule generation and SHA-256 sealing for the new module (it generates locally; no network fetch).
 
 ---
 
@@ -97,8 +98,11 @@ graph LR
 
 ## 4. CI/CD Architecture, Git Flags & Commit Conventions
 
+### Branches & CI Triggers:
+- Work on `phase/<topic>` branches and merge via pull request; CI runs on PRs only, not on every push.
+- Use `[skip ci]` in docs-only commits.
+
 ### Conventional Commit Format:
-Use structured commit prefixes:
 - `feat(scope): ...` — New detection engine, TUI feature, or tool.
 - `fix(scope): ...` — Bug fix, memory leak fix, or bootloader correction.
 - `docs(scope): ...` — Markdown documentation, skill files, or worklogs.
@@ -160,9 +164,9 @@ sudo ./scripts/build_iso.sh booto-live-amd64.iso
 
 ## 6. Architectural Improvement Priorities & Low-Level Design Specs
 
-The following 5 improvements are designated architectural priorities for future iterations of Booto:
+The following improvements are architectural priorities for Booto. Items marked **(Done)** are already implemented and kept for reference:
 
-### 1. Direct Superblock Magic Probing (`src/disk_mount.c`)
+### 1. Direct Superblock Magic Probing (`src/disk_mount.c`) — **(Done)**
 - **Problem**: Partition names (e.g. `sda1`, `sda2`) are unreliable indicators of filesystem types.
 - **Specification**: Probe raw superblock signatures via `pread()` on sector 0 / initial disk blocks:
   - **`ext4`**: Magic `0xEF53` at offset 1024 (2 bytes).
@@ -180,7 +184,7 @@ The following 5 improvements are designated architectural priorities for future 
   - Automatically mount the neighbor ESP partition read-only to `/tmp/booto_esp_target`.
   - Redirect `uefi_inspect_esp_directory()` to audit the true EFI System Partition.
 
-### 3. Transparent In-Memory Initramfs Decompression (`src/initramfs_auditor.c`)
+### 3. Transparent Initramfs Decompression (`src/initramfs_auditor.c`) — **(Done)**: implemented by piping gzip/xz/zstd/lz4/bzip2 streams through the system tools.
 - **Problem**: Production distributions compress `initrd.img` with zstd, gzip, or xz, and prepend uncompressed CPU microcode CPIO archives.
 - **Specification**:
   - Identify stream compression magic signatures:
@@ -189,7 +193,7 @@ The following 5 improvements are designated architectural priorities for future 
     - `XZ`: `\xfd7zXZ\x00`
   - When encountering concatenated archives, parse the early microcode CPIO until `TRAILER!!!`, then decompress the subsequent payload stream in RAM prior to script analysis.
 
-### 4. Asynchronous Live Scan Threading (`src/tui/tui_app.c`)
+### 4. Asynchronous Live Scan Threading (`src/tui/tui_app.c`) — **(Done)**
 - **Problem**: Synchronous scan execution (`F5`) momentarily freezes the main TUI frame refresh on slow or mechanical disks.
 - **Specification**:
   - Launch `execute_forensic_scan()` via `pthread_create()`.
@@ -197,7 +201,7 @@ The following 5 improvements are designated architectural priorities for future 
   - Keep the TUI main loop rendering at 60 FPS with an animated progress bar and live log streaming.
 
 ### 5. Ext4 Block Group Descriptor Table (BGDT) Traversal (`src/ext4_diff.c`)
-- **Problem**: Current scanner computes superblock metadata counts but needs low-level bitmap walking.
+- **Problem**: Current scanner reads superblock statistics only (no hidden-inode cross-view); it needs low-level bitmap walking.
 - **Specification**:
   - Read Block Group Descriptors located immediately after the superblock (offset 2048 or 4096 depending on block size).
   - Inspect the Inode Allocation Bitmap for each block group to identify allocated raw inodes.

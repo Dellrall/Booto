@@ -8,6 +8,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
+# Reproducible timestamps: derive from the last commit when building from git.
+if [ -z "${SOURCE_DATE_EPOCH:-}" ]; then
+    SOURCE_DATE_EPOCH="$(git -C "$REPO_ROOT" log -1 --format=%ct 2>/dev/null || date -u +%s)"
+fi
+export SOURCE_DATE_EPOCH
+ISO_DATE="$(date -u -d "@${SOURCE_DATE_EPOCH}" +%Y%m%d%H%M%S)00"
+
 WORK_DIR="/tmp/booto_iso_workspace"
 ROOTFS_DIR="${WORK_DIR}/chroot"
 CD_DIR="${WORK_DIR}/iso_root"
@@ -71,7 +78,8 @@ cp "${initrd_path}" "${CD_DIR}/live/initrd.img"
 
 echo "[+] Step 5/6: Compressing root filesystem into SquashFS..."
 mksquashfs "${ROOTFS_DIR}" "${CD_DIR}/live/filesystem.squashfs" \
-           -comp xz -Xbcj x86 -noappend -wildcards
+           -comp xz -Xbcj x86 -noappend -wildcards \
+           -mkfs-time "${SOURCE_DATE_EPOCH}" -all-time "${SOURCE_DATE_EPOCH}"
 
 echo "[+] Step 6/6: Assembling GRUB2 hybrid boot configuration..."
 cat << 'EOF_GRUB' > "${CD_DIR}/boot/grub/grub.cfg"
@@ -144,6 +152,7 @@ if [ -f "${CD_DIR}/boot/grub/bios.img" ]; then
         -iso-level 3 \
         -full-iso9660-filenames \
         -volid "BOOTO_LIVE" \
+        --modification-date="${ISO_DATE}" \
         -output "${OUTPUT_DIR}/${ISO_NAME}" \
         -b boot/grub/bios.img \
         -c boot.catalog \
@@ -159,6 +168,7 @@ else
         -iso-level 3 \
         -full-iso9660-filenames \
         -volid "BOOTO_LIVE" \
+        --modification-date="${ISO_DATE}" \
         -output "${OUTPUT_DIR}/${ISO_NAME}" \
         -e boot/grub/efiboot.img \
         -no-emul-boot \
