@@ -21,6 +21,23 @@ extern "C" {
 #define MAX_DRIVES    16
 #define MAX_MODULES   8
 
+/* Style tokens (see the TUI visual spec). */
+#define A_TEXT   MAKE_ATTR(COLOR_DEFAULT, COLOR_DEFAULT, ATTR_NONE)
+#define A_STRONG MAKE_ATTR(COLOR_BRIGHT_WHITE, COLOR_DEFAULT, ATTR_BOLD)
+#define A_MUTED  MAKE_ATTR(COLOR_BRIGHT_BLACK, COLOR_DEFAULT, ATTR_NONE)
+#define A_FRAME  MAKE_ATTR(COLOR_WHITE, COLOR_DEFAULT, ATTR_NONE)
+#define A_TARGET MAKE_ATTR(COLOR_YELLOW, COLOR_DEFAULT, ATTR_BOLD)
+#define A_OK     MAKE_ATTR(COLOR_GREEN, COLOR_DEFAULT, ATTR_NONE)
+#define A_WARN   MAKE_ATTR(COLOR_YELLOW, COLOR_DEFAULT, ATTR_NONE)
+#define A_BAD    MAKE_ATTR(COLOR_RED, COLOR_DEFAULT, ATTR_BOLD)
+#define A_CURSOR MAKE_ATTR(COLOR_BLACK, COLOR_WHITE, ATTR_NONE)
+#define A_KEYCAP MAKE_ATTR(COLOR_BLACK, COLOR_WHITE, ATTR_NONE)
+/* Black text stays non-bold: bold black is dark grey on the Linux console and unreadable on the band. */
+#define A_V_CLEAN   MAKE_ATTR(COLOR_BLACK, COLOR_GREEN, ATTR_NONE)
+#define A_V_THREATS MAKE_ATTR(COLOR_BRIGHT_WHITE, COLOR_RED, ATTR_BOLD)
+#define A_V_INCOMPL MAKE_ATTR(COLOR_BLACK, COLOR_YELLOW, ATTR_NONE)
+#define A_V_NONE    MAKE_ATTR(COLOR_BLACK, COLOR_WHITE, ATTR_NONE)
+
 typedef struct {
     char name[128];
     char size[32];
@@ -34,15 +51,12 @@ typedef struct {
     char name[64];
     char target_path[64];
     bool enabled;
-    char status_text[24];
-    uint32_t status_color;
 } module_item_t;
 
 typedef struct {
     char timestamp[24];
-    char level[12];
+    log_level_t level;
     char msg[256];
-    uint32_t color;
 } log_entry_t;
 
 typedef struct {
@@ -51,8 +65,6 @@ typedef struct {
     char hook_type[64];
     char sha256[65];
     char severity[16];
-    uint32_t severity_color;
-    char hex_dump[256];
 } threat_detail_t;
 
 typedef struct {
@@ -94,7 +106,6 @@ typedef struct {
 
     // Persistence state
     bool luks_unlocked;
-    char persistence_status[64];
 
     // Status bar & modal state
     bool show_exit_modal;

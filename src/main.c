@@ -132,12 +132,10 @@ static int run_cli(booto_context_t *ctx) {
     printf("\nTarget: %s  Root: %s\n\n", rep->target_dev[0] ? rep->target_dev : "(none)", rep->scan_root);
     printf("%-12s | %-8s | %-7s | %s\n", "Module", "Status", "Threats", "Note");
     printf("-------------+----------+---------+------------------------------\n");
-    const int threats[SCAN_MOD_COUNT] = {rep->mbr.threats_detected, rep->uefi.bootkits_detected,
-                                         rep->kernel.threats_detected, rep->initramfs.threats_detected,
-                                         rep->preload.threats_detected, 0};
     for (int i = 0; i < SCAN_MOD_COUNT; i++) {
         printf("%-12s | %-8s | %7d | %s\n", forensic_scan_module_name((scan_module_id_t)i),
-               forensic_scan_status_str(rep->status[i]), threats[i], rep->note[i]);
+               forensic_scan_status_str(rep->status[i]), forensic_scan_module_threats(rep, (scan_module_id_t)i),
+               rep->note[i]);
     }
     printf("\nVerdict: %s\n", forensic_scan_verdict_str(rep->verdict));
 

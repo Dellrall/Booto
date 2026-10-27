@@ -41,10 +41,12 @@ static struct sigaction g_old_winch_sa;
 static int g_rows = 24;
 static int g_cols = 80;
 
-static char *g_front_chars = NULL;
+/* Cells hold Unicode codepoints; term_present() encodes them as UTF-8 (or ASCII with BOOTO_ASCII=1). */
+static uint32_t *g_front_chars = NULL;
 static uint32_t *g_front_attrs = NULL;
-static char *g_back_chars = NULL;
+static uint32_t *g_back_chars = NULL;
 static uint32_t *g_back_attrs = NULL;
+static bool g_ascii_only = false;
 
 /* Unparsed input bytes left over from a read that returned several keys. */
 static unsigned char g_pending[64];
@@ -89,9 +91,9 @@ static void update_dimensions(void) {
     }
 
     size_t cells = (size_t)rows * (size_t)cols;
-    char *fc = malloc(cells);
+    uint32_t *fc = malloc(cells * sizeof(uint32_t));
     uint32_t *fa = malloc(cells * sizeof(uint32_t));
-    char *bc = malloc(cells);
+    uint32_t *bc = malloc(cells * sizeof(uint32_t));
     uint32_t *ba = malloc(cells * sizeof(uint32_t));
     if (!fc || !fa || !bc || !ba) {
         free(fc);
@@ -112,9 +114,9 @@ static void update_dimensions(void) {
     g_rows = rows;
     g_cols = cols;
 
-    memset(g_front_chars, 0, cells);
+    memset(g_front_chars, 0, cells * sizeof(uint32_t));
     memset(g_front_attrs, 0xFF, cells * sizeof(uint32_t));
-    memset(g_back_chars, ' ', cells);
+    memset(g_back_chars, 0, cells * sizeof(uint32_t)); /* 0 = empty cell, painted as a space */
     memset(g_back_attrs, 0, cells * sizeof(uint32_t));
 }
 
@@ -155,6 +157,8 @@ int term_init(void) {
         return -1;
     }
     g_raw_active = true;
+    const char *ascii = getenv("BOOTO_ASCII");
+    g_ascii_only = ascii && ascii[0] == '1';
     g_tty_dirty = 1;
     g_pending_len = 0;
 
@@ -199,60 +203,166 @@ void term_get_dimensions(int *rows, int *cols) {
 void term_clear(void) {
     if (!g_back_chars || !g_back_attrs) return;
     size_t cells = (size_t)g_rows * (size_t)g_cols;
-    memset(g_back_chars, ' ', cells);
+    memset(g_back_chars, 0, cells * sizeof(uint32_t)); /* 0 = empty cell, painted as a space */
     memset(g_back_attrs, 0, cells * sizeof(uint32_t));
 }
 
-void term_putc(int x, int y, char c, uint32_t attr) {
+void term_put_glyph(int x, int y, uint32_t cp, uint32_t attr) {
     if (x < 0 || x >= g_cols || y < 0 || y >= g_rows) return;
     if (!g_back_chars || !g_back_attrs) return;
 
     size_t idx = (size_t)y * (size_t)g_cols + (size_t)x;
-    g_back_chars[idx] = c;
+    g_back_chars[idx] = cp;
     g_back_attrs[idx] = attr;
 }
 
-void term_puts(int x, int y, const char *str, uint32_t attr) {
-    if (!str || y < 0 || y >= g_rows) return;
-    int curr_x = x;
-    while (*str && curr_x < g_cols) {
-        if (curr_x >= 0) {
-            term_putc(curr_x, y, *str, attr);
-        }
-        curr_x++;
-        str++;
+void term_putc(int x, int y, char c, uint32_t attr) {
+    term_put_glyph(x, y, (unsigned char)c, attr);
+}
+
+/* Decode one UTF-8 sequence; invalid bytes become '?'. Advances *s. */
+static uint32_t next_codepoint(const unsigned char **s) {
+    const unsigned char *p = *s;
+    uint32_t cp;
+    int extra;
+    if (p[0] < 0x80) { *s = p + 1; return p[0]; }
+    else if ((p[0] & 0xE0) == 0xC0) { cp = p[0] & 0x1Fu; extra = 1; }
+    else if ((p[0] & 0xF0) == 0xE0) { cp = p[0] & 0x0Fu; extra = 2; }
+    else if ((p[0] & 0xF8) == 0xF0) { cp = p[0] & 0x07u; extra = 3; }
+    else { *s = p + 1; return '?'; }
+    for (int i = 1; i <= extra; i++) {
+        if ((p[i] & 0xC0) != 0x80) { *s = p + 1; return '?'; }
+        cp = (cp << 6) | (p[i] & 0x3Fu);
     }
+    *s = p + extra + 1;
+    return (cp < 0x20 || cp == 0x7F) ? '?' : cp;
+}
+
+int term_puts_clip(int x, int y, int max_w, const char *str, uint32_t attr) {
+    if (!str || max_w <= 0) return 0;
+    const unsigned char *s = (const unsigned char *)str;
+    int n = 0;
+    while (*s && n < max_w) {
+        uint32_t cp = next_codepoint(&s);
+        if (n == max_w - 1 && *s) cp = '~'; // more text follows: mark the cut
+        term_put_glyph(x + n, y, cp, attr);
+        n++;
+    }
+    return n;
+}
+
+int term_puts(int x, int y, const char *str, uint32_t attr) {
+    return term_puts_clip(x, y, g_cols - x, str, attr);
+}
+
+void term_fill(int x, int y, int w, int h, uint32_t attr) {
+    for (int j = y; j < y + h; j++) {
+        for (int i = x; i < x + w; i++) term_put_glyph(i, j, ' ', attr);
+    }
+}
+
+/* Single-line box glyphs indexed by direction mask (up=1, down=2, left=4, right=8). */
+#define LINE_U 1u
+#define LINE_D 2u
+#define LINE_L 4u
+#define LINE_R 8u
+static const uint32_t LINE_GLYPHS[16] = {
+    ' ',    0x2502, 0x2502, 0x2502, /* -, U, D, UD */
+    0x2500, 0x2518, 0x2510, 0x2524, /* L, UL, DL, UDL */
+    0x2500, 0x2514, 0x250C, 0x251C, /* R, UR, DR, UDR */
+    0x2500, 0x2534, 0x252C, 0x253C  /* LR, ULR, DLR, UDLR */
+};
+
+static unsigned line_mask_of(uint32_t cp) {
+    for (unsigned m = 1; m < 16; m++) {
+        if (LINE_GLYPHS[m] == cp) {
+            /* Canonical masks for the ambiguous straight glyphs. */
+            if (cp == 0x2502) return LINE_U | LINE_D;
+            if (cp == 0x2500) return LINE_L | LINE_R;
+            return m;
+        }
+    }
+    return 0;
+}
+
+/* Draw a line segment end; merges with any line already in the cell so boxes sharing an edge form junctions.
+ * A cell already holding text or a drawn space (a neighbour's title) is left alone. */
+static void put_line(int x, int y, unsigned mask, uint32_t attr) {
+    if (x < 0 || x >= g_cols || y < 0 || y >= g_rows || !g_back_chars) return;
+    size_t idx = (size_t)y * (size_t)g_cols + (size_t)x;
+    uint32_t cur = g_back_chars[idx];
+    unsigned cur_mask = line_mask_of(cur);
+    if (cur != 0 && cur_mask == 0) return;
+    term_put_glyph(x, y, LINE_GLYPHS[(mask | cur_mask) & 15u], attr);
+}
+
+void term_hline(int x, int y, int w, uint32_t attr) {
+    for (int i = 0; i < w; i++) put_line(x + i, y, LINE_L | LINE_R, attr);
+}
+
+void term_vline(int x, int y, int h, uint32_t attr) {
+    for (int j = 0; j < h; j++) put_line(x, y + j, LINE_U | LINE_D, attr);
 }
 
 void term_draw_box(int x, int y, int w, int h, const char *title, uint32_t border_attr, uint32_t title_attr) {
     if (w < 2 || h < 2) return;
 
-    term_putc(x, y, '+', border_attr);
-    term_putc(x + w - 1, y, '+', border_attr);
-    term_putc(x, y + h - 1, '+', border_attr);
-    term_putc(x + w - 1, y + h - 1, '+', border_attr);
+    put_line(x, y, LINE_D | LINE_R, border_attr);
+    put_line(x + w - 1, y, LINE_D | LINE_L, border_attr);
+    put_line(x, y + h - 1, LINE_U | LINE_R, border_attr);
+    put_line(x + w - 1, y + h - 1, LINE_U | LINE_L, border_attr);
+    term_hline(x + 1, y, w - 2, border_attr);
+    term_hline(x + 1, y + h - 1, w - 2, border_attr);
+    term_vline(x, y + 1, h - 2, border_attr);
+    term_vline(x + w - 1, y + 1, h - 2, border_attr);
 
-    for (int i = x + 1; i < x + w - 1; i++) {
-        term_putc(i, y, '-', border_attr);
-        term_putc(i, y + h - 1, '-', border_attr);
+    if (title && *title && w > 6) {
+        term_put_glyph(x + 2, y, ' ', title_attr);
+        int n = term_puts_clip(x + 3, y, w - 6, title, title_attr);
+        term_put_glyph(x + 3 + n, y, ' ', title_attr);
     }
+}
 
-    for (int j = y + 1; j < y + h - 1; j++) {
-        term_putc(x, j, '|', border_attr);
-        term_putc(x + w - 1, j, '|', border_attr);
+/* ASCII stand-ins for terminals without box-drawing glyphs (BOOTO_ASCII=1). */
+static char ascii_for(uint32_t cp) {
+    if (cp < 0x80) return (char)cp;
+    unsigned m = line_mask_of(cp);
+    if (m == (LINE_L | LINE_R)) return '-';
+    if (m == (LINE_U | LINE_D)) return '|';
+    if (m) return '+';
+    switch (cp) {
+        case TERM_G_TARGET: return '*';
+        case TERM_G_SQUARE: return '#';
+        case TERM_G_ARROW_R: return '>';
+        case TERM_G_UP: return '^';
+        case TERM_G_DOWN: return 'v';
+        case TERM_G_BLOCK: return '#';
+        case TERM_G_SHADE: return ':';
+        case TERM_G_DOT: return '.';
+        default: return '?';
     }
+}
 
-    if (title && *title && w > 4) {
-        int title_len = (int)strlen(title);
-        int max_len = w - 4;
-        if (title_len > max_len) title_len = max_len;
-
-        term_putc(x + 1, y, ' ', title_attr);
-        for (int i = 0; i < title_len; i++) {
-            term_putc(x + 2 + i, y, title[i], title_attr);
-        }
-        term_putc(x + 2 + title_len, y, ' ', title_attr);
+static size_t encode_cell(uint32_t cp, char *out) {
+    if (cp == 0) cp = ' ';
+    if (g_ascii_only) { out[0] = ascii_for(cp); return 1; }
+    if (cp < 0x80) { out[0] = (char)cp; return 1; }
+    if (cp < 0x800) {
+        out[0] = (char)(0xC0 | (cp >> 6));
+        out[1] = (char)(0x80 | (cp & 0x3F));
+        return 2;
     }
+    if (cp < 0x10000) {
+        out[0] = (char)(0xE0 | (cp >> 12));
+        out[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        out[2] = (char)(0x80 | (cp & 0x3F));
+        return 3;
+    }
+    out[0] = (char)(0xF0 | (cp >> 18));
+    out[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
+    out[2] = (char)(0x80 | ((cp >> 6) & 0x3F));
+    out[3] = (char)(0x80 | (cp & 0x3F));
+    return 4;
 }
 
 static void apply_attr(uint32_t attr, uint32_t prev_attr, char **buf, size_t *rem) {
@@ -321,8 +431,9 @@ void term_present(void) {
                     current_attr = g_back_attrs[idx];
                 }
 
-                *ptr++ = g_back_chars[idx];
-                rem--;
+                size_t n = encode_cell(g_back_chars[idx], ptr);
+                ptr += n;
+                rem -= n;
                 cursor_x++;
 
                 g_front_chars[idx] = g_back_chars[idx];

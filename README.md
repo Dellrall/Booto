@@ -106,9 +106,9 @@ The shipped DBX, LKM and MBR signatures are illustrative samples, not an authori
 
 | Shortcut | Action | Description |
 | :--- | :--- | :--- |
-| `Alt + Arrow` / `hjkl` | **Spatial Focus** | Move focus to adjacent pane |
+| `Alt + Arrow` | **Spatial Focus** | Move focus to adjacent pane |
 | `Tab` | **Cycle Focus** | Cycle focus through active leaf panes |
-| `Alt + M` | **Move / Swap** | Swap active pane position with adjacent pane |
+| `Alt + M` | **Move / Swap** | Swap the focused pane with the next pane |
 | `Alt + Z` | **Zoom / Maximize** | Toggle full-screen on focused pane |
 | `Alt + H` | **Split Horizontal** | Split focused pane into top & bottom |
 | `Alt + V` | **Split Vertical** | Split focused pane into left & right |
@@ -116,10 +116,12 @@ The shipped DBX, LKM and MBR signatures are illustrative samples, not an authori
 | `Space` | **Toggle Target** | Toggle target disk flag / toggle scanner module |
 | `Enter` | **Mount / Unmount** | Mount target storage strictly READ-ONLY |
 | `Mouse Click` | **Click to Focus** | Focus pane by clicking inside its border |
-| `F2` | **Toggle LUKS** | Lock / unlock encrypted persistence partition |
+| `F3` | **Unlock LUKS** | Unlock an encrypted target partition read-only |
 | `F5` | **Start Scan** | Trigger forensic scanning sequence |
 | `F6` | **Export Report** | Export JSON & Markdown case reports with SHA-256 checksums |
 | `F10` / `q` | **Exit** | Gracefully shutdown TUI and restore terminal |
+
+The TUI draws with line and symbol glyphs that exist in the Linux console's default (CP437) font, using only the 16 standard colours, so it looks the same on a bare VT as in a terminal emulator. On a terminal without those glyphs (for example some serial consoles), start it with `BOOTO_ASCII=1 booto` to draw plain ASCII instead.
 
 ---
 

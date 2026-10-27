@@ -43,6 +43,16 @@ typedef enum {
 
 #define MAKE_ATTR(fg, bg, style) (((uint32_t)(style) & 0x0F) | (((uint32_t)(fg) & 0x1F) << 4) | (((uint32_t)(bg) & 0x1F) << 9))
 
+/* Glyphs that exist in CP437, so they render on a bare Linux console font. */
+#define TERM_G_TARGET  0x2666u  /* diamond: evidence target marker */
+#define TERM_G_SQUARE  0x25A0u  /* filled square: enabled */
+#define TERM_G_DOT     0x00B7u  /* middle dot: disabled / empty */
+#define TERM_G_ARROW_R 0x25BAu
+#define TERM_G_UP      0x25B2u
+#define TERM_G_DOWN    0x25BCu
+#define TERM_G_SHADE   0x2591u
+#define TERM_G_BLOCK   0x2588u
+
 /* Key definitions */
 typedef enum {
     KEY_NONE = 0,
@@ -93,15 +103,6 @@ typedef struct {
     int mouse_btn;
 } input_event_t;
 
-typedef struct {
-    int rows;
-    int cols;
-    char *front_chars;
-    uint32_t *front_attrs;
-    char *back_chars;
-    uint32_t *back_attrs;
-} term_screen_t;
-
 /**
  * @brief Initialize terminal in raw mode, enabling mouse tracking.
  *
@@ -132,17 +133,38 @@ bool term_poll_event(input_event_t *event, int timeout_ms);
 void term_clear(void);
 
 /**
- * @brief Put character at coordinate with attributes in back buffer.
+ * @brief Put an ASCII character at coordinate with attributes in back buffer.
  */
 void term_putc(int x, int y, char c, uint32_t attr);
 
 /**
- * @brief Draw string at coordinate with attributes.
+ * @brief Put a Unicode codepoint (single-width) at coordinate.
  */
-void term_puts(int x, int y, const char *str, uint32_t attr);
+void term_put_glyph(int x, int y, uint32_t cp, uint32_t attr);
 
 /**
- * @brief Draw box border with UTF-8 / ASCII characters.
+ * @brief Draw a UTF-8 string; returns columns written.
+ */
+int term_puts(int x, int y, const char *str, uint32_t attr);
+
+/**
+ * @brief Draw a UTF-8 string in at most max_w columns; a cut string ends with '~'. Returns columns written.
+ */
+int term_puts_clip(int x, int y, int max_w, const char *str, uint32_t attr);
+
+/**
+ * @brief Fill a rectangle with spaces in the given attribute.
+ */
+void term_fill(int x, int y, int w, int h, uint32_t attr);
+
+/**
+ * @brief Horizontal / vertical single lines. Lines merge with lines already drawn in a cell (forming junctions).
+ */
+void term_hline(int x, int y, int w, uint32_t attr);
+void term_vline(int x, int y, int h, uint32_t attr);
+
+/**
+ * @brief Draw a single-line box (merging with neighbouring boxes) with an optional title at x+2.
  */
 void term_draw_box(int x, int y, int w, int h, const char *title, uint32_t border_attr, uint32_t title_attr);
 

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **TUI redesign**:
+  - Panes share single-line box-drawing borders with proper junctions, using only CP437 glyphs and the 16 standard colours so it renders the same on a bare Linux VT. `BOOTO_ASCII=1` falls back to ASCII.
+  - Text is clipped to its pane and never crosses a border.
+  - New default layout: Storage and Engines on the left, Findings above Log on the right.
+  - Findings opens with a colour-coded verdict band (CLEAN / THREATS / INCOMPLETE) followed by a per-engine result table.
+  - Engines show live per-engine results; Storage marks the evidence target with ♦.
+  - The top bar shows the target and LUKS state; the bottom bar shows the status message plus key hints that drop by priority on narrow screens.
+  - Copy is plain and accurate (no "PAM", "VFS diff", "Disassembly" or "Signed" claims).
+
 ### Added
 - **Shared scan orchestrator (`src/forensic_scan.c`)**: records a per-engine status (`OK`/`ERROR`/`SKIPPED`) and a verdict (`CLEAN`/`THREATS`/`INCOMPLETE`). `CLEAN` is reported only when every engine ran and nothing was found; a failed mount yields `INCOMPLETE`.
 - **Real headless CLI**:
