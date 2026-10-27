@@ -14,22 +14,15 @@
 #include "tui/wm.h"
 #include "tui/pane.h"
 #include "case_reporter.h"
-#include "persistence_mgr.h"
 #include "disk_mount.h"
-#include "mbr_auditor.h"
-#include "elf_analyzer.h"
-#include "kernel_inspector.h"
-#include "uefi_analyzer.h"
-#include "initramfs_auditor.h"
-#include "preload_scanner.h"
-#include "ext4_diff.h"
+#include "forensic_scan.h"
 #include "logger.h"
 #include "version.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
+#include <time.h>
 
 static tui_app_state_t *g_current_app = NULL;
 
@@ -178,110 +171,185 @@ static void render_tree_leaves(wm_node_t *node, wm_node_t *focused, tui_app_stat
     }
 }
 
+static void scan_progress_cb(int step, int total, const char *msg, void *user) {
+    char log_buf[256];
+    snprintf(log_buf, sizeof(log_buf), "[%d/%d] %.200s", step, total, msg ? msg : "");
+    tui_app_append_log((tui_app_state_t *)user, LOG_LEVEL_INFO, NULL, log_buf);
+}
+
+static scan_module_id_t pane_module_to_scan_id(const char *name) {
+    if (strncmp(name, "MBR", 3) == 0) return SCAN_MOD_MBR;
+    if (strncmp(name, "UEFI", 4) == 0) return SCAN_MOD_UEFI;
+    if (strncmp(name, "Kernel", 6) == 0) return SCAN_MOD_KERNEL;
+    if (strstr(name, "Initramfs")) return SCAN_MOD_INITRAMFS;
+    if (strncmp(name, "LD_PRELOAD", 10) == 0) return SCAN_MOD_PRELOAD;
+    if (strstr(name, "Ext4")) return SCAN_MOD_EXT4;
+    return SCAN_MOD_COUNT;
+}
+
+static int module_threats(const forensic_scan_report_t *r, int m) {
+    switch (m) {
+        case SCAN_MOD_MBR: return r->mbr.threats_detected;
+        case SCAN_MOD_UEFI: return r->uefi.bootkits_detected;
+        case SCAN_MOD_KERNEL: return r->kernel.threats_detected;
+        case SCAN_MOD_INITRAMFS: return r->initramfs.threats_detected;
+        case SCAN_MOD_PRELOAD: return r->preload.threats_detected;
+        default: return 0;
+    }
+}
+
 static void execute_forensic_scan(tui_app_state_t *app) {
-    const char *target_dev = "/dev/sda";
+    const char *target_dev = NULL;
     for (int i = 0; i < app->drive_count; i++) {
         if (app->drives[i].is_target) {
             target_dev = app->drives[i].name;
             break;
         }
     }
+    if (!target_dev) {
+        tui_app_append_log(app, LOG_LEVEL_ERROR, NULL, "No target drive selected; scan not started");
+        snprintf(app->status_msg, sizeof(app->status_msg), "No target drive selected: mark a target in Storage pane first.");
+        return;
+    }
+
+    if (!app->last_scan) {
+        app->last_scan = calloc(1, sizeof(*app->last_scan));
+        if (!app->last_scan) {
+            tui_app_append_log(app, LOG_LEVEL_ERROR, NULL, "Out of memory allocating scan report");
+            snprintf(app->status_msg, sizeof(app->status_msg), "Scan failed: out of memory.");
+            return;
+        }
+    }
+    forensic_scan_report_t *r = app->last_scan;
+
+    bool enabled[SCAN_MOD_COUNT];
+    memset(enabled, 0, sizeof(enabled));
+    for (int i = 0; i < app->module_count; i++) {
+        scan_module_id_t id = pane_module_to_scan_id(app->modules[i].name);
+        if (id < SCAN_MOD_COUNT) enabled[id] = app->modules[i].enabled;
+    }
 
     char log_buf[256];
-    snprintf(log_buf, sizeof(log_buf), "=== Starting Forensic Scan on %s (Strict Read-Only) ===", target_dev);
+    snprintf(log_buf, sizeof(log_buf), "=== Starting Forensic Scan on %.120s (Strict Read-Only) ===", target_dev);
     tui_app_append_log(app, LOG_LEVEL_INFO, NULL, log_buf);
 
-    const char *scan_root = "/tmp/booto_scan_target";
-    disk_mount_ro(target_dev, scan_root, "ext4");
-
-    // 1. MBR & VBR Boot Sector Auditor
-    tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "[1/6] Auditing Master Boot Record (MBR) and Volume Boot Records (VBR)...");
-    mbr_scan_result_t mbr_res;
-    memset(&mbr_res, 0, sizeof(mbr_res));
-    mbr_audit_device(target_dev, &mbr_res);
-
-    // 2. UEFI ESP Analyzer
-    tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "[2/6] Auditing UEFI ESP bootloader & DBX revocation list...");
-    uefi_scan_result_t uefi_res;
-    memset(&uefi_res, 0, sizeof(uefi_res));
-    char esp_path[512];
-    snprintf(esp_path, sizeof(esp_path), "%s/boot/efi", scan_root);
-    uefi_inspect_esp_directory(esp_path, &uefi_res);
-
-    // 3. Kernel LKM Rootkit Inspector
-    tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "[3/6] Parsing Kernel ELF binary and /lib/modules LKMs...");
-    kernel_scan_result_t kernel_res;
-    memset(&kernel_res, 0, sizeof(kernel_res));
-    char lkm_path[512];
-    snprintf(lkm_path, sizeof(lkm_path), "%s/lib/modules", scan_root);
-    kernel_inspect_directory(lkm_path, &kernel_res);
-
-    // 4. In-Memory Initramfs Auditor
-    tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "[4/6] Decompressing in-memory initramfs CPIO scripts...");
-    initramfs_scan_result_t initrd_res;
-    memset(&initrd_res, 0, sizeof(initrd_res));
-    char initrd_path[512];
-    snprintf(initrd_path, sizeof(initrd_path), "%s/boot/initrd.img", scan_root);
-    initramfs_audit_file(initrd_path, &initrd_res);
-
-    // 5. Userland LD_PRELOAD Scanner
-    tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "[5/6] Auditing /etc/ld.so.preload & dynamic linker hooks...");
-    preload_scan_result_t preload_res;
-    memset(&preload_res, 0, sizeof(preload_res));
-    preload_scan_rootfs(scan_root, &preload_res);
-
-    // 6. Raw Ext4 Inode Differential Engine
-    tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "[6/6] Executing Raw Ext4 Inode vs VFS Directory Table Diff...");
-    ext4_diff_result_t ext4_res;
-    memset(&ext4_res, 0, sizeof(ext4_res));
-    ext4_diff_scan(target_dev, scan_root, &ext4_res);
-
-    int total_threats = mbr_res.threats_detected + uefi_res.bootkits_detected +
-                        kernel_res.threats_detected + initrd_res.threats_detected +
-                        preload_res.threats_detected + ext4_res.hidden_inodes_count;
-
-    if (total_threats > 0) {
-        snprintf(log_buf, sizeof(log_buf), "=== Forensic Scan Finished: %d Threat(s) Identified ===", total_threats);
-        tui_app_append_log(app, LOG_LEVEL_CRITICAL, NULL, log_buf);
-
-        if (mbr_res.threats_detected > 0) {
-            snprintf(app->threat.threat_name, sizeof(app->threat.threat_name), "%.60s", mbr_res.findings[0].threat_name);
-            snprintf(app->threat.infected_file, sizeof(app->threat.infected_file), "%.70s (LBA %llu)",
-                     mbr_res.findings[0].target_device, (unsigned long long)mbr_res.findings[0].sector_lba);
-            snprintf(app->threat.hook_type, sizeof(app->threat.hook_type), "Rule: %.50s", mbr_res.findings[0].rule_id);
-            snprintf(app->threat.sha256, sizeof(app->threat.sha256), "%.64s", mbr_res.findings[0].sha256);
-            snprintf(app->threat.severity, sizeof(app->threat.severity), "%.15s", mbr_severity_to_string(mbr_res.findings[0].severity));
-            app->threat.severity_color = MAKE_ATTR(COLOR_BRIGHT_RED, COLOR_DEFAULT, ATTR_BOLD);
-        } else if (kernel_res.threats_detected > 0) {
-            snprintf(app->threat.threat_name, sizeof(app->threat.threat_name), "%.60s", kernel_res.findings[0].threat_name);
-            snprintf(app->threat.infected_file, sizeof(app->threat.infected_file), "%.120s", kernel_res.findings[0].file_path);
-            snprintf(app->threat.hook_type, sizeof(app->threat.hook_type), "%.30s: %.25s",
-                     kernel_res.findings[0].detection_rule, kernel_res.findings[0].matched_symbol);
-            snprintf(app->threat.sha256, sizeof(app->threat.sha256), "%.64s", kernel_res.findings[0].sha256);
-            snprintf(app->threat.severity, sizeof(app->threat.severity), "%.15s", kernel_severity_to_string(kernel_res.findings[0].severity));
-            app->threat.severity_color = MAKE_ATTR(COLOR_BRIGHT_RED, COLOR_DEFAULT, ATTR_BOLD);
-        } else if (preload_res.threats_detected > 0) {
-            snprintf(app->threat.threat_name, sizeof(app->threat.threat_name), "%.60s", preload_res.findings[0].threat_name);
-            snprintf(app->threat.infected_file, sizeof(app->threat.infected_file), "%.120s", preload_res.findings[0].file_path);
-            snprintf(app->threat.hook_type, sizeof(app->threat.hook_type), "Target: %.50s", preload_res.findings[0].target_library);
-            snprintf(app->threat.sha256, sizeof(app->threat.sha256), "%.64s", preload_res.findings[0].sha256);
-            snprintf(app->threat.severity, sizeof(app->threat.severity), "CRITICAL");
-            app->threat.severity_color = MAKE_ATTR(COLOR_BRIGHT_RED, COLOR_DEFAULT, ATTR_BOLD);
-        }
-        snprintf(app->status_msg, sizeof(app->status_msg), "Scan complete: %d Threats Identified. Check Threat Inspector.", total_threats);
-    } else {
-        snprintf(log_buf, sizeof(log_buf), "=== Forensic Scan Finished: Storage Clean (0 Threats Detected) ===");
-        tui_app_append_log(app, LOG_LEVEL_INFO, NULL, log_buf);
-
-        snprintf(app->threat.threat_name, sizeof(app->threat.threat_name), "Storage Clean (0 Threats)");
-        snprintf(app->threat.infected_file, sizeof(app->threat.infected_file), "%.100s (Clean)", target_dev);
-        snprintf(app->threat.hook_type, sizeof(app->threat.hook_type), "All 6 Forensic Engines Passed");
-        snprintf(app->threat.sha256, sizeof(app->threat.sha256), "0000000000000000000000000000000000000000000000000000000000000000");
-        snprintf(app->threat.severity, sizeof(app->threat.severity), "CLEAN / PASSED");
-        app->threat.severity_color = MAKE_ATTR(COLOR_BRIGHT_GREEN, COLOR_DEFAULT, ATTR_BOLD);
-
-        snprintf(app->status_msg, sizeof(app->status_msg), "Scan complete: Target storage verified clean.");
+    booto_error_t err = forensic_scan_run(target_dev, NULL, enabled, scan_progress_cb, app, r);
+    if (err != BOOTO_OK) {
+        free(app->last_scan);
+        app->last_scan = NULL;
+        snprintf(log_buf, sizeof(log_buf), "Forensic scan could not run (error %d)", (int)err);
+        tui_app_append_log(app, LOG_LEVEL_ERROR, NULL, log_buf);
+        snprintf(app->status_msg, sizeof(app->status_msg), "Scan failed to run (error %d).", (int)err);
+        return;
     }
+
+    int ok_count = 0;
+    for (int m = 0; m < SCAN_MOD_COUNT; m++) {
+        if (r->status[m] == SCAN_STATUS_OK) ok_count++;
+        snprintf(log_buf, sizeof(log_buf), "%.20s: %.8s (%d) %.96s",
+                 forensic_scan_module_name((scan_module_id_t)m), forensic_scan_status_str(r->status[m]),
+                 module_threats(r, m), r->note[m]);
+        tui_app_append_log(app, r->status[m] == SCAN_STATUS_OK ? LOG_LEVEL_INFO : LOG_LEVEL_WARN, NULL, log_buf);
+    }
+
+    snprintf(app->threat.infected_file, sizeof(app->threat.infected_file), "%.120s", target_dev);
+    snprintf(app->threat.hex_dump, sizeof(app->threat.hex_dump), "-");
+
+    if (r->verdict == SCAN_VERDICT_THREATS) {
+        snprintf(log_buf, sizeof(log_buf), "=== Forensic Scan Finished: %d Threat(s) Identified ===", r->total_threats);
+        tui_app_append_log(app, LOG_LEVEL_CRITICAL, NULL, log_buf);
+        app->threat.severity_color = MAKE_ATTR(COLOR_BRIGHT_RED, COLOR_DEFAULT, ATTR_BOLD);
+        snprintf(app->threat.severity, sizeof(app->threat.severity), "CRITICAL");
+
+        if (r->mbr.threats_detected > 0) {
+            snprintf(app->threat.threat_name, sizeof(app->threat.threat_name), "%.60s", r->mbr.findings[0].threat_name);
+            snprintf(app->threat.infected_file, sizeof(app->threat.infected_file), "%.70s (LBA %llu)",
+                     r->mbr.findings[0].target_device, (unsigned long long)r->mbr.findings[0].sector_lba);
+            snprintf(app->threat.hook_type, sizeof(app->threat.hook_type), "Rule: %.50s", r->mbr.findings[0].rule_id);
+            snprintf(app->threat.sha256, sizeof(app->threat.sha256), "%.64s", r->mbr.findings[0].sha256);
+            snprintf(app->threat.severity, sizeof(app->threat.severity), "%.15s", mbr_severity_to_string(r->mbr.findings[0].severity));
+        } else if (r->uefi.bootkits_detected > 0) {
+            snprintf(app->threat.threat_name, sizeof(app->threat.threat_name), "%.60s", r->uefi.findings[0].threat_name);
+            snprintf(app->threat.infected_file, sizeof(app->threat.infected_file), "%.120s", r->uefi.findings[0].file_path);
+            snprintf(app->threat.hook_type, sizeof(app->threat.hook_type), "Rule: %.50s", r->uefi.findings[0].rule_id);
+            snprintf(app->threat.sha256, sizeof(app->threat.sha256), "%.64s", r->uefi.findings[0].sha256);
+        } else if (r->kernel.threats_detected > 0) {
+            snprintf(app->threat.threat_name, sizeof(app->threat.threat_name), "%.60s", r->kernel.findings[0].threat_name);
+            snprintf(app->threat.infected_file, sizeof(app->threat.infected_file), "%.120s", r->kernel.findings[0].file_path);
+            snprintf(app->threat.hook_type, sizeof(app->threat.hook_type), "%.30s: %.25s",
+                     r->kernel.findings[0].detection_rule, r->kernel.findings[0].matched_symbol);
+            snprintf(app->threat.sha256, sizeof(app->threat.sha256), "%.64s", r->kernel.findings[0].sha256);
+            snprintf(app->threat.severity, sizeof(app->threat.severity), "%.15s", kernel_severity_to_string(r->kernel.findings[0].severity));
+        } else if (r->initramfs.threats_detected > 0) {
+            snprintf(app->threat.threat_name, sizeof(app->threat.threat_name), "%.60s", r->initramfs.findings[0].threat_name);
+            snprintf(app->threat.infected_file, sizeof(app->threat.infected_file), "%.120s", r->initramfs.findings[0].file_path);
+            snprintf(app->threat.hook_type, sizeof(app->threat.hook_type), "Pattern: %.50s", r->initramfs.findings[0].matched_pattern);
+            snprintf(app->threat.sha256, sizeof(app->threat.sha256), "-");
+        } else if (r->preload.threats_detected > 0) {
+            snprintf(app->threat.threat_name, sizeof(app->threat.threat_name), "%.60s", r->preload.findings[0].threat_name);
+            snprintf(app->threat.infected_file, sizeof(app->threat.infected_file), "%.120s", r->preload.findings[0].file_path);
+            snprintf(app->threat.hook_type, sizeof(app->threat.hook_type), "Target: %.50s", r->preload.findings[0].target_library);
+            snprintf(app->threat.sha256, sizeof(app->threat.sha256), "%.64s", r->preload.findings[0].sha256);
+        }
+        snprintf(app->status_msg, sizeof(app->status_msg), "Scan complete: %d Threats Identified. Check Threat Inspector.", r->total_threats);
+    } else if (r->verdict == SCAN_VERDICT_INCOMPLETE) {
+        int failed = SCAN_MOD_COUNT - ok_count;
+        tui_app_append_log(app, LOG_LEVEL_WARN, NULL, "=== Forensic Scan Finished: INCOMPLETE (not all engines ran) ===");
+        snprintf(app->threat.threat_name, sizeof(app->threat.threat_name), "Scan Incomplete");
+        snprintf(app->threat.hook_type, sizeof(app->threat.hook_type), "%d engine(s) failed or skipped", failed);
+        snprintf(app->threat.sha256, sizeof(app->threat.sha256), "-");
+        snprintf(app->threat.severity, sizeof(app->threat.severity), "INCOMPLETE");
+        app->threat.severity_color = MAKE_ATTR(COLOR_BRIGHT_YELLOW, COLOR_DEFAULT, ATTR_BOLD);
+        snprintf(app->status_msg, sizeof(app->status_msg), "Scan INCOMPLETE: %d engine(s) failed or skipped. See log.", failed);
+    } else {
+        tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "=== Forensic Scan Finished: CLEAN (all engines OK, 0 threats) ===");
+        snprintf(app->threat.threat_name, sizeof(app->threat.threat_name), "No Threats Found");
+        snprintf(app->threat.hook_type, sizeof(app->threat.hook_type), "%d engine(s) OK", ok_count);
+        snprintf(app->threat.sha256, sizeof(app->threat.sha256), "-");
+        snprintf(app->threat.severity, sizeof(app->threat.severity), "CLEAN");
+        app->threat.severity_color = MAKE_ATTR(COLOR_BRIGHT_GREEN, COLOR_DEFAULT, ATTR_BOLD);
+        snprintf(app->status_msg, sizeof(app->status_msg), "Scan complete: CLEAN (%d engine(s) OK, 0 threats).", ok_count);
+    }
+}
+
+static void export_case_report(tui_app_state_t *app) {
+    if (!app->last_scan) {
+        snprintf(app->status_msg, sizeof(app->status_msg), "Run a scan first (F5)");
+        return;
+    }
+    char case_id[32];
+    time_t now = time(NULL);
+    struct tm tm_utc;
+    gmtime_r(&now, &tm_utc);
+    strftime(case_id, sizeof(case_id), "CASE-%Y%m%d-%H%M%S", &tm_utc);
+    const char *examiner = getenv("USER");
+    if (!examiner || !examiner[0]) examiner = "unknown";
+
+    forensic_case_summary_t sum;
+    memset(&sum, 0, sizeof(sum));
+    forensic_scan_fill_case_summary(app->last_scan, case_id, examiner, &sum);
+
+    const char *out_dir = "/persistence/cases";
+    booto_error_t err = disk_ensure_private_dir(out_dir);
+    if (err != BOOTO_OK) {
+        snprintf(app->status_msg, sizeof(app->status_msg), "Export failed: cannot create %s (error %d)", out_dir, (int)err);
+        tui_app_append_log(app, LOG_LEVEL_ERROR, NULL, app->status_msg);
+        return;
+    }
+
+    char saved_json[512] = "";
+    char saved_md[512] = "";
+    booto_error_t jerr = case_report_generate_json(&sum, out_dir, saved_json, sizeof(saved_json));
+    booto_error_t merr = case_report_generate_markdown(&sum, out_dir, saved_md, sizeof(saved_md));
+    if (jerr != BOOTO_OK || merr != BOOTO_OK) {
+        snprintf(app->status_msg, sizeof(app->status_msg), "Export failed: JSON error %d, Markdown error %d", (int)jerr, (int)merr);
+        tui_app_append_log(app, LOG_LEVEL_ERROR, NULL, app->status_msg);
+        return;
+    }
+    char log_buf[512];
+    snprintf(log_buf, sizeof(log_buf), "Exported case report %.31s to %.200s", case_id, saved_md);
+    tui_app_append_log(app, LOG_LEVEL_INFO, NULL, log_buf);
+    snprintf(app->status_msg, sizeof(app->status_msg), "Case Report Saved: %.200s", saved_md);
 }
 
 int tui_app_run(booto_context_t *ctx) {
@@ -369,6 +437,7 @@ int tui_app_run(booto_context_t *ctx) {
                     explicit_bzero(app.luks_passphrase_input, sizeof(app.luks_passphrase_input));
                     app.luks_passphrase_len = 0;
                     if (err == BOOTO_OK) {
+                        app.luks_unlocked = true;
                         tui_app_append_log(&app, LOG_LEVEL_INFO, NULL, "Successfully unlocked target LUKS volume (READ-ONLY)");
                         snprintf(app.status_msg, sizeof(app.status_msg), "LUKS target unlocked: /dev/mapper/booto_target_luks");
 
@@ -424,37 +493,8 @@ int tui_app_run(booto_context_t *ctx) {
                 wm_adjust_split_ratio(app.wm, +0.05f);
             } else if (event.type == KEY_F5) {
                 execute_forensic_scan(&app);
-            } else if (event.type == KEY_F2) {
-                app.luks_unlocked = !app.luks_unlocked;
-                snprintf(app.persistence_status, sizeof(app.persistence_status),
-                         app.luks_unlocked ? "LUKS Unlocked (/persistence)" : "LUKS Locked (Amnesic Mode)");
-                tui_app_append_log(&app, app.luks_unlocked ? LOG_LEVEL_INFO : LOG_LEVEL_WARN, NULL,
-                                   app.luks_unlocked ? "Unlocked encrypted LUKS persistence volume" : "Locked persistence volume");
             } else if (event.type == KEY_F6) {
-                forensic_case_summary_t sum;
-                memset(&sum, 0, sizeof(sum));
-                snprintf(sum.case_id, sizeof(sum.case_id), "CASE-20260901-01");
-                snprintf(sum.timestamp, sizeof(sum.timestamp), "2026-09-01 23:28:00 UTC");
-                snprintf(sum.target_disk, sizeof(sum.target_disk), "/dev/nvme0n1p2");
-                snprintf(sum.target_fs, sizeof(sum.target_fs), "ext4");
-                snprintf(sum.examiner, sizeof(sum.examiner), "Booto Live Examiner");
-                sum.mbr_threats_count = 0;
-                sum.kernel_threats_count = 1;
-                sum.uefi_threats_count = 0;
-                sum.initramfs_threats_count = 0;
-                sum.preload_threats_count = 0;
-                sum.ext4_hidden_inodes_count = 1;
-                sum.total_threats = 2;
-                snprintf(sum.highest_severity, sizeof(sum.highest_severity), "CRITICAL");
-
-                const char *out_dir = app.luks_unlocked ? "/persistence/cases" : "/tmp";
-                char saved_md[512];
-                case_report_generate_markdown(&sum, out_dir, saved_md, sizeof(saved_md));
-
-                char log_buf[512];
-                snprintf(log_buf, sizeof(log_buf), "Exported signed forensic case report to %.300s", saved_md);
-                tui_app_append_log(&app, LOG_LEVEL_INFO, NULL, log_buf);
-                snprintf(app.status_msg, sizeof(app.status_msg), "Case Report Saved: %.100s", saved_md);
+                export_case_report(&app);
             } else if (event.type == KEY_MOUSE_CLICK) {
                 wm_node_t *clicked = wm_find_leaf_at(app.wm->root, event.mouse_x, event.mouse_y);
                 if (clicked) {
@@ -472,6 +512,7 @@ int tui_app_run(booto_context_t *ctx) {
     g_current_app = NULL;
 
     wm_tree_destroy(app.wm);
+    free(app.last_scan);
     term_shutdown();
     return 0;
 }

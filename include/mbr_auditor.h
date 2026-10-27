@@ -145,14 +145,6 @@ const char *mbr_severity_to_string(mbr_severity_t severity);
  */
 const char *mbr_bootloader_to_string(bootloader_type_t type);
 
-/**
- * @brief Emulate MBR bootkit scan with mock findings for non-root / test environments.
- * @param mock_type Identifier of mock scenario (e.g. "clean", "rovnix", "tdl4", "wiper").
- * @param result Output structure to fill.
- * @return BOOTO_OK on success.
- */
-booto_error_t mbr_audit_mock(const char *mock_type, mbr_scan_result_t *result);
-
 #ifdef __cplusplus
 }
 #endif

@@ -230,33 +230,14 @@ static void test_corrupt_signature_and_partitions(void) {
     TEST_PASS("test_corrupt_signature_and_partitions");
 }
 
-static void test_mock_scenarios(void) {
-    TEST_START("test_mock_scenarios");
-
+static void test_device_open_failure_is_error(void) {
+    TEST_START("test_device_open_failure_is_error");
     mbr_scan_result_t res;
-
-    mbr_audit_mock("clean", &res);
-    ASSERT_INT_EQ(res.threats_detected, 0, "Mock clean must have 0 threats");
-
-    mbr_audit_mock("rovnix", &res);
-    ASSERT_INT_EQ(res.threats_detected, 1, "Mock rovnix must have 1 threat");
-
-    mbr_audit_mock("tdl4", &res);
-    ASSERT_INT_EQ(res.threats_detected, 1, "Mock tdl4 must have 1 threat");
-
-    mbr_audit_mock("gapz", &res);
-    ASSERT_INT_EQ(res.threats_detected, 1, "Mock gapz must have 1 threat");
-
-    mbr_audit_mock("wiper", &res);
-    ASSERT_INT_EQ(res.threats_detected, 1, "Mock wiper must have 1 threat");
-
-    const char *sev_str = mbr_severity_to_string(MBR_SEVERITY_CRITICAL);
-    ASSERT_STR_EQ(sev_str, "CRITICAL", "Severity string check");
-
-    const char *bl_str = mbr_bootloader_to_string(BOOTLOADER_GRUB2);
-    ASSERT_TRUE(bl_str != NULL, "Bootloader string check");
-
-    TEST_PASS("test_mock_scenarios");
+    ASSERT_INT_EQ(mbr_audit_device("/nonexistent/booto_disk", &res), BOOTO_ERR_NOT_FOUND,
+                  "Unreadable device must fail instead of reporting a clean mock");
+    ASSERT_INT_EQ(res.threats_detected, 0, "No findings may be fabricated");
+    ASSERT_INT_EQ(res.sectors_scanned, 0, "No sectors were scanned");
+    TEST_PASS("test_device_open_failure_is_error");
 }
 
 int main(void) {
@@ -269,7 +250,7 @@ int main(void) {
     test_mbr_gap_hidden_payload();
     test_vbr_gapz_detection();
     test_corrupt_signature_and_partitions();
-    test_mock_scenarios();
+    test_device_open_failure_is_error();
     TEST_SUMMARY();
     return 0;
 }

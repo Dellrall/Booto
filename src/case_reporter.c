@@ -10,6 +10,7 @@
 #endif
 
 #include "case_reporter.h"
+#include "forensic_scan.h"
 #include "crypto_utils.h"
 #include "logger.h"
 #include "version.h"
@@ -134,8 +135,15 @@ booto_error_t case_report_generate_json(const forensic_case_summary_t *summary,
     fprintf(fp, "    \"kernel_lkm_threats\": %d,\n", summary->kernel_threats_count);
     fprintf(fp, "    \"uefi_bootkit_threats\": %d,\n", summary->uefi_threats_count);
     fprintf(fp, "    \"initramfs_script_threats\": %d,\n", summary->initramfs_threats_count);
-    fprintf(fp, "    \"userland_preload_threats\": %d,\n", summary->preload_threats_count);
-    fprintf(fp, "    \"ext4_hidden_inodes\": %d\n", summary->ext4_hidden_inodes_count);
+    fprintf(fp, "    \"userland_preload_threats\": %d\n", summary->preload_threats_count);
+    fprintf(fp, "  },\n");
+    fputs("  \"verdict\": ", fp); json_put_string(fp, summary->verdict); fputs(",\n", fp);
+    fprintf(fp, "  \"module_status\": {\n");
+    for (int i = 0; i < SCAN_MOD_COUNT; i++) {
+        fputs("    ", fp); json_put_string(fp, forensic_scan_module_name((scan_module_id_t)i));
+        fputs(": ", fp); json_put_string(fp, summary->module_status[i]);
+        fputs(i + 1 < SCAN_MOD_COUNT ? ",\n" : "\n", fp);
+    }
     fprintf(fp, "  }\n");
     fprintf(fp, "}\n");
 
@@ -146,6 +154,12 @@ booto_error_t case_report_generate_json(const forensic_case_summary_t *summary,
 
     char seal[65];
     return case_report_sign_and_seal(filename, seal);
+}
+
+static void md_module_row(FILE *fp, const char *engine, int detections, const char *status) {
+    fprintf(fp, "| **%s** | %d | ", engine, detections);
+    md_put_cell(fp, status);
+    fputs(" |\n", fp);
 }
 
 booto_error_t case_report_generate_markdown(const forensic_case_summary_t *summary,
@@ -178,24 +192,20 @@ booto_error_t case_report_generate_markdown(const forensic_case_summary_t *summa
     fprintf(fp, "| :--- | :--- |\n");
     fputs("| **Target Block Device** | ", fp); md_put_cell(fp, summary->target_disk); fputs(" |\n", fp);
     fputs("| **Target Filesystem** | ", fp); md_put_cell(fp, summary->target_fs); fputs(" |\n", fp);
+    fputs("| **Scan Verdict** | ", fp); md_put_cell(fp, summary->verdict); fputs(" |\n", fp);
     fprintf(fp, "| **Total Anomalies Detected** | **%d** |\n", summary->total_threats);
     fputs("| **Highest Severity Level** | ", fp); md_put_cell(fp, summary->highest_severity); fputs(" |\n\n", fp);
 
     fprintf(fp, "## 2. Detection Breakdown by Module\n\n");
     fprintf(fp, "| Forensic Inspection Engine | Detections Count | Status |\n");
     fprintf(fp, "| :--- | :---: | :--- |\n");
-    fprintf(fp, "| **MBR & VBR Boot Sector Auditor** | %d | %s |\n",
-            summary->mbr_threats_count, summary->mbr_threats_count > 0 ? "CRITICAL ALERT" : "CLEAN");
-    fprintf(fp, "| **Kernel LKM & Syscall Hook Inspector** | %d | %s |\n",
-            summary->kernel_threats_count, summary->kernel_threats_count > 0 ? "CRITICAL ALERT" : "CLEAN");
-    fprintf(fp, "| **UEFI & ESP Bootkit Analyzer** | %d | %s |\n",
-            summary->uefi_threats_count, summary->uefi_threats_count > 0 ? "CRITICAL ALERT" : "CLEAN");
-    fprintf(fp, "| **In-Memory Initramfs Script Auditor** | %d | %s |\n",
-            summary->initramfs_threats_count, summary->initramfs_threats_count > 0 ? "WARNING" : "CLEAN");
-    fprintf(fp, "| **Userland `ld.so.preload` & PAM Scanner** | %d | %s |\n",
-            summary->preload_threats_count, summary->preload_threats_count > 0 ? "ALERT" : "CLEAN");
-    fprintf(fp, "| **Raw Ext4 Inode vs VFS Differential Engine** | %d | %s |\n\n",
-            summary->ext4_hidden_inodes_count, summary->ext4_hidden_inodes_count > 0 ? "HIDDEN INODES FOUND" : "CLEAN");
+    md_module_row(fp, "MBR & VBR Boot Sector Auditor", summary->mbr_threats_count, summary->module_status[SCAN_MOD_MBR]);
+    md_module_row(fp, "Kernel LKM & Syscall Hook Inspector", summary->kernel_threats_count, summary->module_status[SCAN_MOD_KERNEL]);
+    md_module_row(fp, "UEFI & ESP Bootkit Analyzer", summary->uefi_threats_count, summary->module_status[SCAN_MOD_UEFI]);
+    md_module_row(fp, "In-Memory Initramfs Script Auditor", summary->initramfs_threats_count, summary->module_status[SCAN_MOD_INITRAMFS]);
+    md_module_row(fp, "Userland `ld.so.preload` Scanner", summary->preload_threats_count, summary->module_status[SCAN_MOD_PRELOAD]);
+    md_module_row(fp, "Ext4 Superblock Stats", 0, summary->module_status[SCAN_MOD_EXT4]);
+    fputs("\n", fp);
 
     fprintf(fp, "## 3. Cryptographic Chain of Custody\n\n");
     fprintf(fp, "This report was generated in an amnesic Live RAM environment and saved to the LUKS2 encrypted persistence container. Integrity hashes are verified with SHA-256.\n");

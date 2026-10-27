@@ -13,6 +13,7 @@
 #include "crypto_utils.h"
 #include "logger.h"
 
+#include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -380,66 +381,6 @@ booto_error_t mbr_audit_vbr_buffer(const uint8_t *buffer, size_t len, uint64_t v
     return BOOTO_OK;
 }
 
-booto_error_t mbr_audit_mock(const char *mock_type, mbr_scan_result_t *result) {
-    if (!result) return BOOTO_ERR_INVALID_ARG;
-    memset(result, 0, sizeof(*result));
-
-    result->sectors_scanned = 64;
-    result->mbr_inspected = true;
-    result->vbr_scanned = 2;
-
-    mbr_analysis_info_t *info = &result->mbr_info;
-    snprintf(info->device_path, sizeof(info->device_path), "/dev/sda");
-    snprintf(info->mbr_sha256, sizeof(info->mbr_sha256), "a837c92b19e481b0a8f7c9e0d1827364b9a01f2e3d4c5b6a708192a3b4c5d6e7");
-    snprintf(info->bootstrap_sha256, sizeof(info->bootstrap_sha256), "7b82910c839f0182746c82019384726190283746192837461928374619283746");
-    info->has_valid_signature = true;
-    info->disk_signature = 0x8A7B9C1D;
-    info->valid_partition_count = 2;
-    info->active_partition_count = 1;
-    info->first_partition_lba = 2048;
-    info->mbr_gap_sectors = 2047;
-
-    if (!mock_type || strcmp(mock_type, "clean") == 0) {
-        info->detected_bootloader = BOOTLOADER_GRUB2;
-        info->bootloader_name = "GRUB 2 (GNU GRUB)";
-        info->has_mbr_gap_payload = false;
-        LOG_INFO("Mock MBR scan complete: Device /dev/sda is clean (GRUB 2)");
-        return BOOTO_OK;
-    }
-
-    if (strcmp(mock_type, "rovnix") == 0) {
-        info->detected_bootloader = BOOTLOADER_UNKNOWN;
-        info->bootloader_name = "Rovnix Bootkit Hook";
-        add_mbr_threat(result, "Rovnix / Carberp MBR Bootkit", "/dev/sda",
-                       "d948201bc93ef4a890123ef9a82bc128912ef349a128901bc3412ef89018f4b2",
-                       "MBR_BOOTKIT_ROVNIX", 0, MBR_SEVERITY_CRITICAL,
-                       "Rovnix/Carberp MBR hook detected jumping to hidden sectors in unpartitioned space");
-    } else if (strcmp(mock_type, "tdl4") == 0) {
-        info->detected_bootloader = BOOTLOADER_UNKNOWN;
-        info->bootloader_name = "TDL4 Bootkit";
-        add_mbr_threat(result, "TDL4 / Sinowal (Mebroot) Bootkit", "/dev/sda",
-                       "c820192837461928374619283746192837461928374619283746192837461928",
-                       "MBR_BOOTKIT_TDL4_MEBROOT", 0, MBR_SEVERITY_CRITICAL,
-                       "TDL4 bootkit intercepted INT 13h vector in Master Boot Record");
-    } else if (strcmp(mock_type, "gapz") == 0) {
-        info->detected_bootloader = BOOTLOADER_WINDOWS_NT;
-        info->bootloader_name = "Windows Boot Manager (NT 6+)";
-        add_mbr_threat(result, "GAPZ / Cidox VBR Bootkit", "/dev/sda1",
-                       "f849201928374619283746192837461928374619283746192837461928374619",
-                       "VBR_BOOTKIT_GAPZ", 2048, MBR_SEVERITY_CRITICAL,
-                       "GAPZ VBR hook in NTFS partition boot sector");
-    } else if (strcmp(mock_type, "wiper") == 0) {
-        info->detected_bootloader = BOOTLOADER_UNKNOWN;
-        info->bootloader_name = "HermeticWiper Dropper";
-        add_mbr_threat(result, "HermeticWiper / Ransomware MBR Payload", "/dev/sda",
-                       "e719283746192837461928374619283746192837461928374619283746192837",
-                       "MBR_WIPER_RANSOMWARE", 0, MBR_SEVERITY_CRITICAL,
-                       "MBR wiper payload corrupted partition table with malicious wipe loop");
-    }
-
-    return BOOTO_OK;
-}
-
 booto_error_t mbr_audit_device(const char *block_dev, mbr_scan_result_t *result) {
     if (!block_dev || !result) return BOOTO_ERR_INVALID_ARG;
     memset(result, 0, sizeof(*result));
@@ -448,17 +389,19 @@ booto_error_t mbr_audit_device(const char *block_dev, mbr_scan_result_t *result)
 
     int fd = open(block_dev, O_RDONLY);
     if (fd < 0) {
-        LOG_WARN("Cannot open block device '%s' directly (non-root): Running clean MBR mock emulation", block_dev);
-        return mbr_audit_mock("clean", result);
+        int e = errno;
+        LOG_ERROR("Cannot open block device '%s': %s", block_dev, strerror(e));
+        if (e == EACCES || e == EPERM) return BOOTO_ERR_PERMISSION_DENIED;
+        return e == ENOENT ? BOOTO_ERR_NOT_FOUND : BOOTO_ERR_IO;
     }
 
     // 1. Read Master Boot Record (Sector 0)
     uint8_t mbr_buf[MBR_SECTOR_SIZE];
     ssize_t bytes_read = read(fd, mbr_buf, sizeof(mbr_buf));
     if (bytes_read != (ssize_t)sizeof(mbr_buf)) {
-        LOG_WARN("Failed to read Sector 0 from '%s': Falling back to mock", block_dev);
+        LOG_ERROR("Failed to read Sector 0 from '%s'", block_dev);
         close(fd);
-        return mbr_audit_mock("clean", result);
+        return BOOTO_ERR_IO;
     }
 
     booto_error_t err = mbr_audit_buffer(mbr_buf, sizeof(mbr_buf), block_dev, result);

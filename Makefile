@@ -21,6 +21,7 @@ SOURCES = $(SRCDIR)/logger.c \
           $(SRCDIR)/ext4_diff.c \
           $(SRCDIR)/persistence_mgr.c \
           $(SRCDIR)/case_reporter.c \
+          $(SRCDIR)/forensic_scan.c \
           $(SRCDIR)/disk_mount.c \
           $(SRCDIR)/tui/terminal.c \
           $(SRCDIR)/tui/wm.c \

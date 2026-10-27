@@ -25,7 +25,8 @@ typedef struct {
     int uefi_threats_count;
     int initramfs_threats_count;
     int preload_threats_count;
-    int ext4_hidden_inodes_count;
+    char verdict[16];                 /**< "CLEAN" / "THREATS" / "INCOMPLETE" */
+    char module_status[6][16];        /**< Per-module status, indexed by scan_module_id_t */
     int total_threats;
     char highest_severity[16];
 } forensic_case_summary_t;

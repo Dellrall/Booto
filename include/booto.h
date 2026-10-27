@@ -48,10 +48,9 @@ typedef struct {
     booto_mode_t mode;
     bool verbose;
     bool mock_drives;
-    bool enable_persistence;
-    char target_rootfs[512];
-    char persistence_dir[512];
-    char output_report_path[512];
+    char target_dev[128];      /**< Raw block device to scan (-t) */
+    char target_rootfs[512];   /**< Already-available rootfs directory to inspect (-s) */
+    char persistence_dir[512]; /**< Case report output directory (-p) */
 } booto_context_t;
 
 /**
