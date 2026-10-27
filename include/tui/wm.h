@@ -115,11 +115,6 @@ wm_node_t *wm_find_leaf_at(wm_node_t *node, int x, int y);
  */
 void wm_tree_destroy(wm_tree_t *tree);
 
-/**
- * @brief Get human-readable name of pane type.
- */
-const char *wm_pane_type_name(pane_type_t type);
-
 #ifdef __cplusplus
 }
 #endif

@@ -54,6 +54,8 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
 const char *forensic_scan_module_name(scan_module_id_t id);
 const char *forensic_scan_status_str(scan_status_t s);
 const char *forensic_scan_verdict_str(scan_verdict_t v);
+/* Threats found by one module (ext4 reports statistics only, so always 0). */
+int forensic_scan_module_threats(const forensic_scan_report_t *r, scan_module_id_t id);
 /* Fill a case summary from a finished report (timestamp = now UTC). */
 void forensic_scan_fill_case_summary(const forensic_scan_report_t *r, const char *case_id, const char *examiner,
                                      forensic_case_summary_t *sum);

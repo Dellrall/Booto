@@ -7,17 +7,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-const char *wm_pane_type_name(pane_type_t type) {
-    switch (type) {
-        case PANE_STORAGE_DEVICES:  return "Target Storage Devices";
-        case PANE_SCANNER_MODULES:  return "Forensic Scanner Modules";
-        case PANE_LIVE_LOGS:        return "Live Scan & Hex Log";
-        case PANE_THREAT_INSPECTOR: return "Threat Inspector & Disassembly";
-        case PANE_PERSISTENCE:      return "Encrypted Persistence & Case Mgr";
-        default:                    return "Unknown Pane";
-    }
-}
-
 #define WM_MAX_LEAVES 32
 
 static wm_node_t *create_leaf(int id, pane_type_t type) {
@@ -59,23 +48,24 @@ static void compute_node_layout(wm_node_t *node, int x, int y, int w, int h) {
     node->w = w;
     node->h = h;
 
+    /* Siblings overlap by one cell so they share a border; term_draw_box merges it into a junction. */
     if (node->type == NODE_SPLIT) {
         if (node->split_dir == SPLIT_VERTICAL) {
             int left_w = (int)((float)w * node->split_ratio);
             if (left_w < 10) left_w = 10;
             if (left_w > w - 10) left_w = w - 10;
-            int right_w = w - left_w;
+            int right_w = w - left_w + 1;
 
             compute_node_layout(node->left, x, y, left_w, h);
-            compute_node_layout(node->right, x + left_w, y, right_w, h);
+            compute_node_layout(node->right, x + left_w - 1, y, right_w, h);
         } else {
             int top_h = (int)((float)h * node->split_ratio);
             if (top_h < 4) top_h = 4;
             if (top_h > h - 4) top_h = h - 4;
-            int bottom_h = h - top_h;
+            int bottom_h = h - top_h + 1;
 
             compute_node_layout(node->left, x, y, w, top_h);
-            compute_node_layout(node->right, x, y + top_h, w, bottom_h);
+            compute_node_layout(node->right, x, y + top_h - 1, w, bottom_h);
         }
     }
 }
@@ -102,14 +92,14 @@ wm_tree_t *wm_tree_create_default(int screen_w, int screen_h) {
     tree->next_id = 1;
 
     // Default 4-pane layout:
-    // Left column: Storage Devices (Top) & Scanner Modules (Bottom)
-    // Right column: Live Logs (Top) & Threat Inspector (Bottom)
+    // Left column: Storage (top) & Engines (bottom)
+    // Right column: Findings (top, holds the verdict) & Log (bottom)
     wm_node_t *p1 = create_leaf(tree->next_id++, PANE_STORAGE_DEVICES);
     wm_node_t *p2 = create_leaf(tree->next_id++, PANE_SCANNER_MODULES);
-    wm_node_t *left_col = create_split(SPLIT_HORIZONTAL, 0.45f, p1, p2);
+    wm_node_t *left_col = create_split(SPLIT_HORIZONTAL, 0.62f, p1, p2);
 
-    wm_node_t *p3 = create_leaf(tree->next_id++, PANE_LIVE_LOGS);
-    wm_node_t *p4 = create_leaf(tree->next_id++, PANE_THREAT_INSPECTOR);
+    wm_node_t *p3 = create_leaf(tree->next_id++, PANE_THREAT_INSPECTOR);
+    wm_node_t *p4 = create_leaf(tree->next_id++, PANE_LIVE_LOGS);
     wm_node_t *right_col = create_split(SPLIT_HORIZONTAL, 0.55f, p3, p4);
 
     tree->root = create_split(SPLIT_VERTICAL, 0.40f, left_col, right_col);

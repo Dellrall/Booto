@@ -59,6 +59,17 @@ const char *forensic_scan_verdict_str(scan_verdict_t v) {
     }
 }
 
+int forensic_scan_module_threats(const forensic_scan_report_t *r, scan_module_id_t id) {
+    switch (id) {
+        case SCAN_MOD_MBR:       return r->mbr.threats_detected;
+        case SCAN_MOD_UEFI:      return r->uefi.bootkits_detected;
+        case SCAN_MOD_KERNEL:    return r->kernel.threats_detected;
+        case SCAN_MOD_INITRAMFS: return r->initramfs.threats_detected;
+        case SCAN_MOD_PRELOAD:   return r->preload.threats_detected;
+        default:                 return 0;
+    }
+}
+
 static void set_status(forensic_scan_report_t *r, scan_module_id_t id, scan_status_t s, booto_error_t e, const char *note) {
     r->status[id] = s;
     r->err[id] = e;
@@ -189,8 +200,8 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
         if (ue != BOOTO_OK) LOG_WARN("Failed to unmount %s: %s", SCAN_MOUNT_POINT, err_name(ue));
     }
 
-    out->total_threats = out->mbr.threats_detected + out->uefi.bootkits_detected + out->kernel.threats_detected +
-                         out->initramfs.threats_detected + out->preload.threats_detected;
+    out->total_threats = 0;
+    for (int i = 0; i < SCAN_MOD_COUNT; i++) out->total_threats += forensic_scan_module_threats(out, (scan_module_id_t)i);
 
     bool any_ok = false, any_err = false;
     for (int i = 0; i < SCAN_MOD_COUNT; i++) {

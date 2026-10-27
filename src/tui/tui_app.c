@@ -33,151 +33,186 @@ static void tui_logger_hook(log_level_t level, const char *timestamp, const char
     }
 }
 
+/* Draws s at (*x, y) clipped to end (exclusive) and advances *x. */
+static void put_clip(int *x, int y, int end, const char *s, uint32_t attr) {
+    if (*x < end) *x += term_puts_clip(*x, y, end - *x, s, attr);
+}
+
 static void render_top_bar(tui_app_state_t *app, int cols) {
-    char left[128];
-    snprintf(left, sizeof(left), " BOOTO v%s (%s) | Mode: Amnesic (RAM) | Focus: [%s]",
-             BOOTO_VERSION_STRING, BOOTO_GIT_HASH,
-             app->wm->focused_leaf ? wm_pane_type_name(app->wm->focused_leaf->pane_type) : "None");
-
-    char right[64];
-    snprintf(right, sizeof(right), "[%s] ",
-             app->luks_unlocked ? "LUKS: UNLOCKED" : "LUKS: LOCKED");
-
-    uint32_t bar_attr = MAKE_ATTR(COLOR_BLACK, COLOR_CYAN, ATTR_BOLD);
-
-    for (int x = 0; x < cols; x++) {
-        term_putc(x, 0, ' ', bar_attr);
+    char scan[32] = "";
+    if (atomic_load(&app->scan_active)) {
+        struct timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        snprintf(scan, sizeof(scan), "%c Scanning %d/%d", "|/-\\"[(ts.tv_nsec / 125000000L) % 4],
+                 atomic_load(&app->scan_step), (int)SCAN_MOD_COUNT);
     }
+    const char *luks = app->luks_unlocked ? "LUKS unlocked" : "LUKS locked";
+    const char *ram = "RAM only";
 
-    term_puts(0, 0, left, bar_attr);
+    /* Right side: scan status, "RAM only", LUKS state, two spaces apart. Drop items until "Booto" still fits. */
+    int min_left = 1 + 5 + 2;
+    int scan_w = scan[0] ? (int)strlen(scan) + 2 : 0;
+    int ram_w = (int)strlen(ram) + 2;
+    int luks_w = (int)strlen(luks);
+    if (min_left + scan_w + ram_w + luks_w > cols - 1) ram_w = 0;
+    if (min_left + scan_w + ram_w + luks_w > cols - 1) scan_w = 0;
+    if (min_left + scan_w + ram_w + luks_w > cols - 1) luks_w = 0;
+    int rw = scan_w + ram_w + luks_w;
 
-    int r_pos = cols - (int)strlen(right);
-    if (r_pos > (int)strlen(left)) {
-        term_puts(r_pos, 0, right, app->luks_unlocked ? MAKE_ATTR(COLOR_BLACK, COLOR_GREEN, ATTR_BOLD) : MAKE_ATTR(COLOR_BLACK, COLOR_RED, ATTR_BOLD));
+    int x = cols - 1 - rw;
+    if (scan_w) x += term_puts(x, 0, scan, A_WARN) + 2;
+    if (ram_w) x += term_puts(x, 0, ram, A_MUTED) + 2;
+    if (luks_w) term_puts(x, 0, luks, app->luks_unlocked ? A_OK : A_BAD);
+
+    int end = cols - 1 - rw - (rw ? 2 : 0);
+    x = 1;
+    put_clip(&x, 0, end, "Booto", A_STRONG);
+    x++;
+    put_clip(&x, 0, end, BOOTO_VERSION_STRING, A_MUTED);
+
+    const drive_item_t *t = NULL;
+    for (int i = 0; i < app->drive_count; i++) {
+        if (app->drives[i].is_target) {
+            t = &app->drives[i];
+            break;
+        }
+    }
+    x += 2;
+    if (!t) {
+        put_clip(&x, 0, end, "No target selected", A_MUTED);
+        return;
+    }
+    int head_w = 9; /* "Target ♦ " */
+    if (end - x < head_w + 4) return;
+    int path_w = (int)strlen(t->name);
+    char meta[80];
+    snprintf(meta, sizeof(meta), "%.31s %.31s", t->fs_type, t->size);
+    bool show_meta = x + head_w + path_w + 2 + (int)strlen(meta) <= end;
+    put_clip(&x, 0, end, "Target ", A_MUTED);
+    term_put_glyph(x, 0, TERM_G_TARGET, A_TARGET);
+    x += 2;
+    put_clip(&x, 0, end, t->name, A_TARGET);
+    if (show_meta) {
+        x += 2;
+        put_clip(&x, 0, end, meta, A_MUTED);
     }
 }
 
 static void render_bottom_bar(tui_app_state_t *app, int rows, int cols) {
-    uint32_t bar_attr = MAKE_ATTR(COLOR_BLACK, COLOR_WHITE, ATTR_NONE);
-
-    for (int x = 0; x < cols; x++) {
-        term_putc(x, rows - 1, ' ', bar_attr);
+    static const struct {
+        const char *key;
+        const char *label;
+    } hints[] = {
+        {" F5 ", " Scan"},       {" F6 ", " Export"}, {" F3 ", " Unlock"},
+        {" Tab ", " Next pane"}, {" Alt+Z ", " Zoom"}, {" F10 ", " Exit"},
+    };
+    enum { HINT_COUNT = (int)(sizeof(hints) / sizeof(hints[0])) };
+    static const int drop_order[] = {4, 3, 2, 1}; /* Zoom, Tab, F3, F6; F5 and F10 always stay */
+    bool shown[HINT_COUNT];
+    int hw = -2;
+    for (int i = 0; i < HINT_COUNT; i++) {
+        shown[i] = true;
+        hw += (int)(strlen(hints[i].key) + strlen(hints[i].label)) + 2;
+    }
+    int status_w = (int)strlen(app->status_msg);
+    for (size_t d = 0; d < sizeof(drop_order) / sizeof(drop_order[0]); d++) {
+        if (1 + status_w + 2 + hw <= cols - 1) break;
+        int i = drop_order[d];
+        shown[i] = false;
+        hw -= (int)(strlen(hints[i].key) + strlen(hints[i].label)) + 2;
     }
 
-    // Alt+M has no direction: it swaps the focused pane with the next pane in Tab order.
-    const char *help = "Alt+Arrow: Focus | Alt+M: Swap w/ Next | Alt+Z: Zoom | F3: Decrypt LUKS | F5: Scan | F6: Export | F10/Q: Exit";
-    char line[512];
-    if (atomic_load(&app->scan_active)) {
-        struct timespec ts;
-        clock_gettime(CLOCK_MONOTONIC, &ts);
-        char spin = "|/-\\"[(ts.tv_nsec / 125000000L) % 4];
-        snprintf(line, sizeof(line), " %c Scanning [%d/%d] | %.200s | %s", spin, atomic_load(&app->scan_step),
-                 (int)SCAN_MOD_COUNT, app->status_msg, help);
-    } else {
-        snprintf(line, sizeof(line), " %.200s | %s", app->status_msg, help);
+    int y = rows - 1;
+    int hx = cols - 1 - hw;
+    if (hx < 1) hx = 1;
+    int x = 1;
+    put_clip(&x, y, hx - 2, app->status_msg, A_TEXT);
+
+    x = hx;
+    for (int i = 0; i < HINT_COUNT; i++) {
+        if (!shown[i]) continue;
+        put_clip(&x, y, cols - 1, hints[i].key, A_KEYCAP);
+        put_clip(&x, y, cols - 1, hints[i].label, A_TEXT);
+        x += 2;
     }
-    term_puts(0, rows - 1, line, bar_attr);
+}
+
+/* Centres a w x h modal (clamped to the screen), clears it and draws its frame. */
+static void modal_frame(int rows, int cols, int w, int h, const char *title, int *mx, int *my, int *mw) {
+    if (w > cols) w = cols;
+    if (h > rows) h = rows;
+    *mx = (cols - w) / 2;
+    *my = (rows - h) / 2;
+    *mw = w;
+    term_fill(*mx, *my, w, h, A_TEXT);
+    term_draw_box(*mx, *my, w, h, title, A_FRAME, A_STRONG);
+}
+
+/* Draws a keycap and its label at (x, y), clipped to end; returns the x after the label. */
+static int modal_key(int x, int y, int end, const char *key, const char *label) {
+    put_clip(&x, y, end, key, A_KEYCAP);
+    put_clip(&x, y, end, label, A_TEXT);
+    return x;
 }
 
 static void render_exit_modal(tui_app_state_t *app, int rows, int cols) {
     (void)app;
-    int mw = 64;
-    int mh = 11;
-    int mx = (cols - mw) / 2;
-    int my = (rows - mh) / 2;
-    if (mx < 0) mx = 0;
-    if (my < 0) my = 0;
-
-    uint32_t border_attr = MAKE_ATTR(COLOR_BRIGHT_RED, COLOR_BLACK, ATTR_BOLD);
-    uint32_t title_attr = MAKE_ATTR(COLOR_BLACK, COLOR_BRIGHT_RED, ATTR_BOLD);
-    uint32_t text_attr = MAKE_ATTR(COLOR_WHITE, COLOR_BLACK, ATTR_NONE);
-    uint32_t key_attr = MAKE_ATTR(COLOR_BRIGHT_YELLOW, COLOR_BLACK, ATTR_BOLD);
-
-    // Clear background behind modal
-    for (int y = my; y < my + mh && y < rows; y++) {
-        for (int x = mx; x < mx + mw && x < cols; x++) {
-            term_putc(x, y, ' ', text_attr);
-        }
+    int mx, my, mw;
+    modal_frame(rows, cols, 40, 9, "Exit", &mx, &my, &mw);
+    int end = mx + mw - 2;
+    static const struct {
+        const char *key;
+        const char *label;
+        int dy;
+    } items[] = {
+        {" P ", "Power off", 2},
+        {" R ", "Reboot", 3},
+        {" S ", "Open a root shell", 4},
+        {" Esc ", "Back to Booto", 6},
+    };
+    for (size_t i = 0; i < sizeof(items) / sizeof(items[0]); i++) {
+        int x = mx + 3;
+        put_clip(&x, my + items[i].dy, end, items[i].key, A_KEYCAP);
+        x = mx + 3 + 7; /* labels aligned after the widest keycap (" Esc ") */
+        put_clip(&x, my + items[i].dy, end, items[i].label, A_TEXT);
     }
-
-    term_draw_box(mx, my, mw, mh, " System Power & Exit Menu ", border_attr, title_attr);
-
-    term_puts(mx + 4, my + 2, "Select an action to proceed:", text_attr);
-
-    term_puts(mx + 6, my + 4, "[P]", key_attr);
-    term_puts(mx + 10, my + 4, "Power Off System (Shutdown Machine)", text_attr);
-
-    term_puts(mx + 6, my + 5, "[R]", key_attr);
-    term_puts(mx + 10, my + 5, "Reboot System    (Restart Machine)", text_attr);
-
-    term_puts(mx + 6, my + 6, "[S]", key_attr);
-    term_puts(mx + 10, my + 6, "Drop to Root Interactive Shell (Bash)", text_attr);
-
-    term_puts(mx + 6, my + 8, "[ESC/C]", key_attr);
-    term_puts(mx + 14, my + 8, "Cancel and Return to Booto TUI", text_attr);
 }
 
 static void render_luks_modal(tui_app_state_t *app, int rows, int cols) {
-    int mw = 68;
-    int mh = 12;
-    int mx = (cols - mw) / 2;
-    int my = (rows - mh) / 2;
-    if (mx < 0) mx = 0;
-    if (my < 0) my = 0;
+    int mx, my, mw;
+    modal_frame(rows, cols, 60, 11, "Unlock LUKS volume (read-only)", &mx, &my, &mw);
+    int end = mx + mw - 2;
 
-    uint32_t border_attr = MAKE_ATTR(COLOR_BRIGHT_CYAN, COLOR_BLACK, ATTR_BOLD);
-    uint32_t title_attr = MAKE_ATTR(COLOR_BLACK, COLOR_BRIGHT_CYAN, ATTR_BOLD);
-    uint32_t text_attr = MAKE_ATTR(COLOR_WHITE, COLOR_BLACK, ATTR_NONE);
-    uint32_t key_attr = MAKE_ATTR(COLOR_BRIGHT_YELLOW, COLOR_BLACK, ATTR_BOLD);
-    uint32_t input_attr = MAKE_ATTR(COLOR_BLACK, COLOR_WHITE, ATTR_BOLD);
-    uint32_t alert_attr = MAKE_ATTR(COLOR_BRIGHT_RED, COLOR_BLACK, ATTR_BOLD);
+    int x = mx + 3;
+    put_clip(&x, my + 2, end, "Device ", A_MUTED);
+    put_clip(&x, my + 2, end, app->luks_target_dev, A_STRONG);
 
-    // Clear background behind modal
-    for (int y = my; y < my + mh && y < rows; y++) {
-        for (int x = mx; x < mx + mw && x < cols; x++) {
-            term_putc(x, y, ' ', text_attr);
-        }
-    }
-
-    term_draw_box(mx, my, mw, mh, " LUKS Encrypted Target Partition Unlock ", border_attr, title_attr);
-
-    char prompt[256];
-    snprintf(prompt, sizeof(prompt), "Target device %.64s is encrypted with LUKS.", app->luks_target_dev);
-    term_puts(mx + 4, my + 2, prompt, text_attr);
-    term_puts(mx + 4, my + 3, "Enter passphrase to map volume strictly READ-ONLY:", text_attr);
-
-    // Render passphrase input box
-    int box_w = 48;
-    for (int x = mx + 6; x < mx + 6 + box_w && x < cols; x++) {
-        term_putc(x, my + 5, ' ', input_attr);
-    }
-    char masked[64];
-    int mask_len = (app->luks_passphrase_len < 40) ? app->luks_passphrase_len : 40;
-    for (int i = 0; i < mask_len; i++) masked[i] = '*';
-    masked[mask_len] = '\0';
-    term_puts(mx + 7, my + 5, masked, input_attr);
-    if (mx + 7 + mask_len < cols) {
-        term_putc(mx + 7 + mask_len, my + 5, '_', MAKE_ATTR(COLOR_RED, COLOR_WHITE, ATTR_BOLD));
+    /* Passphrase field: muted underline row, one '*' per character, block cursor. */
+    int fx = mx + 3;
+    int fw = end - fx;
+    if (fw > 0) {
+        term_hline(fx, my + 4, fw, A_MUTED);
+        int stars = app->luks_passphrase_len < fw - 1 ? app->luks_passphrase_len : fw - 1;
+        for (int i = 0; i < stars; i++) term_putc(fx + i, my + 4, '*', A_STRONG);
+        term_put_glyph(fx + stars, my + 4, TERM_G_BLOCK, A_STRONG);
     }
 
     if (app->luks_status_msg[0] != '\0') {
-        term_puts(mx + 6, my + 7, app->luks_status_msg, alert_attr);
+        x = mx + 3;
+        put_clip(&x, my + 6, end, app->luks_status_msg, A_BAD);
     }
 
-    term_puts(mx + 6, my + 9, "[ENTER]", key_attr);
-    term_puts(mx + 14, my + 9, "Unlock Read-Only", text_attr);
-
-    term_puts(mx + 34, my + 9, "[ESC]", key_attr);
-    term_puts(mx + 40, my + 9, "Cancel / Skip", text_attr);
+    x = modal_key(mx + 3, my + 8, end, " Enter ", " Unlock read-only");
+    modal_key(x + 3, my + 8, end, " Esc ", " Cancel");
 }
 
-static void render_tree_leaves(wm_node_t *node, wm_node_t *focused, tui_app_state_t *app) {
+static void render_unfocused_leaves(wm_node_t *node, wm_node_t *focused, tui_app_state_t *app) {
     if (!node) return;
     if (node->type == NODE_LEAF) {
-        pane_render(node, node == focused, app);
+        if (node != focused) pane_render(node, false, app);
     } else {
-        render_tree_leaves(node->left, focused, app);
-        render_tree_leaves(node->right, focused, app);
+        render_unfocused_leaves(node->left, focused, app);
+        render_unfocused_leaves(node->right, focused, app);
     }
 }
 
@@ -199,17 +234,6 @@ static scan_module_id_t pane_module_to_scan_id(const char *name) {
     return SCAN_MOD_COUNT;
 }
 
-static int module_threats(const forensic_scan_report_t *r, int m) {
-    switch (m) {
-        case SCAN_MOD_MBR: return r->mbr.threats_detected;
-        case SCAN_MOD_UEFI: return r->uefi.bootkits_detected;
-        case SCAN_MOD_KERNEL: return r->kernel.threats_detected;
-        case SCAN_MOD_INITRAMFS: return r->initramfs.threats_detected;
-        case SCAN_MOD_PRELOAD: return r->preload.threats_detected;
-        default: return 0;
-    }
-}
-
 /* Worker thread: touches only its own pending_* / scan_* inputs, the log (locked) and the atomics. */
 static void *scan_worker(void *arg) {
     tui_app_state_t *app = arg;
@@ -221,7 +245,7 @@ static void *scan_worker(void *arg) {
 
 static void start_forensic_scan(tui_app_state_t *app) {
     if (atomic_load(&app->scan_active)) {
-        snprintf(app->status_msg, sizeof(app->status_msg), "Scan already running");
+        snprintf(app->status_msg, sizeof(app->status_msg), "A scan is already running.");
         return;
     }
     const char *target_dev = NULL;
@@ -233,7 +257,7 @@ static void start_forensic_scan(tui_app_state_t *app) {
     }
     if (!target_dev) {
         tui_app_append_log(app, LOG_LEVEL_ERROR, NULL, "No target drive selected; scan not started");
-        snprintf(app->status_msg, sizeof(app->status_msg), "No target drive selected: mark a target in Storage pane first.");
+        snprintf(app->status_msg, sizeof(app->status_msg), "No target selected. Mark a target in Storage first.");
         return;
     }
 
@@ -252,7 +276,7 @@ static void start_forensic_scan(tui_app_state_t *app) {
     }
 
     char log_buf[256];
-    snprintf(log_buf, sizeof(log_buf), "=== Starting Forensic Scan on %.120s (Strict Read-Only) ===", app->scan_target);
+    snprintf(log_buf, sizeof(log_buf), "Scan started on %.120s (read-only).", app->scan_target);
     tui_app_append_log(app, LOG_LEVEL_INFO, NULL, log_buf);
 
     atomic_store(&app->scan_step, 0);
@@ -268,7 +292,7 @@ static void start_forensic_scan(tui_app_state_t *app) {
         snprintf(app->status_msg, sizeof(app->status_msg), "Scan failed to start (%.200s).", strerror(rc));
         return;
     }
-    snprintf(app->status_msg, sizeof(app->status_msg), "Scanning %.120s ...", app->scan_target);
+    snprintf(app->status_msg, sizeof(app->status_msg), "Scanning %.120s.", app->scan_target);
 }
 
 /* Main thread only: joins the worker (blocking if it is still running) and publishes its report. */
@@ -279,7 +303,6 @@ static void finish_forensic_scan(tui_app_state_t *app) {
 
     forensic_scan_report_t *r = app->pending_scan;
     app->pending_scan = NULL;
-    const char *target_dev = app->scan_target;
     char log_buf[256];
     booto_error_t err = app->pending_err;
     if (err != BOOTO_OK) {
@@ -295,19 +318,11 @@ static void finish_forensic_scan(tui_app_state_t *app) {
     int ok_count = 0;
     for (int m = 0; m < SCAN_MOD_COUNT; m++) {
         if (r->status[m] == SCAN_STATUS_OK) ok_count++;
-        snprintf(log_buf, sizeof(log_buf), "%.20s: %.8s (%d) %.96s",
-                 forensic_scan_module_name((scan_module_id_t)m), forensic_scan_status_str(r->status[m]),
-                 module_threats(r, m), r->note[m]);
-        tui_app_append_log(app, r->status[m] == SCAN_STATUS_OK ? LOG_LEVEL_INFO : LOG_LEVEL_WARN, NULL, log_buf);
     }
 
-    snprintf(app->threat.infected_file, sizeof(app->threat.infected_file), "%.120s", target_dev);
-    snprintf(app->threat.hex_dump, sizeof(app->threat.hex_dump), "-");
-
     if (r->verdict == SCAN_VERDICT_THREATS) {
-        snprintf(log_buf, sizeof(log_buf), "=== Forensic Scan Finished: %d Threat(s) Identified ===", r->total_threats);
+        snprintf(log_buf, sizeof(log_buf), "Scan finished: %d threat%s found.", r->total_threats, r->total_threats == 1 ? "" : "s");
         tui_app_append_log(app, LOG_LEVEL_CRITICAL, NULL, log_buf);
-        app->threat.severity_color = MAKE_ATTR(COLOR_BRIGHT_RED, COLOR_DEFAULT, ATTR_BOLD);
         snprintf(app->threat.severity, sizeof(app->threat.severity), "CRITICAL");
 
         if (r->mbr.threats_detected > 0) {
@@ -340,30 +355,23 @@ static void finish_forensic_scan(tui_app_state_t *app) {
             snprintf(app->threat.hook_type, sizeof(app->threat.hook_type), "Target: %.50s", r->preload.findings[0].target_library);
             snprintf(app->threat.sha256, sizeof(app->threat.sha256), "%.64s", r->preload.findings[0].sha256);
         }
-        snprintf(app->status_msg, sizeof(app->status_msg), "Scan complete: %d Threats Identified. Check Threat Inspector.", r->total_threats);
+        snprintf(app->status_msg, sizeof(app->status_msg), "Scan finished: %d threat%s found. See Findings.",
+                 r->total_threats, r->total_threats == 1 ? "" : "s");
     } else if (r->verdict == SCAN_VERDICT_INCOMPLETE) {
         int failed = SCAN_MOD_COUNT - ok_count;
-        tui_app_append_log(app, LOG_LEVEL_WARN, NULL, "=== Forensic Scan Finished: INCOMPLETE (not all engines ran) ===");
-        snprintf(app->threat.threat_name, sizeof(app->threat.threat_name), "Scan Incomplete");
-        snprintf(app->threat.hook_type, sizeof(app->threat.hook_type), "%d engine(s) failed or skipped", failed);
-        snprintf(app->threat.sha256, sizeof(app->threat.sha256), "-");
-        snprintf(app->threat.severity, sizeof(app->threat.severity), "INCOMPLETE");
-        app->threat.severity_color = MAKE_ATTR(COLOR_BRIGHT_YELLOW, COLOR_DEFAULT, ATTR_BOLD);
-        snprintf(app->status_msg, sizeof(app->status_msg), "Scan INCOMPLETE: %d engine(s) failed or skipped. See log.", failed);
+        snprintf(log_buf, sizeof(log_buf), "Scan incomplete: %d of %d engines could not run.", failed, (int)SCAN_MOD_COUNT);
+        tui_app_append_log(app, LOG_LEVEL_WARN, NULL, log_buf);
+        snprintf(app->status_msg, sizeof(app->status_msg), "Scan incomplete: %d engine%s could not run. See Log.",
+                 failed, failed == 1 ? "" : "s");
     } else {
-        tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "=== Forensic Scan Finished: CLEAN (all engines OK, 0 threats) ===");
-        snprintf(app->threat.threat_name, sizeof(app->threat.threat_name), "No Threats Found");
-        snprintf(app->threat.hook_type, sizeof(app->threat.hook_type), "%d engine(s) OK", ok_count);
-        snprintf(app->threat.sha256, sizeof(app->threat.sha256), "-");
-        snprintf(app->threat.severity, sizeof(app->threat.severity), "CLEAN");
-        app->threat.severity_color = MAKE_ATTR(COLOR_BRIGHT_GREEN, COLOR_DEFAULT, ATTR_BOLD);
-        snprintf(app->status_msg, sizeof(app->status_msg), "Scan complete: CLEAN (%d engine(s) OK, 0 threats).", ok_count);
+        tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "Scan finished: no threats found.");
+        snprintf(app->status_msg, sizeof(app->status_msg), "Scan finished: no threats found.");
     }
 }
 
 static void export_case_report(tui_app_state_t *app) {
     if (!app->last_scan) {
-        snprintf(app->status_msg, sizeof(app->status_msg), "Run a scan first (F5)");
+        snprintf(app->status_msg, sizeof(app->status_msg), "Nothing to export yet. Run a scan first.");
         return;
     }
     char case_id[32];
@@ -398,7 +406,7 @@ static void export_case_report(tui_app_state_t *app) {
     char log_buf[512];
     snprintf(log_buf, sizeof(log_buf), "Exported case report %.31s to %.200s", case_id, saved_md);
     tui_app_append_log(app, LOG_LEVEL_INFO, NULL, log_buf);
-    snprintf(app->status_msg, sizeof(app->status_msg), "Case Report Saved: %.200s", saved_md);
+    snprintf(app->status_msg, sizeof(app->status_msg), "Report saved to %.200s.", saved_md);
 }
 
 /* Quit/power paths: never exit (or free last_scan) under a running worker; block until it finishes. */
@@ -442,7 +450,9 @@ int tui_app_run(booto_context_t *ctx) {
         if (app.wm->zoomed_leaf) {
             pane_render(app.wm->zoomed_leaf, true, &app);
         } else {
-            render_tree_leaves(app.wm->root, app.wm->focused_leaf, &app);
+            // Focused pane last so its border wins on shared edges.
+            render_unfocused_leaves(app.wm->root, app.wm->focused_leaf, &app);
+            if (app.wm->focused_leaf) pane_render(app.wm->focused_leaf, true, &app);
         }
 
         // 3. Render Modal Overlays if active
@@ -516,7 +526,7 @@ int tui_app_run(booto_context_t *ctx) {
                         }
                         app.show_luks_modal = false;
                     } else {
-                        snprintf(app.luks_status_msg, sizeof(app.luks_status_msg), "Failed to unlock: Invalid passphrase");
+                        snprintf(app.luks_status_msg, sizeof(app.luks_status_msg), "Could not unlock: wrong passphrase.");
                     }
                 }
                 continue;
@@ -525,7 +535,7 @@ int tui_app_run(booto_context_t *ctx) {
             if (event.type == KEY_F10 || (event.type == KEY_CHAR && (event.ch == 'q' || event.ch == 'Q'))) {
                 app.show_exit_modal = true;
             } else if (event.type == KEY_F3 && atomic_load(&app.scan_active)) {
-                snprintf(app.status_msg, sizeof(app.status_msg), "Scan in progress: LUKS unlock disabled");
+                snprintf(app.status_msg, sizeof(app.status_msg), "LUKS unlock is disabled while a scan runs.");
             } else if (event.type == KEY_F3) {
                 const char *target = (app.drive_count > 0) ? app.drives[app.drive_cursor].name : "/dev/nvme0n1p3";
                 snprintf(app.luks_target_dev, sizeof(app.luks_target_dev), "%s", target);
@@ -570,7 +580,7 @@ int tui_app_run(booto_context_t *ctx) {
                 start_forensic_scan(&app);
             } else if (event.type == KEY_F6) {
                 if (atomic_load(&app.scan_active)) {
-                    snprintf(app.status_msg, sizeof(app.status_msg), "Scan in progress");
+                    snprintf(app.status_msg, sizeof(app.status_msg), "Export is disabled while a scan runs.");
                 } else {
                     export_case_report(&app);
                 }
@@ -581,7 +591,7 @@ int tui_app_run(booto_context_t *ctx) {
                 }
             } else if (atomic_load(&app.scan_active) && event.type == KEY_ENTER && app.wm->focused_leaf &&
                        app.wm->focused_leaf->pane_type == PANE_STORAGE_DEVICES) {
-                snprintf(app.status_msg, sizeof(app.status_msg), "Scan in progress: mount/unmount and LUKS unlock disabled");
+                snprintf(app.status_msg, sizeof(app.status_msg), "Mount and LUKS unlock are disabled while a scan runs.");
             } else {
                 if (app.wm->focused_leaf) {
                     pane_handle_input(app.wm->focused_leaf, &event, &app);
