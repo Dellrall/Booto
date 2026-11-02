@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-11-03
+
 ### Added
 - **Host firmware audit, pass 2: silicon locks**. Three new read-only checks, chosen per CPU vendor:
   - **SMM locked**: Intel `SMRAMC.D_LCK` (host bridge `00:00.0`), AMD `HWCR.SmmLock`.
