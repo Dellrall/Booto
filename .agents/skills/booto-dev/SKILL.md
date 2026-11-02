@@ -213,12 +213,22 @@ The following improvements are architectural priorities for Booto. Items marked 
 - **Scope**: these checks describe the machine Booto booted on, not the scanned disk. They run only in device mode, appear in a separate "Firmware" section, and never change the disk verdict. Every check is PASS / FAIL / UNKNOWN (unreadable) / N/A; UNKNOWN never counts as a pass.
 - **Pass 1 — (Done)**: efivars `SecureBoot`, `SetupMode`, `PK`, test keys in `PK`/`KEK`/`db` ("DO NOT TRUST", PKfail CVE-2024-8105), `dbx` SHA-256 count; ACPI `DMAR`/`IVRS` presence (+ DMAR opt-in flag); Thunderbolt `iommu_dma_protection`. efivars files cannot be read at an offset: read the whole file and skip the 4-byte attribute header.
 - **Pass 2 — silicon locks (Done, unvalidated on real hardware)**, read-only, vendor-switched via `/proc/cpuinfo`. A `hypervisor` CPU flag makes all three UNKNOWN (registers are emulated).
-  - SMM locked: Intel `SMRAMC` (host bridge `00:00.0` offset 0x88) bit 4 `D_LCK`; AMD `HWCR` C001_0015 bit 0 `SmmLock`. `IA32_FEATURE_CONTROL` 0x3A bit 0 locks VMX settings, **not** SMM — do not use it as an SMM check. `MSR_SMM_FEATURE_CONTROL` 0x4E0 is SMM-only per the SDM, so the OS cannot read it; not used.
+  - SMM locked: Intel `D_LCK` (bit 4) in the host bridge `00:00.0` SMRAM control register; AMD `HWCR` C001_0015 bit 0 `SmmLock`. `IA32_FEATURE_CONTROL` 0x3A bit 0 locks VMX settings, **not** SMM — do not use it as an SMM check. `MSR_SMM_FEATURE_CONTROL` 0x4E0 is SMM-only per the SDM, so the OS cannot read it; not used.
   - SMRAM range protected: Intel SMRR (`IA32_MTRRCAP` 0xFE bit 11 = supported, `IA32_SMRR_PHYSMASK` 0x1F3 bit 11 = valid); AMD `SMM_MASK` C001_0113 bit 1 `TValid` (TSEG). MSRs are checked on every CPU (`/dev/cpu/N/msr`; the ISO loads the `msr` module via `/etc/modules-load.d/booto.conf`); one unprotected CPU fails the check.
-  - BIOS write protection (Intel only): `BIOS_CNTL` in the SPI controller at `00:1f.5` offset 0xDC; pass needs BLE (bit 1) and SMM_BWP/EISS (bit 5). UNKNOWN when the device is hidden — unhiding it is a write. AMD reports N/A (its flash protection needs MMIO).
-  - Known limits (`shortcut:` comments): `SMRAMC` at 0x88 holds for Core host bridges from Sandy Bridge on (Atom SoCs and older chipsets differ); pre-100-series `BIOS_CNTL` on `00:1f.0` is not read. Non-root sysfs serves only 64 bytes of PCI config space → UNKNOWN "Needs root".
+  - BIOS write protection (Intel only): `BIOS_CNTL` offset 0xDC; pass needs BLE (bit 1) and SMM_BWP (bit 5). UNKNOWN when the device is hidden — unhiding it is a write. AMD reports N/A (its flash protection needs MMIO).
+  - **Chipset generations** (tables in `firmware_auditor.c`; device IDs from `pci.ids`, offsets from Intel datasheets). Anything not in a table is UNKNOWN, never a guessed offset.
+
+    | Generation | SMRAM control | `BIOS_CNTL` | SMM_BWP |
+    |---|---|---|---|
+    | 945 to 4 Series memory controller hubs (host bridge ID table) | `00:00.0` + 0x9D (319970 §5.1.28) | — | — |
+    | ICH6–ICH10 (LPC ID table) | — | `00:1f.0` + 0xDC | absent: bits 7:5 reserved (316972 §13.1.30) → FAIL even with BLE, the lock can be raced (CVE-2014-8273) |
+    | 5–9 Series PCH (LPC ID table) | — | `00:1f.0` + 0xDC | bit 5 (322169) |
+    | Sandy Bridge to Raptor Lake (family 6 model allowlist) | `00:00.0` + 0x88 (337345 §3.29) | — | — |
+    | 100 Series and newer (SPI class 0x0C80 at `00:1f.5`) | — | `00:1f.5` + 0xDC | bit 5 |
+
+    Not covered (UNKNOWN): first-gen Core i (Nehalem/Westmere), Atom SoCs, HEDT/server (X79/X99/C600), Meteor Lake and newer. The 0x9D offset is verified for the 4 Series only and assumed for the earlier hubs. Non-root sysfs serves only 64 bytes of PCI config space → UNKNOWN "Needs root".
 - **Out of scope**: SPI Protected Range registers (PR0–PR4) and anything needing MMIO or `/dev/mem` (blocked by kernel lockdown under Secure Boot) or any register write.
-- **Validation**: parser tests on fixture files (sparse files stand in for `/dev/cpu/N/msr`); at least one real Intel and one AMD machine before trusting results.
+- **Validation**: parser tests on fixture files (sparse files stand in for `/dev/cpu/N/msr`); at least one real Intel and one AMD machine before trusting results. To add a chipset, capture `sudo lspci -s 00:00.0 -xxx` and `sudo lspci -s 00:1f.0 -xxx` from real hardware and turn them into fixtures.
 
 ---
 

@@ -37,10 +37,12 @@
 #define SMM_MASK_TVALID         (1ull << 1)
 #define PCI_UNPRIV_CONFIG_LEN   64u     /* sysfs serves only the standard header to non-root */
 #define PCI_CLASS_HOST_BRIDGE   0x0600u
+#define PCI_CLASS_ISA_BRIDGE    0x0601u
 #define PCI_CLASS_SPI           0x0C80u
-#define SMRAMC_OFFSET           0x88u   /* host bridge 00:00.0 */
+#define SMRAMC_OFFSET           0x88u   /* host bridge, Sandy Bridge and newer (337345 §3.29) */
+#define SMRAM_MCH_OFFSET        0x9Du   /* host bridge, Core 2-era memory controller hubs (319970 §5.1.28) */
 #define SMRAMC_D_LCK            0x10u
-#define BIOS_CNTL_OFFSET        0xDCu   /* SPI controller 00:1f.5, Intel 100-series and newer */
+#define BIOS_CNTL_OFFSET        0xDCu   /* SPI 00:1f.5 (100-series+) or LPC 00:1f.0 (ICH6 to 9-series) */
 #define BC_BLE                  0x02u
 #define BC_SMM_BWP              0x20u
 
@@ -48,6 +50,44 @@
 _Static_assert(sizeof(off_t) >= 8, "off_t must hold 64-bit MSR offsets");
 
 typedef enum { CPU_OTHER, CPU_INTEL, CPU_AMD } cpu_vendor_t;
+
+/* Intel family-6 client CPUs whose host bridge has SMRAMC at 0x88: Sandy Bridge through Raptor Lake.
+ * Unlisted models (Atom SoCs, HEDT/server, Meteor Lake and newer) report unknown rather than guess. */
+static const uint8_t SMRAMC_88_MODELS[] = {
+    0x2A, 0x3A,                         /* Sandy Bridge, Ivy Bridge */
+    0x3C, 0x45, 0x46, 0x3D, 0x47,       /* Haswell, Broadwell */
+    0x4E, 0x5E, 0x8E, 0x9E, 0xA5, 0xA6, /* Skylake, Kaby/Coffee/Whiskey/Comet Lake */
+    0x66, 0x7D, 0x7E, 0x8C, 0x8D, 0xA7, /* Cannon, Ice, Tiger, Rocket Lake */
+    0x97, 0x9A, 0xB7, 0xBA, 0xBF,       /* Alder Lake, Raptor Lake */
+};
+
+/* Core 2-era memory controller hubs (945 to 4 Series): SMRAM at 0x9D. Device IDs from pci.ids;
+ * offset verified in the 4 Series datasheet, assumed for the earlier hubs of the same lineage. */
+static const uint16_t MCH_SMRAM_9D[] = {
+    0x2770, 0x27A0, 0x27AC, 0x2970, 0x2980, 0x2990, 0x29A0, 0x29B0, 0x29C0, 0x29D0,
+    0x29E0, 0x2A00, 0x2A10, 0x2A40, 0x2E00, 0x2E10, 0x2E20, 0x2E30, 0x2E40, 0x2E90,
+};
+
+/* Pre-100-series LPC bridges (00:1f.0) that hold BIOS_CNTL at 0xDC. SMM_BWP (bit 5) first appears
+ * in the 5 Series (322169); on ICH6-ICH10 bits 7:5 are reserved (ICH9: 316972 §13.1.30). */
+typedef struct {
+    uint16_t first, last;
+    bool smm_bwp;
+} lpc_range_t;
+static const lpc_range_t LEGACY_LPC[] = {
+    { 0x2640, 0x2642, false },  /* ICH6 */
+    { 0x27B0, 0x27BD, false },  /* ICH7, NM10 */
+    { 0x2810, 0x2815, false },  /* ICH8 */
+    { 0x2912, 0x2919, false },  /* ICH9 */
+    { 0x3A14, 0x3A1A, false },  /* ICH10 */
+    { 0x3B00, 0x3B1F, true },   /* 5 Series / 3400 */
+    { 0x1C40, 0x1C5F, true },   /* 6 Series / C200 */
+    { 0x1E40, 0x1E5F, true },   /* 7 Series */
+    { 0x8C40, 0x8C5F, true },   /* 8 Series / C220 */
+    { 0x9C40, 0x9C47, true },   /* 8 Series LP */
+    { 0x8CC0, 0x8CDF, true },   /* 9 Series */
+    { 0x9CC0, 0x9CCF, true },   /* 9 Series LP */
+};
 
 /* GUIDs as stored on disk: first three fields little-endian. */
 static const uint8_t GUID_CERT_SHA256[16] = {
@@ -468,47 +508,74 @@ static void check_msr_bit(fw_check_t *c, const char *dir, uint32_t msr, uint64_t
     }
 }
 
-/* Reads byte `off` of an Intel PCI function's config space; on failure sets c and returns false. */
-static bool read_intel_pci_byte(fw_check_t *c, const char *pci_dir, const char *bdf, uint16_t class_code,
-                                size_t off, const char *absent_msg, uint8_t *val) {
+/* Reads an Intel PCI function's config space; on failure returns NULL and, if c is set, says why. */
+static uint8_t *read_intel_pci(fw_check_t *c, const char *pci_dir, const char *bdf, uint16_t class_code,
+                               const char *absent_msg, size_t *len) {
     char path[4096];
     int w = snprintf(path, sizeof(path), "%s/%s/config", pci_dir, bdf);
     uint8_t *buf = NULL;
-    size_t len = 0;
-    int err = (w < 0 || (size_t)w >= sizeof(path)) ? ENAMETOOLONG : read_file(path, &buf, &len);
-    c->result = FW_RESULT_UNKNOWN;
-    if (err == ENOENT) {
-        snprintf(c->detail, sizeof(c->detail), "%s", absent_msg);
-    } else if (err == EACCES || err == EPERM) {
-        snprintf(c->detail, sizeof(c->detail), "Needs root to read chipset registers.");
-    } else if (err) {
-        snprintf(c->detail, sizeof(c->detail), "Could not read PCI %s: %s.", bdf, strerror(err));
-    } else if (len < 0x0C || buf[0] != 0x86 || buf[1] != 0x80 ||
-               buf[0x0B] != (uint8_t)(class_code >> 8) || buf[0x0A] != (uint8_t)class_code) {
-        snprintf(c->detail, sizeof(c->detail), "PCI %s is not the expected Intel device.", bdf);
-    } else if (len <= off) {
-        snprintf(c->detail, sizeof(c->detail), "%s", len == PCI_UNPRIV_CONFIG_LEN
-                 ? "Needs root to read chipset registers." : "Chipset config space is too short.");
-    } else {
-        *val = buf[off];
-        free(buf);
+    *len = 0;
+    int err = (w < 0 || (size_t)w >= sizeof(path)) ? ENAMETOOLONG : read_file(path, &buf, len);
+    char why[160] = "";
+    if (err == ENOENT)
+        snprintf(why, sizeof(why), "%s", absent_msg);
+    else if (err == EACCES || err == EPERM)
+        snprintf(why, sizeof(why), "Needs root to read chipset registers.");
+    else if (err)
+        snprintf(why, sizeof(why), "Could not read PCI %s: %s.", bdf, strerror(err));
+    else if (*len < 0x0C || buf[0] != 0x86 || buf[1] != 0x80 ||
+             buf[0x0B] != (uint8_t)(class_code >> 8) || buf[0x0A] != (uint8_t)class_code)
+        snprintf(why, sizeof(why), "PCI %s is not the expected Intel device.", bdf);
+    if (why[0] == '\0') return buf;
+    free(buf);
+    if (c) set_check(c, FW_RESULT_UNKNOWN, why);
+    return NULL;
+}
+
+static uint16_t pci_device_id(const uint8_t *cfg) {
+    return (uint16_t)(cfg[2] | (cfg[3] << 8));
+}
+
+/* Config byte `off`; non-root sysfs readers only get the 64-byte header. */
+static bool pci_cfg_byte(fw_check_t *c, const uint8_t *cfg, size_t len, size_t off, uint8_t *val) {
+    if (len > off) {
+        *val = cfg[off];
         return true;
     }
-    free(buf);
+    set_check(c, FW_RESULT_UNKNOWN, len == PCI_UNPRIV_CONFIG_LEN ? "Needs root to read chipset registers."
+                                                                  : "Chipset config space is too short.");
     return false;
 }
 
-/* shortcut: SMRAMC at 00:00.0+0x88 holds for Core host bridges (Sandy Bridge and newer); older
- * chipsets and Atom SoCs place it elsewhere. Add host-bridge device IDs if those must be supported. */
-static void check_intel_smm_lock(fw_check_t *c, const char *pci_dir) {
-    uint8_t smramc;
-    if (!read_intel_pci_byte(c, pci_dir, "0000:00:00.0", PCI_CLASS_HOST_BRIDGE, SMRAMC_OFFSET,
-                             "No Intel host bridge at 00:00.0.", &smramc))
-        return;
-    if (smramc & SMRAMC_D_LCK)
-        set_check(c, FW_RESULT_PASS, "SMRAM is locked (SMRAMC.D_LCK).");
-    else
-        set_check(c, FW_RESULT_FAIL, "SMRAM is not locked (SMRAMC.D_LCK): the OS can change SMM code.");
+static size_t smram_offset(uint16_t host_bridge, long family, long model) {
+    for (size_t i = 0; i < sizeof(MCH_SMRAM_9D) / sizeof(MCH_SMRAM_9D[0]); i++)
+        if (MCH_SMRAM_9D[i] == host_bridge) return SMRAM_MCH_OFFSET;
+    if (family == 6)
+        for (size_t i = 0; i < sizeof(SMRAMC_88_MODELS); i++)
+            if (SMRAMC_88_MODELS[i] == model) return SMRAMC_OFFSET;
+    return 0;
+}
+
+static void check_intel_smm_lock(fw_check_t *c, const char *pci_dir, long family, long model) {
+    size_t len;
+    uint8_t *cfg = read_intel_pci(c, pci_dir, "0000:00:00.0", PCI_CLASS_HOST_BRIDGE,
+                                  "No Intel host bridge at 00:00.0.", &len);
+    if (!cfg) return;
+    uint16_t did = pci_device_id(cfg);
+    size_t off = smram_offset(did, family, model);
+    uint8_t smram;
+    if (off == 0) {
+        c->result = FW_RESULT_UNKNOWN;
+        snprintf(c->detail, sizeof(c->detail),
+                 "Chipset not recognised (host bridge 8086:%04x, CPU model %ld): SMRAM lock location unknown.",
+                 (unsigned)did, model);
+    } else if (pci_cfg_byte(c, cfg, len, off, &smram)) {
+        c->result = (smram & SMRAMC_D_LCK) ? FW_RESULT_PASS : FW_RESULT_FAIL;
+        snprintf(c->detail, sizeof(c->detail), (smram & SMRAMC_D_LCK)
+                 ? "SMRAM is locked (D_LCK at 0x%02X)." : "SMRAM is not locked (D_LCK at 0x%02X): the OS can change SMM code.",
+                 (unsigned)off);
+    }
+    free(cfg);
 }
 
 static void check_intel_smrr(fw_check_t *c, const char *msr_dir) {
@@ -521,20 +588,52 @@ static void check_intel_smrr(fw_check_t *c, const char *msr_dir) {
         check_msr_bit(c, msr_dir, MSR_SMRR_PHYSMASK, SMRR_VALID, "SMRR protects SMRAM.", "SMRR is not set up");
 }
 
-/* shortcut: pre-100-series chipsets keep BIOS_CNTL on the LPC bridge (00:1f.0), which is not
- * read here because 00:1f.0+0xDC means something else on newer PCHs; add device IDs if needed. */
+static const lpc_range_t *legacy_lpc(uint16_t did) {
+    for (size_t i = 0; i < sizeof(LEGACY_LPC) / sizeof(LEGACY_LPC[0]); i++)
+        if (did >= LEGACY_LPC[i].first && did <= LEGACY_LPC[i].last) return &LEGACY_LPC[i];
+    return NULL;
+}
+
+/* BIOS_CNTL lives on the LPC bridge up to the 9 Series and on the SPI controller from the 100 Series. */
 static void check_intel_bios_wp(fw_check_t *c, const char *pci_dir) {
-    uint8_t bc;
-    if (!read_intel_pci_byte(c, pci_dir, "0000:00:1f.5", PCI_CLASS_SPI, BIOS_CNTL_OFFSET,
-                             "SPI controller hidden by firmware, or chipset older than Intel 100 series.", &bc))
-        return;
-    if ((bc & BC_BLE) && (bc & BC_SMM_BWP)) {
-        set_check(c, FW_RESULT_PASS, "BIOS lock and SMM write protection are on.");
-    } else {
-        c->result = FW_RESULT_FAIL;
-        snprintf(c->detail, sizeof(c->detail), "The OS can rewrite the firmware: BIOS lock %s, SMM write protection %s.",
-                 (bc & BC_BLE) ? "on" : "off", (bc & BC_SMM_BWP) ? "on" : "off");
+    size_t len;
+    const lpc_range_t *legacy = NULL;
+    uint8_t *cfg = read_intel_pci(NULL, pci_dir, "0000:00:1f.0", PCI_CLASS_ISA_BRIDGE, "", &len);
+    if (cfg) legacy = legacy_lpc(pci_device_id(cfg));
+    if (!legacy) {
+        free(cfg);
+        cfg = read_intel_pci(c, pci_dir, "0000:00:1f.5", PCI_CLASS_SPI,
+                             "SPI controller hidden by firmware, or chipset not recognised.", &len);
+        if (!cfg) return;
     }
+    uint8_t bc;
+    if (pci_cfg_byte(c, cfg, len, BIOS_CNTL_OFFSET, &bc)) {
+        bool ble = (bc & BC_BLE) != 0, bwp = (bc & BC_SMM_BWP) != 0;
+        if (legacy && !legacy->smm_bwp) {
+            set_check(c, FW_RESULT_FAIL, ble
+                      ? "BIOS lock on, but this chipset has no SMM write protection: the lock can be raced (CVE-2014-8273)."
+                      : "The OS can rewrite the firmware: BIOS lock off, and this chipset has no SMM write protection.");
+        } else if (ble && bwp) {
+            set_check(c, FW_RESULT_PASS, "BIOS lock and SMM write protection are on.");
+        } else {
+            c->result = FW_RESULT_FAIL;
+            snprintf(c->detail, sizeof(c->detail), "The OS can rewrite the firmware: BIOS lock %s, SMM write protection %s.",
+                     ble ? "on" : "off", bwp ? "on" : "off");
+        }
+    }
+    free(cfg);
+}
+
+/* Value of the first "key<blanks>: N" line, or -1; skips longer keys such as "model name". */
+static long cpuinfo_number(const char *s, const char *key) {
+    size_t klen = strlen(key);
+    for (const char *line = s; line; line = strchr(line, '\n'), line = line ? line + 1 : NULL) {
+        if (strncmp(line, key, klen) != 0) continue;
+        const char *p = line + klen;
+        while (*p == ' ' || *p == '\t') p++;
+        if (*p == ':') return strtol(p + 1, NULL, 10);
+    }
+    return -1;
 }
 
 static void check_silicon(fw_check_t *ck, const char *cpuinfo, const char *msr_dir, const char *pci_dir) {
@@ -542,6 +641,11 @@ static void check_silicon(fw_check_t *ck, const char *cpuinfo, const char *msr_d
     uint8_t *buf;
     size_t len;
     int err = read_file(cpuinfo, &buf, &len);
+    char *text = err ? NULL : realloc(buf, len + 1);
+    if (!err && !text) {
+        free(buf);
+        err = ENOMEM;
+    }
     if (err) {
         for (size_t i = 0; i < 3; i++) {
             silicon[i]->result = FW_RESULT_UNKNOWN;
@@ -549,10 +653,12 @@ static void check_silicon(fw_check_t *ck, const char *cpuinfo, const char *msr_d
         }
         return;
     }
-    cpu_vendor_t vendor = memmem(buf, len, "GenuineIntel", 12) ? CPU_INTEL
-                        : memmem(buf, len, "AuthenticAMD", 12) ? CPU_AMD : CPU_OTHER;
-    bool vm = memmem(buf, len, " hypervisor", 11) != NULL;
-    free(buf);
+    text[len] = '\0';
+    cpu_vendor_t vendor = strstr(text, "GenuineIntel") ? CPU_INTEL
+                        : strstr(text, "AuthenticAMD") ? CPU_AMD : CPU_OTHER;
+    bool vm = strstr(text, " hypervisor") != NULL;
+    long family = cpuinfo_number(text, "cpu family"), model = cpuinfo_number(text, "model");
+    free(text);
 
     if (vendor == CPU_OTHER) {
         for (size_t i = 0; i < 3; i++) set_check(silicon[i], FW_RESULT_NA, "Not an Intel or AMD CPU.");
@@ -561,7 +667,7 @@ static void check_silicon(fw_check_t *ck, const char *cpuinfo, const char *msr_d
         for (size_t i = 0; i < 3; i++)
             set_check(silicon[i], FW_RESULT_UNKNOWN, "Virtual machine: silicon registers are emulated.");
     } else if (vendor == CPU_INTEL) {
-        check_intel_smm_lock(silicon[0], pci_dir);
+        check_intel_smm_lock(silicon[0], pci_dir, family, model);
         check_intel_smrr(silicon[1], msr_dir);
         check_intel_bios_wp(silicon[2], pci_dir);
     } else {
