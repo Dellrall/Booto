@@ -556,11 +556,12 @@ static size_t smram_offset(uint16_t host_bridge, long family, long model) {
     return 0;
 }
 
-static void check_intel_smm_lock(fw_check_t *c, const char *pci_dir, long family, long model) {
+/* Returns true when the result rests on an unconfirmed layout (older-chipset table or unrecognised chipset). */
+static bool check_intel_smm_lock(fw_check_t *c, const char *pci_dir, long family, long model) {
     size_t len;
     uint8_t *cfg = read_intel_pci(c, pci_dir, "0000:00:00.0", PCI_CLASS_HOST_BRIDGE,
                                   "No Intel host bridge at 00:00.0.", &len);
-    if (!cfg) return;
+    if (!cfg) return false;
     uint16_t did = pci_device_id(cfg);
     size_t off = smram_offset(did, family, model);
     uint8_t smram;
@@ -576,6 +577,7 @@ static void check_intel_smm_lock(fw_check_t *c, const char *pci_dir, long family
                  (unsigned)off);
     }
     free(cfg);
+    return off != SMRAMC_OFFSET;
 }
 
 static void check_intel_smrr(fw_check_t *c, const char *msr_dir) {
@@ -594,8 +596,9 @@ static const lpc_range_t *legacy_lpc(uint16_t did) {
     return NULL;
 }
 
-/* BIOS_CNTL lives on the LPC bridge up to the 9 Series and on the SPI controller from the 100 Series. */
-static void check_intel_bios_wp(fw_check_t *c, const char *pci_dir) {
+/* BIOS_CNTL lives on the LPC bridge up to the 9 Series and on the SPI controller from the 100 Series.
+ * Returns true when an older-chipset table entry was used. */
+static bool check_intel_bios_wp(fw_check_t *c, const char *pci_dir) {
     size_t len;
     const lpc_range_t *legacy = NULL;
     uint8_t *cfg = read_intel_pci(NULL, pci_dir, "0000:00:1f.0", PCI_CLASS_ISA_BRIDGE, "", &len);
@@ -604,7 +607,7 @@ static void check_intel_bios_wp(fw_check_t *c, const char *pci_dir) {
         free(cfg);
         cfg = read_intel_pci(c, pci_dir, "0000:00:1f.5", PCI_CLASS_SPI,
                              "SPI controller hidden by firmware, or chipset not recognised.", &len);
-        if (!cfg) return;
+        if (!cfg) return false;
     }
     uint8_t bc;
     if (pci_cfg_byte(c, cfg, len, BIOS_CNTL_OFFSET, &bc)) {
@@ -622,6 +625,7 @@ static void check_intel_bios_wp(fw_check_t *c, const char *pci_dir) {
         }
     }
     free(cfg);
+    return legacy != NULL;
 }
 
 /* Value of the first "key<blanks>: N" line, or -1; skips longer keys such as "model name". */
@@ -636,7 +640,8 @@ static long cpuinfo_number(const char *s, const char *key) {
     return -1;
 }
 
-static void check_silicon(fw_check_t *ck, const char *cpuinfo, const char *msr_dir, const char *pci_dir) {
+static void check_silicon(fw_check_t *ck, bool *unconfirmed, const char *cpuinfo, const char *msr_dir,
+                          const char *pci_dir) {
     fw_check_t *const silicon[3] = { &ck[FW_CHECK_SMM_LOCK], &ck[FW_CHECK_SMRAM_RANGE], &ck[FW_CHECK_BIOS_WP] };
     uint8_t *buf;
     size_t len;
@@ -667,9 +672,10 @@ static void check_silicon(fw_check_t *ck, const char *cpuinfo, const char *msr_d
         for (size_t i = 0; i < 3; i++)
             set_check(silicon[i], FW_RESULT_UNKNOWN, "Virtual machine: silicon registers are emulated.");
     } else if (vendor == CPU_INTEL) {
-        check_intel_smm_lock(silicon[0], pci_dir, family, model);
+        bool smm = check_intel_smm_lock(silicon[0], pci_dir, family, model);
         check_intel_smrr(silicon[1], msr_dir);
-        check_intel_bios_wp(silicon[2], pci_dir);
+        bool bwp = check_intel_bios_wp(silicon[2], pci_dir);
+        *unconfirmed = smm || bwp;
     } else {
         check_msr_bit(silicon[0], msr_dir, MSR_AMD_HWCR, HWCR_SMMLOCK, "SMM is locked (HWCR.SmmLock).",
                       "SMM is not locked (HWCR.SmmLock)");
@@ -720,7 +726,7 @@ booto_error_t firmware_audit(const firmware_paths_t *paths, firmware_report_t *o
     }
     check_iommu(&ck[FW_CHECK_IOMMU], acpi);
     check_thunderbolt(&ck[FW_CHECK_THUNDERBOLT_DMA], tb);
-    check_silicon(ck, cpuinfo, msr, pci);
+    check_silicon(ck, &out->chipset_unconfirmed, cpuinfo, msr, pci);
 
     for (int i = 0; i < FW_CHECK_COUNT; i++) {
         if (ck[i].result == FW_RESULT_FAIL) out->fail_count++;

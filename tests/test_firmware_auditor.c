@@ -249,6 +249,7 @@ static void test_good_machine(void) {
     ASSERT_STR_EQ(r.checks[FW_CHECK_DBX].detail, "3 revoked hashes.", "dbx count");
     ASSERT_TRUE(strstr(r.checks[FW_CHECK_IOMMU].detail, "DMAR") != NULL, "DMAR named");
     ASSERT_TRUE(strstr(r.checks[FW_CHECK_IOMMU].detail, "is set") != NULL, "opt-in flag reported");
+    ASSERT_TRUE(!r.chipset_unconfirmed, "modern chipset needs no help request");
     TEST_PASS("test_good_machine");
 }
 
@@ -507,6 +508,7 @@ static void test_legacy_chipsets(void) {
     ASSERT_TRUE(strstr(r.checks[FW_CHECK_SMM_LOCK].detail, "0x9D") != NULL, "names the offset");
     ASSERT_INT_EQ(r.checks[FW_CHECK_BIOS_WP].result, FW_RESULT_FAIL, "ICH9 cannot block the race");
     ASSERT_TRUE(strstr(r.checks[FW_CHECK_BIOS_WP].detail, "CVE-2014-8273") != NULL, "names the race");
+    ASSERT_TRUE(r.chipset_unconfirmed, "pre-2015 chipset asks for a dump");
 
     /* Sandy Bridge + 6 Series: SMRAMC at 0x88; BIOS_CNTL on the LPC bridge with SMM_BWP. */
     make_root(false, false, false);
@@ -517,6 +519,7 @@ static void test_legacy_chipsets(void) {
     remove_tree(g_root);
     ASSERT_INT_EQ(r.checks[FW_CHECK_SMM_LOCK].result, FW_RESULT_PASS, "SNB lock read at 0x88");
     ASSERT_INT_EQ(r.checks[FW_CHECK_BIOS_WP].result, FW_RESULT_PASS, "6 Series BLE + SMM_BWP passes");
+    ASSERT_TRUE(r.chipset_unconfirmed, "6 Series LPC table asks for a dump");
 
     /* Bay Trail Atom: not in any table, so unknown rather than a guessed offset. */
     make_root(false, false, false);
@@ -528,6 +531,7 @@ static void test_legacy_chipsets(void) {
     ASSERT_INT_EQ(r.checks[FW_CHECK_SMM_LOCK].result, FW_RESULT_UNKNOWN, "unlisted CPU is unknown");
     ASSERT_TRUE(strstr(r.checks[FW_CHECK_SMM_LOCK].detail, "8086:0f00") != NULL, "names the host bridge");
     ASSERT_INT_EQ(r.checks[FW_CHECK_BIOS_WP].result, FW_RESULT_UNKNOWN, "unlisted LPC is unknown");
+    ASSERT_TRUE(r.chipset_unconfirmed, "unrecognised chipset asks for a dump");
     TEST_PASS("test_legacy_chipsets");
 }
 

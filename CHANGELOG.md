@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Core 2-era memory controller hubs (945 to 4 Series): SMRAM lock at host bridge offset 0x9D.
   - ICH6 to 9 Series: `BIOS_CNTL` on the LPC bridge `00:1f.0`. ICH6–ICH10 have no SMM write protection, so they fail with a note that the BIOS lock can be raced (CVE-2014-8273).
   - The 0x88 SMRAM layout is used only for Sandy Bridge to Raptor Lake CPUs. Unlisted chipsets and CPUs (Atom, server, Meteor Lake and newer) now report `unknown` instead of reading a guessed offset.
+  - When a result relies on one of these older-chipset tables, or the chipset is not recognised, the CLI prints the commands (`od` and `grep` only, which the live ISO has) whose output lets the chipset be confirmed, plus where to send it. The TUI and the log point to `booto -c -t <disk>`.
 
 ### Fixed
 - `--dry-run` followed by `-c` no longer turns into a real scan; dry-run now wins regardless of flag order.

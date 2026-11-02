@@ -279,6 +279,8 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
         firmware_audit(NULL, &out->firmware);
         out->firmware_ran = true;
         LOG_INFO("Firmware: %d issue(s), %d unknown", out->firmware.fail_count, out->firmware.unknown_count);
+        if (out->firmware.chipset_unconfirmed)
+            LOG_INFO("Firmware: this chipset is not confirmed yet; run 'booto -c -t %s' for how to help", target_dev);
     }
 
     out->total_threats = 0;

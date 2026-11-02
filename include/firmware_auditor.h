@@ -37,10 +37,19 @@ typedef struct {
 
 typedef struct {
     bool uefi_boot;                     /* efivars directory exists */
+    bool chipset_unconfirmed;           /* Intel layout from an unverified table, or chipset not recognised */
     fw_check_t checks[FW_CHECK_COUNT];
     int fail_count;
     int unknown_count;
 } firmware_report_t;
+
+/* What to send so a chipset can be confirmed; commands exist on the live ISO (no lspci, no sudo). */
+#define FW_CHIPSET_HELP \
+    "Booto has not been confirmed on this chipset. To help, run as root:\n" \
+    "  od -A x -t x1 /sys/bus/pci/devices/0000:00:00.0/config\n" \
+    "  od -A x -t x1 /sys/bus/pci/devices/0000:00:1f.0/config\n" \
+    "  grep -m2 -E '^(cpu family|model)[[:space:]]*:' /proc/cpuinfo\n" \
+    "and paste the output in an issue at https://github.com/Dellrall/Booto/issues\n"
 
 typedef struct {
     const char *efivars_dir;
