@@ -1,8 +1,9 @@
 /**
  * @file firmware_auditor.h
  * @brief Read-only audit of the host machine's firmware: Secure Boot key state
- *        (efivars), PKfail test keys, dbx presence and DMA protection (ACPI DMAR/IVRS,
- *        Thunderbolt). Describes the machine Booto booted on, not the scanned disk.
+ *        (efivars), PKfail test keys, dbx presence, DMA protection (ACPI DMAR/IVRS,
+ *        Thunderbolt) and silicon locks (SMM lock, SMRAM range, BIOS write protection).
+ *        Describes the machine Booto booted on, not the scanned disk.
  */
 #ifndef BOOTO_FIRMWARE_AUDITOR_H
 #define BOOTO_FIRMWARE_AUDITOR_H
@@ -23,6 +24,9 @@ typedef enum {
     FW_CHECK_DBX,              /* "Revocation list (dbx)" */
     FW_CHECK_IOMMU,            /* "IOMMU described (DMAR/IVRS)" */
     FW_CHECK_THUNDERBOLT_DMA,  /* "Thunderbolt DMA protection" */
+    FW_CHECK_SMM_LOCK,         /* "SMM locked" */
+    FW_CHECK_SMRAM_RANGE,      /* "SMRAM range protected" */
+    FW_CHECK_BIOS_WP,          /* "BIOS write protection" */
     FW_CHECK_COUNT
 } fw_check_id_t;
 
@@ -42,12 +46,15 @@ typedef struct {
     const char *efivars_dir;
     const char *acpi_tables_dir;
     const char *thunderbolt_dir;
+    const char *cpuinfo_path;
+    const char *msr_dir;       /* holds <cpu>/msr */
+    const char *pci_devices_dir;
 } firmware_paths_t;
 
 /**
  * @brief Audit host firmware state. Never writes to any firmware interface.
  * @param paths NULL (or NULL fields) = /sys/firmware/efi/efivars, /sys/firmware/acpi/tables,
- *              /sys/bus/thunderbolt/devices.
+ *              /sys/bus/thunderbolt/devices, /proc/cpuinfo, /dev/cpu, /sys/bus/pci/devices.
  * @return BOOTO_OK whenever out != NULL (unreadable checks carry UNKNOWN);
  *         BOOTO_ERR_INVALID_ARG if out is NULL.
  */

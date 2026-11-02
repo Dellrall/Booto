@@ -6,6 +6,7 @@
 #include "firmware_auditor.h"
 
 #include <dirent.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,8 +26,14 @@ static const uint8_t T_X509[16] = {
 };
 
 static char g_root[64];
-static char g_efi[96], g_acpi[96], g_tb[96];
+static char g_efi[96], g_acpi[96], g_tb[96], g_cpuinfo[96], g_msr[96], g_pci[96];
 static firmware_paths_t g_paths;
+
+#define CPUINFO_INTEL "vendor_id\t: GenuineIntel\nflags\t\t: fpu vme msr\n"
+#define CPUINFO_AMD   "vendor_id\t: AuthenticAMD\nflags\t\t: fpu vme msr\n"
+#define CPUINFO_VM    "vendor_id\t: GenuineIntel\nflags\t\t: fpu vme msr hypervisor\n"
+
+static void write_file(const char *path, const void *data, size_t len);
 
 static void make_root(bool efi, bool acpi, bool tb) {
     snprintf(g_root, sizeof(g_root), "/tmp/booto_fw_XXXXXX");
@@ -43,6 +50,14 @@ static void make_root(bool efi, bool acpi, bool tb) {
     g_paths.efivars_dir = g_efi;
     g_paths.acpi_tables_dir = g_acpi;
     g_paths.thunderbolt_dir = g_tb;
+    snprintf(g_cpuinfo, sizeof(g_cpuinfo), "%s/cpuinfo", g_root);
+    snprintf(g_msr, sizeof(g_msr), "%s/cpu", g_root);
+    snprintf(g_pci, sizeof(g_pci), "%s/pci", g_root);
+    g_paths.cpuinfo_path = g_cpuinfo;
+    g_paths.msr_dir = g_msr;
+    g_paths.pci_devices_dir = g_pci;
+    /* Default: a CPU the silicon checks do not cover, so they report n/a. */
+    write_file(g_cpuinfo, "vendor_id\t: OtherVendor\n", 24);
 }
 
 static void remove_tree(const char *path) {
@@ -157,6 +172,46 @@ static void write_tb_domain(const char *value) {
     write_file(path, value, strlen(value));
 }
 
+static void write_cpuinfo(const char *text) {
+    write_file(g_cpuinfo, text, strlen(text));
+}
+
+/* Stands in for /dev/cpu/N/msr: a sparse file where the MSR number is the byte offset. */
+static void write_msr(int cpu, uint32_t msr, uint64_t val) {
+    char path[192];
+    mkdir(g_msr, 0755);
+    snprintf(path, sizeof(path), "%s/%d", g_msr, cpu);
+    mkdir(path, 0755);
+    snprintf(path, sizeof(path), "%s/%d/msr", g_msr, cpu);
+    int fd = open(path, O_RDWR | O_CREAT, 0644);
+    if (fd < 0) return;
+    if (pwrite(fd, &val, sizeof(val), (off_t)msr) != (ssize_t)sizeof(val)) perror("pwrite");
+    close(fd);
+}
+
+/* Intel PCI function config space of `len` bytes with byte `off` = val. */
+static void write_pci(const char *bdf, uint16_t class_code, size_t len, size_t off, uint8_t val) {
+    uint8_t cfg[256];
+    memset(cfg, 0, sizeof(cfg));
+    cfg[0] = 0x86;
+    cfg[1] = 0x80;
+    cfg[0x0A] = (uint8_t)class_code;
+    cfg[0x0B] = (uint8_t)(class_code >> 8);
+    if (off < sizeof(cfg)) cfg[off] = val;
+    char path[192];
+    mkdir(g_pci, 0755);
+    snprintf(path, sizeof(path), "%s/%s", g_pci, bdf);
+    mkdir(path, 0755);
+    snprintf(path, sizeof(path), "%s/%s/config", g_pci, bdf);
+    write_file(path, cfg, len);
+}
+
+static void build_intel_silicon(bool d_lck, uint8_t bios_cntl) {
+    write_cpuinfo(CPUINFO_INTEL);
+    write_pci("0000:00:00.0", 0x0600, 256, 0x88, d_lck ? 0x1A : 0x0A);
+    write_pci("0000:00:1f.5", 0x0C80, 256, 0xDC, bios_cntl);
+}
+
 static void build_good_machine(void) {
     make_root(true, true, true);
     write_byte_var("SecureBoot", 1);
@@ -167,6 +222,11 @@ static void build_good_machine(void) {
     write_dbx(3);
     write_dmar(0x04);
     write_tb_domain("1\n");
+    build_intel_silicon(true, 0x2A);
+    for (int cpu = 0; cpu < 2; cpu++) {
+        write_msr(cpu, 0xFE, 1u << 11);
+        write_msr(cpu, 0x1F3, 0xFF800800u);
+    }
 }
 
 static void test_good_machine(void) {
@@ -357,6 +417,78 @@ static void test_garbage_siglists(void) {
     if (g_tests_failed == before) TEST_PASS("test_garbage_siglists");
 }
 
+static void test_intel_silicon_unlocked(void) {
+    TEST_START("test_intel_silicon_unlocked");
+    make_root(false, false, false);
+    build_intel_silicon(false, 0x02);
+    write_msr(0, 0xFE, 1u << 11);
+    write_msr(0, 0x1F3, 1u << 11);
+    write_msr(1, 0xFE, 1u << 11);
+    write_msr(1, 0x1F3, 0);
+    firmware_report_t r;
+    firmware_audit(&g_paths, &r);
+
+    ASSERT_INT_EQ(r.checks[FW_CHECK_SMM_LOCK].result, FW_RESULT_FAIL, "D_LCK clear fails");
+    ASSERT_INT_EQ(r.checks[FW_CHECK_SMRAM_RANGE].result, FW_RESULT_FAIL, "SMRR missing on one CPU fails");
+    ASSERT_TRUE(strstr(r.checks[FW_CHECK_SMRAM_RANGE].detail, "1 of 2 CPUs") != NULL, "names the CPU count");
+    ASSERT_INT_EQ(r.checks[FW_CHECK_BIOS_WP].result, FW_RESULT_FAIL, "BLE without SMM_BWP fails");
+    ASSERT_TRUE(strstr(r.checks[FW_CHECK_BIOS_WP].detail, "BIOS lock on, SMM write protection off") != NULL,
+                "names the missing bit");
+
+    /* A CPU without SMRR support fails before the mask is consulted. */
+    write_msr(0, 0xFE, 0);
+    firmware_audit(&g_paths, &r);
+    ASSERT_INT_EQ(r.checks[FW_CHECK_SMRAM_RANGE].result, FW_RESULT_FAIL, "no SMRR support fails");
+    ASSERT_TRUE(strstr(r.checks[FW_CHECK_SMRAM_RANGE].detail, "no SMRR") != NULL, "says SMRR is unsupported");
+    remove_tree(g_root);
+    TEST_PASS("test_intel_silicon_unlocked");
+}
+
+static void test_amd_silicon(void) {
+    TEST_START("test_amd_silicon");
+    make_root(false, false, false);
+    write_cpuinfo(CPUINFO_AMD);
+    write_msr(0, 0xC0010015u, 1);
+    write_msr(1, 0xC0010015u, 1);
+    write_msr(0, 0xC0010113u, 0x3);
+    write_msr(1, 0xC0010113u, 0x1);
+    firmware_report_t r;
+    firmware_audit(&g_paths, &r);
+    remove_tree(g_root);
+
+    ASSERT_INT_EQ(r.checks[FW_CHECK_SMM_LOCK].result, FW_RESULT_PASS, "SmmLock on all CPUs passes");
+    ASSERT_INT_EQ(r.checks[FW_CHECK_SMRAM_RANGE].result, FW_RESULT_FAIL, "TValid clear on one CPU fails");
+    ASSERT_TRUE(strstr(r.checks[FW_CHECK_SMRAM_RANGE].detail, "1 of 2 CPUs") != NULL, "names the CPU count");
+    ASSERT_INT_EQ(r.checks[FW_CHECK_BIOS_WP].result, FW_RESULT_NA, "BIOS_CNTL is Intel only");
+    TEST_PASS("test_amd_silicon");
+}
+
+static void test_silicon_unreadable(void) {
+    TEST_START("test_silicon_unreadable");
+    make_root(false, false, false);
+    write_cpuinfo(CPUINFO_INTEL);
+    write_pci("0000:00:00.0", 0x0600, 64, 0x3F, 0);   /* non-root sysfs view; no 00:1f.5; no msr dir */
+    firmware_report_t r;
+    firmware_audit(&g_paths, &r);
+    ASSERT_INT_EQ(r.checks[FW_CHECK_SMM_LOCK].result, FW_RESULT_UNKNOWN, "64-byte config is unknown");
+    ASSERT_STR_EQ(r.checks[FW_CHECK_SMM_LOCK].detail, "Needs root to read chipset registers.", "asks for root");
+    ASSERT_INT_EQ(r.checks[FW_CHECK_SMRAM_RANGE].result, FW_RESULT_UNKNOWN, "missing msr device is unknown");
+    ASSERT_TRUE(strstr(r.checks[FW_CHECK_SMRAM_RANGE].detail, "msr kernel module") != NULL, "names the module");
+    ASSERT_INT_EQ(r.checks[FW_CHECK_BIOS_WP].result, FW_RESULT_UNKNOWN, "hidden SPI controller is unknown");
+
+    /* Fully readable registers inside a VM are still emulated: unknown, not pass. */
+    build_intel_silicon(true, 0x2A);
+    write_msr(0, 0xFE, 1u << 11);
+    write_msr(0, 0x1F3, 1u << 11);
+    write_cpuinfo(CPUINFO_VM);
+    firmware_audit(&g_paths, &r);
+    remove_tree(g_root);
+    for (int i = FW_CHECK_SMM_LOCK; i <= FW_CHECK_BIOS_WP; i++)
+        ASSERT_INT_EQ(r.checks[i].result, FW_RESULT_UNKNOWN, firmware_check_name((fw_check_id_t)i));
+    ASSERT_TRUE(strstr(r.checks[FW_CHECK_SMM_LOCK].detail, "Virtual machine") != NULL, "says why");
+    TEST_PASS("test_silicon_unreadable");
+}
+
 static void test_real_host(void) {
     TEST_START("test_real_host");
     firmware_report_t r;
@@ -378,6 +510,9 @@ int main(void) {
     test_no_iommu_no_thunderbolt();
     test_ivrs_and_tb_off();
     test_garbage_siglists();
+    test_intel_silicon_unlocked();
+    test_amd_silicon();
+    test_silicon_unreadable();
     test_real_host();
     TEST_SUMMARY();
     return 0;

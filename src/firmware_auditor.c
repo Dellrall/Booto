@@ -1,9 +1,11 @@
 /**
  * @file firmware_auditor.c
- * @brief Read-only host firmware audit: Secure Boot keys (efivars), PKfail, dbx, DMA protection.
+ * @brief Read-only host firmware audit: Secure Boot keys (efivars), PKfail, dbx, DMA protection,
+ *        silicon locks (MSRs via /dev/cpu/N/msr, PCI config space via sysfs).
  *
  * Everything here is hostile-input parsing of data owned by firmware. Files are only ever
- * opened O_RDONLY; nothing is written to efivars, ACPI or sysfs.
+ * opened O_RDONLY; nothing is written to efivars, ACPI, sysfs, PCI config space or MSRs.
+ * Register layouts come from the Intel SDM, Intel PCH datasheets and AMD PPRs.
  */
 #include "firmware_auditor.h"
 
@@ -25,6 +27,28 @@
 #define DMAR_FLAGS_OFFSET       37u
 #define DMAR_PLATFORM_OPT_IN    0x04u
 
+#define MSR_MTRRCAP             0xFEu
+#define MTRRCAP_SMRR            (1ull << 11)
+#define MSR_SMRR_PHYSMASK       0x1F3u
+#define SMRR_VALID              (1ull << 11)
+#define MSR_AMD_HWCR            0xC0010015u
+#define HWCR_SMMLOCK            1ull
+#define MSR_AMD_SMM_MASK        0xC0010113u
+#define SMM_MASK_TVALID         (1ull << 1)
+#define PCI_UNPRIV_CONFIG_LEN   64u     /* sysfs serves only the standard header to non-root */
+#define PCI_CLASS_HOST_BRIDGE   0x0600u
+#define PCI_CLASS_SPI           0x0C80u
+#define SMRAMC_OFFSET           0x88u   /* host bridge 00:00.0 */
+#define SMRAMC_D_LCK            0x10u
+#define BIOS_CNTL_OFFSET        0xDCu   /* SPI controller 00:1f.5, Intel 100-series and newer */
+#define BC_BLE                  0x02u
+#define BC_SMM_BWP              0x20u
+
+/* MSR numbers are file offsets into /dev/cpu/N/msr; AMD ones exceed 2^31. */
+_Static_assert(sizeof(off_t) >= 8, "off_t must hold 64-bit MSR offsets");
+
+typedef enum { CPU_OTHER, CPU_INTEL, CPU_AMD } cpu_vendor_t;
+
 /* GUIDs as stored on disk: first three fields little-endian. */
 static const uint8_t GUID_CERT_SHA256[16] = {
     0x26, 0x16, 0xc4, 0xc1, 0x4c, 0x50, 0x92, 0x40,
@@ -45,6 +69,9 @@ static const char *const CHECK_NAMES[FW_CHECK_COUNT] = {
     "Revocation list (dbx)",
     "IOMMU described (DMAR/IVRS)",
     "Thunderbolt DMA protection",
+    "SMM locked",
+    "SMRAM range protected",
+    "BIOS write protection",
 };
 
 typedef struct {
@@ -322,11 +349,15 @@ static void check_iommu(fw_check_t *c, const char *acpi_dir) {
     }
 }
 
-static bool is_domain_entry(const char *name) {
-    if (strncmp(name, "domain", 6) != 0 || name[6] == '\0') return false;
-    for (const char *p = name + 6; *p; p++)
-        if (*p < '0' || *p > '9') return false;
+static bool is_number(const char *s) {
+    if (*s == '\0') return false;
+    for (; *s; s++)
+        if (*s < '0' || *s > '9') return false;
     return true;
+}
+
+static bool is_domain_entry(const char *name) {
+    return strncmp(name, "domain", 6) == 0 && is_number(name + 6);
 }
 
 static void check_thunderbolt(fw_check_t *c, const char *tb_dir) {
@@ -370,6 +401,178 @@ static void check_thunderbolt(fw_check_t *c, const char *tb_dir) {
         set_check(c, FW_RESULT_PASS, "Thunderbolt DMA protection is on.");
 }
 
+typedef struct {
+    int cpus;   /* CPUs read */
+    int set;    /* CPUs with every requested bit set */
+    int err;    /* 0 or errno */
+} msr_scan_t;
+
+/* Reads one MSR on every CPU under dir (<dir>/<N>/msr) and counts CPUs with all `bits` set. */
+static msr_scan_t msr_scan(const char *dir, uint32_t msr, uint64_t bits) {
+    msr_scan_t s = { 0, 0, 0 };
+    DIR *d = opendir(dir);
+    if (!d) {
+        s.err = errno;
+        return s;
+    }
+    struct dirent *de;
+    while (!s.err && (de = readdir(d)) != NULL) {
+        if (!is_number(de->d_name)) continue;
+        char path[4096];
+        int w = snprintf(path, sizeof(path), "%s/%s/msr", dir, de->d_name);
+        if (w < 0 || (size_t)w >= sizeof(path)) {
+            s.err = ENAMETOOLONG;
+            break;
+        }
+        int fd = open(path, O_RDONLY | O_CLOEXEC);
+        if (fd < 0) {
+            s.err = errno;
+            break;
+        }
+        uint64_t v = 0;
+        ssize_t n = pread(fd, &v, sizeof(v), (off_t)msr);
+        if (n != (ssize_t)sizeof(v)) s.err = n < 0 ? errno : EIO;   /* the msr driver returns EIO on #GP */
+        close(fd);
+        if (s.err) break;
+        s.cpus++;
+        if ((v & bits) == bits) s.set++;
+    }
+    closedir(d);
+    if (!s.err && s.cpus == 0) s.err = ENOENT;
+    return s;
+}
+
+static void set_msr_error(fw_check_t *c, int err, uint32_t msr) {
+    c->result = FW_RESULT_UNKNOWN;
+    if (err == ENOENT || err == ENXIO)
+        snprintf(c->detail, sizeof(c->detail), "CPU registers not available: load the msr kernel module.");
+    else if (err == EACCES || err == EPERM)
+        snprintf(c->detail, sizeof(c->detail), "Needs root to read CPU registers.");
+    else if (err == EIO)
+        snprintf(c->detail, sizeof(c->detail), "CPU refused to read register 0x%X.", (unsigned)msr);
+    else
+        snprintf(c->detail, sizeof(c->detail), "Could not read CPU registers: %s.", strerror(err));
+}
+
+/* PASS when `bit` is set in `msr` on every CPU; one unprotected CPU is enough for an attacker. */
+static void check_msr_bit(fw_check_t *c, const char *dir, uint32_t msr, uint64_t bit,
+                          const char *pass_msg, const char *fail_msg) {
+    msr_scan_t s = msr_scan(dir, msr, bit);
+    if (s.err) {
+        set_msr_error(c, s.err, msr);
+    } else if (s.set == s.cpus) {
+        set_check(c, FW_RESULT_PASS, pass_msg);
+    } else {
+        c->result = FW_RESULT_FAIL;
+        snprintf(c->detail, sizeof(c->detail), "%s on %d of %d CPUs.", fail_msg, s.cpus - s.set, s.cpus);
+    }
+}
+
+/* Reads byte `off` of an Intel PCI function's config space; on failure sets c and returns false. */
+static bool read_intel_pci_byte(fw_check_t *c, const char *pci_dir, const char *bdf, uint16_t class_code,
+                                size_t off, const char *absent_msg, uint8_t *val) {
+    char path[4096];
+    int w = snprintf(path, sizeof(path), "%s/%s/config", pci_dir, bdf);
+    uint8_t *buf = NULL;
+    size_t len = 0;
+    int err = (w < 0 || (size_t)w >= sizeof(path)) ? ENAMETOOLONG : read_file(path, &buf, &len);
+    c->result = FW_RESULT_UNKNOWN;
+    if (err == ENOENT) {
+        snprintf(c->detail, sizeof(c->detail), "%s", absent_msg);
+    } else if (err == EACCES || err == EPERM) {
+        snprintf(c->detail, sizeof(c->detail), "Needs root to read chipset registers.");
+    } else if (err) {
+        snprintf(c->detail, sizeof(c->detail), "Could not read PCI %s: %s.", bdf, strerror(err));
+    } else if (len < 0x0C || buf[0] != 0x86 || buf[1] != 0x80 ||
+               buf[0x0B] != (uint8_t)(class_code >> 8) || buf[0x0A] != (uint8_t)class_code) {
+        snprintf(c->detail, sizeof(c->detail), "PCI %s is not the expected Intel device.", bdf);
+    } else if (len <= off) {
+        snprintf(c->detail, sizeof(c->detail), "%s", len == PCI_UNPRIV_CONFIG_LEN
+                 ? "Needs root to read chipset registers." : "Chipset config space is too short.");
+    } else {
+        *val = buf[off];
+        free(buf);
+        return true;
+    }
+    free(buf);
+    return false;
+}
+
+/* shortcut: SMRAMC at 00:00.0+0x88 holds for Core host bridges (Sandy Bridge and newer); older
+ * chipsets and Atom SoCs place it elsewhere. Add host-bridge device IDs if those must be supported. */
+static void check_intel_smm_lock(fw_check_t *c, const char *pci_dir) {
+    uint8_t smramc;
+    if (!read_intel_pci_byte(c, pci_dir, "0000:00:00.0", PCI_CLASS_HOST_BRIDGE, SMRAMC_OFFSET,
+                             "No Intel host bridge at 00:00.0.", &smramc))
+        return;
+    if (smramc & SMRAMC_D_LCK)
+        set_check(c, FW_RESULT_PASS, "SMRAM is locked (SMRAMC.D_LCK).");
+    else
+        set_check(c, FW_RESULT_FAIL, "SMRAM is not locked (SMRAMC.D_LCK): the OS can change SMM code.");
+}
+
+static void check_intel_smrr(fw_check_t *c, const char *msr_dir) {
+    msr_scan_t cap = msr_scan(msr_dir, MSR_MTRRCAP, MTRRCAP_SMRR);
+    if (cap.err)
+        set_msr_error(c, cap.err, MSR_MTRRCAP);
+    else if (cap.set != cap.cpus)
+        set_check(c, FW_RESULT_FAIL, "CPU has no SMRR: SMRAM can be attacked through the cache.");
+    else
+        check_msr_bit(c, msr_dir, MSR_SMRR_PHYSMASK, SMRR_VALID, "SMRR protects SMRAM.", "SMRR is not set up");
+}
+
+/* shortcut: pre-100-series chipsets keep BIOS_CNTL on the LPC bridge (00:1f.0), which is not
+ * read here because 00:1f.0+0xDC means something else on newer PCHs; add device IDs if needed. */
+static void check_intel_bios_wp(fw_check_t *c, const char *pci_dir) {
+    uint8_t bc;
+    if (!read_intel_pci_byte(c, pci_dir, "0000:00:1f.5", PCI_CLASS_SPI, BIOS_CNTL_OFFSET,
+                             "SPI controller hidden by firmware, or chipset older than Intel 100 series.", &bc))
+        return;
+    if ((bc & BC_BLE) && (bc & BC_SMM_BWP)) {
+        set_check(c, FW_RESULT_PASS, "BIOS lock and SMM write protection are on.");
+    } else {
+        c->result = FW_RESULT_FAIL;
+        snprintf(c->detail, sizeof(c->detail), "The OS can rewrite the firmware: BIOS lock %s, SMM write protection %s.",
+                 (bc & BC_BLE) ? "on" : "off", (bc & BC_SMM_BWP) ? "on" : "off");
+    }
+}
+
+static void check_silicon(fw_check_t *ck, const char *cpuinfo, const char *msr_dir, const char *pci_dir) {
+    fw_check_t *const silicon[3] = { &ck[FW_CHECK_SMM_LOCK], &ck[FW_CHECK_SMRAM_RANGE], &ck[FW_CHECK_BIOS_WP] };
+    uint8_t *buf;
+    size_t len;
+    int err = read_file(cpuinfo, &buf, &len);
+    if (err) {
+        for (size_t i = 0; i < 3; i++) {
+            silicon[i]->result = FW_RESULT_UNKNOWN;
+            snprintf(silicon[i]->detail, sizeof(silicon[i]->detail), "Could not identify the CPU: %s.", strerror(err));
+        }
+        return;
+    }
+    cpu_vendor_t vendor = memmem(buf, len, "GenuineIntel", 12) ? CPU_INTEL
+                        : memmem(buf, len, "AuthenticAMD", 12) ? CPU_AMD : CPU_OTHER;
+    bool vm = memmem(buf, len, " hypervisor", 11) != NULL;
+    free(buf);
+
+    if (vendor == CPU_OTHER) {
+        for (size_t i = 0; i < 3; i++) set_check(silicon[i], FW_RESULT_NA, "Not an Intel or AMD CPU.");
+    } else if (vm) {
+        /* Hypervisors emulate or zero these registers, so any answer would be fiction. */
+        for (size_t i = 0; i < 3; i++)
+            set_check(silicon[i], FW_RESULT_UNKNOWN, "Virtual machine: silicon registers are emulated.");
+    } else if (vendor == CPU_INTEL) {
+        check_intel_smm_lock(silicon[0], pci_dir);
+        check_intel_smrr(silicon[1], msr_dir);
+        check_intel_bios_wp(silicon[2], pci_dir);
+    } else {
+        check_msr_bit(silicon[0], msr_dir, MSR_AMD_HWCR, HWCR_SMMLOCK, "SMM is locked (HWCR.SmmLock).",
+                      "SMM is not locked (HWCR.SmmLock)");
+        check_msr_bit(silicon[1], msr_dir, MSR_AMD_SMM_MASK, SMM_MASK_TVALID, "TSEG protects SMRAM.",
+                      "TSEG protection is off");
+        set_check(silicon[2], FW_RESULT_NA, "Checked on Intel only: AMD flash protection needs MMIO.");
+    }
+}
+
 booto_error_t firmware_audit(const firmware_paths_t *paths, firmware_report_t *out) {
     if (!out) return BOOTO_ERR_INVALID_ARG;
     memset(out, 0, sizeof(*out));
@@ -377,6 +580,9 @@ booto_error_t firmware_audit(const firmware_paths_t *paths, firmware_report_t *o
     const char *efi = (paths && paths->efivars_dir) ? paths->efivars_dir : "/sys/firmware/efi/efivars";
     const char *acpi = (paths && paths->acpi_tables_dir) ? paths->acpi_tables_dir : "/sys/firmware/acpi/tables";
     const char *tb = (paths && paths->thunderbolt_dir) ? paths->thunderbolt_dir : "/sys/bus/thunderbolt/devices";
+    const char *cpuinfo = (paths && paths->cpuinfo_path) ? paths->cpuinfo_path : "/proc/cpuinfo";
+    const char *msr = (paths && paths->msr_dir) ? paths->msr_dir : "/dev/cpu";
+    const char *pci = (paths && paths->pci_devices_dir) ? paths->pci_devices_dir : "/sys/bus/pci/devices";
 
     struct stat sb;
     out->uefi_boot = stat(efi, &sb) == 0 && S_ISDIR(sb.st_mode);
@@ -408,6 +614,7 @@ booto_error_t firmware_audit(const firmware_paths_t *paths, firmware_report_t *o
     }
     check_iommu(&ck[FW_CHECK_IOMMU], acpi);
     check_thunderbolt(&ck[FW_CHECK_THUNDERBOLT_DMA], tb);
+    check_silicon(ck, cpuinfo, msr, pci);
 
     for (int i = 0; i < FW_CHECK_COUNT; i++) {
         if (ck[i].result == FW_RESULT_FAIL) out->fail_count++;

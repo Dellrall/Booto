@@ -207,7 +207,7 @@ int main(int argc, char *argv[]) {
                 if (res == -1 || !WIFEXITED(res)) return 1;
                 return WEXITSTATUS(res);
             case 'c':
-                ctx.mode = BOOTO_MODE_CLI;
+                if (ctx.mode != BOOTO_MODE_DRY_RUN) ctx.mode = BOOTO_MODE_CLI;   /* dry-run must never be upgraded */
                 break;
             case 'd':
                 ctx.mode = BOOTO_MODE_DRY_RUN;
