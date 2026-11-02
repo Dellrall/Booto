@@ -70,6 +70,9 @@ sudo make iso
 
 # Install to USB Flash Drive (Dual Partition)
 sudo ./scripts/setup_usb.sh /dev/sdb
+# The live system loads only from removable media (USB stick, CD/DVD); a USB SSD that
+# reports itself as non-removable will not boot it. This keeps a /live tree planted on the
+# suspect disk from replacing the forensic system.
 ```
 
 ---
