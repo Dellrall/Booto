@@ -41,7 +41,7 @@ typedef struct {
 } pe_efi_info_t;
 
 typedef struct {
-    char threat_name[64];
+    char threat_name[96];          /* fits a dbx rule's threat field */
     char file_path[256];
     char sha256[65];
     char rule_id[64];

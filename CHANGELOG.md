@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - live-boot gets `live-media=removable`, so it loads only from removable media (USB sticks, CD/DVD) and never falls back to internal disks.
   - `systemd.swap=no` keeps swap on the suspect disk from being activated.
   - Limits: a USB SSD that reports itself as non-removable will no longer boot Booto. The marker name of a published release is public, so this stops opportunistic plants, not an attacker who targets a specific Booto release; only Secure Boot with your own keys authenticates the medium.
+- **UEFI dbx rules now hold Microsoft's real revocation list.** The previous 5 entries were not in any published dbx: two were filler (`…0123ef…`), one was a corrupted copy of a 2018 shim hash, and the MoonBounce entry described an SPI-flash implant as an ESP file.
+  - `scripts/gen_dbx_rules.py` generates `rules/uefi_dbx_revocations.json` and the matching built-in table `src/dbx_builtin.inc` from the vendored copy of Microsoft's `dbx_info_msft_latest.json` (676 unique Authenticode hashes, x64/ia32/ARM/aarch64, BSD-2-Clause-Patent; notice shipped in the ISO).
+  - Each entry names the revoked file, vendor, architecture and date; severity is HIGH, because a revoked binary on the ESP is vulnerable or malicious but not proof of infection.
+  - Verified end to end: Ubuntu's `shim-signed 1.38` (shim 15) is flagged `UEFI_DBX_REVOCATION_MATCH` and the scan exits THREATS; Debian's current shim is not flagged.
+  - Dbx rule capacity raised to 1024 entries; UEFI finding names widened to fit rule names.
 
 ## [1.3.0] - 2026-11-03
 

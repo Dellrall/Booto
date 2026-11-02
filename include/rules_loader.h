@@ -19,13 +19,15 @@
 #include <stdint.h>
 
 #define RULES_MAX_ENTRIES 128
+#define RULES_MAX_DBX_ENTRIES 1024 /* Microsoft's dbx lists ~680 image hashes */
 #define RULES_MAX_SYMBOLS 8
 #define RULES_MAX_PATTERNS 8
 #define RULES_MAX_PATTERN_BYTES 64
 
 typedef enum { RULES_SOURCE_BUILTIN, RULES_SOURCE_FILE } rules_source_t;
 
-/* uefi_dbx_revocations.json: {"revocations":[{sha256,threat,cve,severity,description}]} */
+/* uefi_dbx_revocations.json: {"revocations":[{sha256,threat,cve,severity,description}]}
+ * Generated from Microsoft's dbx list by scripts/gen_dbx_rules.py. */
 typedef struct {
     char sha256[65]; /* Authenticode PE image hash, lowercase hex */
     char threat[96];
@@ -38,7 +40,7 @@ typedef struct {
     rules_source_t source;
     char path[512];
     int count;
-    rules_dbx_entry_t entries[RULES_MAX_ENTRIES];
+    rules_dbx_entry_t entries[RULES_MAX_DBX_ENTRIES];
 } rules_dbx_set_t;
 
 /* lkm_rootkit_signatures.json: {"signatures":[{name,rule_id,severity,description,symbols[]}]}

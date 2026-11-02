@@ -40,29 +40,9 @@ typedef struct {
     const char *description;
 } builtin_dbx_t;
 
+/* Microsoft's dbx image hashes; regenerate with scripts/update_rules.sh, never by hand. */
 static const builtin_dbx_t G_BUILTIN_DBX[] = {
-    // 1. BlackLotus UEFI Bootkit Revocations
-    { "0c644d57c79e614066929a008c2a382d5e305e9e03d42c38848d7c4dbfc78f24",
-      "BlackLotus Revoked Windows Bootloader", "CVE-2022-21894", "CRITICAL",
-      "Vulnerable Windows EFI boot manager exploited by BlackLotus UEFI bootkit to bypass Secure Boot" },
-    { "80b4d96931bf0d02fd91a61e19d14f1da452e66db2408ca44b83993b36a49f63",
-      "BlackLotus Batched EFI Payload", "CVE-2023-24932", "CRITICAL",
-      "BlackLotus second-stage kernel hijacker payload deployed into ESP" },
-
-    // 2. BootHole GRUB2 Vulnerability Hashes
-    { "cb078e4726b008d51624c96ea208d249f3e498c8793b890916d7a46abf1d4f9b",
-      "BootHole Vulnerable GRUB2 Binary", "CVE-2020-10713", "HIGH",
-      "Revoked GRUB2 EFI executable vulnerable to heap-overflow buffer execution in grub.cfg parser" },
-
-    // 3. ESPecter UEFI Bootkit
-    { "5f8a3562a63200dc8ba79198642738a9d9e4a3b17728f3a9e0123ef89a12c451",
-      "ESPecter UEFI Bootloader Implant", "ESPecter", "CRITICAL",
-      "ESPecter bootkit persistence module hidden in the EFI partition" },
-
-    // 4. MoonBounce / CosmicStrand Firmware-to-ESP Stage
-    { "a849201bc93ef4a890123ef9a82bc128912ef349a128901bc3412ef89018f4b2",
-      "MoonBounce Stage-2 Bootloader", "MoonBounce", "CRITICAL",
-      "Stage-2 OS-loader interceptor deploying memory implants from ESP" }
+#include "dbx_builtin.inc"
 };
 
 typedef struct {
@@ -503,7 +483,7 @@ static bool take_key(unsigned *seen, unsigned bit) {
 
 static bool parse_dbx_entry(jp_t *p, void *vset) {
     rules_dbx_set_t *set = vset;
-    if (set->count >= RULES_MAX_ENTRIES) return false;
+    if (set->count >= RULES_MAX_DBX_ENTRIES) return false;
     rules_dbx_entry_t *e = &set->entries[set->count];
     char key[32];
     bool first = true;

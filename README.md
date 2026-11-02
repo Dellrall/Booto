@@ -150,4 +150,6 @@ The TUI draws with line and symbol glyphs that exist in the Linux console's defa
 
 This project is licensed under the MIT License.
 
+The UEFI dbx rules (`rules/uefi_dbx_revocations.json`, `src/dbx_builtin.inc`) are generated from Microsoft's [secureboot_objects](https://github.com/microsoft/secureboot_objects) dbx list, © Microsoft Corporation, BSD-2-Clause-Patent; see `rules/sources/secureboot_objects-License.txt`. To update them, replace `rules/sources/dbx_info_msft_latest.json` with the latest `PreSignedObjects/DBX/dbx_info_msft_latest.json` and run `scripts/update_rules.sh rules`.
+
 
