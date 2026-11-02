@@ -29,7 +29,8 @@ static char g_root[64];
 static char g_efi[96], g_acpi[96], g_tb[96], g_cpuinfo[96], g_msr[96], g_pci[96];
 static firmware_paths_t g_paths;
 
-#define CPUINFO_INTEL "vendor_id\t: GenuineIntel\nflags\t\t: fpu vme msr\n"
+#define CPUINFO_INTEL "vendor_id\t: GenuineIntel\ncpu family\t: 6\nmodel name\t: Intel(R) Core(TM) i7-8550U\n" \
+                      "model\t\t: 142\nflags\t\t: fpu vme msr\n"
 #define CPUINFO_AMD   "vendor_id\t: AuthenticAMD\nflags\t\t: fpu vme msr\n"
 #define CPUINFO_VM    "vendor_id\t: GenuineIntel\nflags\t\t: fpu vme msr hypervisor\n"
 
@@ -189,12 +190,14 @@ static void write_msr(int cpu, uint32_t msr, uint64_t val) {
     close(fd);
 }
 
-/* Intel PCI function config space of `len` bytes with byte `off` = val. */
-static void write_pci(const char *bdf, uint16_t class_code, size_t len, size_t off, uint8_t val) {
+/* Intel PCI function 8086:did config space of `len` bytes with byte `off` = val. */
+static void write_pci(const char *bdf, uint16_t did, uint16_t class_code, size_t len, size_t off, uint8_t val) {
     uint8_t cfg[256];
     memset(cfg, 0, sizeof(cfg));
     cfg[0] = 0x86;
     cfg[1] = 0x80;
+    cfg[2] = (uint8_t)did;
+    cfg[3] = (uint8_t)(did >> 8);
     cfg[0x0A] = (uint8_t)class_code;
     cfg[0x0B] = (uint8_t)(class_code >> 8);
     if (off < sizeof(cfg)) cfg[off] = val;
@@ -208,8 +211,8 @@ static void write_pci(const char *bdf, uint16_t class_code, size_t len, size_t o
 
 static void build_intel_silicon(bool d_lck, uint8_t bios_cntl) {
     write_cpuinfo(CPUINFO_INTEL);
-    write_pci("0000:00:00.0", 0x0600, 256, 0x88, d_lck ? 0x1A : 0x0A);
-    write_pci("0000:00:1f.5", 0x0C80, 256, 0xDC, bios_cntl);
+    write_pci("0000:00:00.0", 0x5914, 0x0600, 256, 0x88, d_lck ? 0x1A : 0x0A);
+    write_pci("0000:00:1f.5", 0x9D24, 0x0C80, 256, 0xDC, bios_cntl);
 }
 
 static void build_good_machine(void) {
@@ -467,7 +470,7 @@ static void test_silicon_unreadable(void) {
     TEST_START("test_silicon_unreadable");
     make_root(false, false, false);
     write_cpuinfo(CPUINFO_INTEL);
-    write_pci("0000:00:00.0", 0x0600, 64, 0x3F, 0);   /* non-root sysfs view; no 00:1f.5; no msr dir */
+    write_pci("0000:00:00.0", 0x5914, 0x0600, 64, 0x3F, 0);   /* non-root sysfs view; no 00:1f.5; no msr dir */
     firmware_report_t r;
     firmware_audit(&g_paths, &r);
     ASSERT_INT_EQ(r.checks[FW_CHECK_SMM_LOCK].result, FW_RESULT_UNKNOWN, "64-byte config is unknown");
@@ -487,6 +490,45 @@ static void test_silicon_unreadable(void) {
         ASSERT_INT_EQ(r.checks[i].result, FW_RESULT_UNKNOWN, firmware_check_name((fw_check_id_t)i));
     ASSERT_TRUE(strstr(r.checks[FW_CHECK_SMM_LOCK].detail, "Virtual machine") != NULL, "says why");
     TEST_PASS("test_silicon_unreadable");
+}
+
+static void test_legacy_chipsets(void) {
+    TEST_START("test_legacy_chipsets");
+    firmware_report_t r;
+
+    /* Core 2 + ICH9: SMRAM at 0x9D on the memory controller hub; BIOS_CNTL on the LPC bridge without SMM_BWP. */
+    make_root(false, false, false);
+    write_cpuinfo("vendor_id\t: GenuineIntel\ncpu family\t: 6\nmodel\t\t: 23\n");
+    write_pci("0000:00:00.0", 0x2E20, 0x0600, 256, 0x9D, 0x1A);   /* 0x88 stays 0: reading it would fail */
+    write_pci("0000:00:1f.0", 0x2918, 0x0601, 256, 0xDC, 0x22);
+    firmware_audit(&g_paths, &r);
+    remove_tree(g_root);
+    ASSERT_INT_EQ(r.checks[FW_CHECK_SMM_LOCK].result, FW_RESULT_PASS, "MCH lock read at 0x9D");
+    ASSERT_TRUE(strstr(r.checks[FW_CHECK_SMM_LOCK].detail, "0x9D") != NULL, "names the offset");
+    ASSERT_INT_EQ(r.checks[FW_CHECK_BIOS_WP].result, FW_RESULT_FAIL, "ICH9 cannot block the race");
+    ASSERT_TRUE(strstr(r.checks[FW_CHECK_BIOS_WP].detail, "CVE-2014-8273") != NULL, "names the race");
+
+    /* Sandy Bridge + 6 Series: SMRAMC at 0x88; BIOS_CNTL on the LPC bridge with SMM_BWP. */
+    make_root(false, false, false);
+    write_cpuinfo("vendor_id\t: GenuineIntel\ncpu family\t: 6\nmodel\t\t: 42\n");
+    write_pci("0000:00:00.0", 0x0104, 0x0600, 256, 0x88, 0x1A);
+    write_pci("0000:00:1f.0", 0x1C49, 0x0601, 256, 0xDC, 0x22);
+    firmware_audit(&g_paths, &r);
+    remove_tree(g_root);
+    ASSERT_INT_EQ(r.checks[FW_CHECK_SMM_LOCK].result, FW_RESULT_PASS, "SNB lock read at 0x88");
+    ASSERT_INT_EQ(r.checks[FW_CHECK_BIOS_WP].result, FW_RESULT_PASS, "6 Series BLE + SMM_BWP passes");
+
+    /* Bay Trail Atom: not in any table, so unknown rather than a guessed offset. */
+    make_root(false, false, false);
+    write_cpuinfo("vendor_id\t: GenuineIntel\ncpu family\t: 6\nmodel\t\t: 55\n");
+    write_pci("0000:00:00.0", 0x0F00, 0x0600, 256, 0x88, 0x1A);
+    write_pci("0000:00:1f.0", 0x0F1C, 0x0601, 256, 0xDC, 0x22);
+    firmware_audit(&g_paths, &r);
+    remove_tree(g_root);
+    ASSERT_INT_EQ(r.checks[FW_CHECK_SMM_LOCK].result, FW_RESULT_UNKNOWN, "unlisted CPU is unknown");
+    ASSERT_TRUE(strstr(r.checks[FW_CHECK_SMM_LOCK].detail, "8086:0f00") != NULL, "names the host bridge");
+    ASSERT_INT_EQ(r.checks[FW_CHECK_BIOS_WP].result, FW_RESULT_UNKNOWN, "unlisted LPC is unknown");
+    TEST_PASS("test_legacy_chipsets");
 }
 
 static void test_real_host(void) {
@@ -513,6 +555,7 @@ int main(void) {
     test_intel_silicon_unlocked();
     test_amd_silicon();
     test_silicon_unreadable();
+    test_legacy_chipsets();
     test_real_host();
     TEST_SUMMARY();
     return 0;

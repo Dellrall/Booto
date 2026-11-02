@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Inside a virtual machine all three report `unknown`, since the registers are emulated. Hidden devices, a missing `msr` module and non-root runs also report `unknown`, never pass.
   - The live ISO loads the `msr` kernel module at boot.
 
+- **Firmware audit: older Intel chipsets**. The SMM lock and BIOS write protection checks now pick the register location per chipset generation instead of assuming the newest layout:
+  - Core 2-era memory controller hubs (945 to 4 Series): SMRAM lock at host bridge offset 0x9D.
+  - ICH6 to 9 Series: `BIOS_CNTL` on the LPC bridge `00:1f.0`. ICH6–ICH10 have no SMM write protection, so they fail with a note that the BIOS lock can be raced (CVE-2014-8273).
+  - The 0x88 SMRAM layout is used only for Sandy Bridge to Raptor Lake CPUs. Unlisted chipsets and CPUs (Atom, server, Meteor Lake and newer) now report `unknown` instead of reading a guessed offset.
 ### Fixed
 - `--dry-run` followed by `-c` no longer turns into a real scan; dry-run now wins regardless of flag order.
 
