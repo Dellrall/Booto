@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Host firmware audit, pass 2: silicon locks**. Three new read-only checks, chosen per CPU vendor:
+  - **SMM locked**: Intel `SMRAMC.D_LCK` (host bridge `00:00.0`), AMD `HWCR.SmmLock`.
+  - **SMRAM range protected**: Intel SMRR (support and valid bit), AMD TSEG `SMM_MASK.TValid`. Checked on every CPU.
+  - **BIOS write protection** (Intel 100-series and newer): `BIOS_CNTL` BIOS lock and SMM write protection on the SPI controller `00:1f.5`.
+  - Inside a virtual machine all three report `unknown`, since the registers are emulated. Hidden devices, a missing `msr` module and non-root runs also report `unknown`, never pass.
+  - The live ISO loads the `msr` kernel module at boot.
+
+### Fixed
+- `--dry-run` followed by `-c` no longer turns into a real scan; dry-run now wins regardless of flag order.
+
 ## [1.2.0] - 2026-10-27
 
 ### Added

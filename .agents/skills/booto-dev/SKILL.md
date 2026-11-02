@@ -212,13 +212,13 @@ The following improvements are architectural priorities for Booto. Items marked 
 - **Problem**: Full Intel CHIPSEC requires Python 3 and heavy dependencies (~50 MB+), contradicting Booto's zero-dependency C11 architecture. CHIPSEC is GPLv2: build from Intel/AMD datasheets and the SDM, never copy its code or register definitions.
 - **Scope**: these checks describe the machine Booto booted on, not the scanned disk. They run only in device mode, appear in a separate "Firmware" section, and never change the disk verdict. Every check is PASS / FAIL / UNKNOWN (unreadable) / N/A; UNKNOWN never counts as a pass.
 - **Pass 1 — (Done)**: efivars `SecureBoot`, `SetupMode`, `PK`, test keys in `PK`/`KEK`/`db` ("DO NOT TRUST", PKfail CVE-2024-8105), `dbx` SHA-256 count; ACPI `DMAR`/`IVRS` presence (+ DMAR opt-in flag); Thunderbolt `iommu_dma_protection`. efivars files cannot be read at an offset: read the whole file and skip the 4-byte attribute header.
-- **Pass 2 — silicon locks (not started)**, read-only, vendor-switched:
-  - Intel: SMRR (`IA32_SMRR_PHYSBASE/MASK` 0x1F2/0x1F3, only if `IA32_MTRRCAP` bit 11 reports SMRR) and `MSR_SMM_FEATURE_CONTROL` 0x4E0 (LOCK, SMM_CODE_CHK_EN; may be unreadable outside SMM → UNKNOWN). `IA32_FEATURE_CONTROL` 0x3A bit 0 locks VMX settings, **not** SMM — do not use it as an SMM check.
-  - AMD: `HWCR` C001_0015 bit 0 (SmmLock).
-  - MSRs need the `msr` module (`/dev/cpu/N/msr`).
-  - BIOS write protection: on Intel 100-series and newer PCHs `BIOS_CNTL` (BLE bit 1, SMM_BWP/EISS bit 5) lives in the SPI controller at `00:1f.5` offset 0xDC, which firmware often hides; `00:1f.0` holds it only on older chipsets. Report UNKNOWN when the device is hidden — unhiding it is a write and breaks forensic read-only.
+- **Pass 2 — silicon locks (Done, unvalidated on real hardware)**, read-only, vendor-switched via `/proc/cpuinfo`. A `hypervisor` CPU flag makes all three UNKNOWN (registers are emulated).
+  - SMM locked: Intel `SMRAMC` (host bridge `00:00.0` offset 0x88) bit 4 `D_LCK`; AMD `HWCR` C001_0015 bit 0 `SmmLock`. `IA32_FEATURE_CONTROL` 0x3A bit 0 locks VMX settings, **not** SMM — do not use it as an SMM check. `MSR_SMM_FEATURE_CONTROL` 0x4E0 is SMM-only per the SDM, so the OS cannot read it; not used.
+  - SMRAM range protected: Intel SMRR (`IA32_MTRRCAP` 0xFE bit 11 = supported, `IA32_SMRR_PHYSMASK` 0x1F3 bit 11 = valid); AMD `SMM_MASK` C001_0113 bit 1 `TValid` (TSEG). MSRs are checked on every CPU (`/dev/cpu/N/msr`; the ISO loads the `msr` module via `/etc/modules-load.d/booto.conf`); one unprotected CPU fails the check.
+  - BIOS write protection (Intel only): `BIOS_CNTL` in the SPI controller at `00:1f.5` offset 0xDC; pass needs BLE (bit 1) and SMM_BWP/EISS (bit 5). UNKNOWN when the device is hidden — unhiding it is a write. AMD reports N/A (its flash protection needs MMIO).
+  - Known limits (`shortcut:` comments): `SMRAMC` at 0x88 holds for Core host bridges from Sandy Bridge on (Atom SoCs and older chipsets differ); pre-100-series `BIOS_CNTL` on `00:1f.0` is not read. Non-root sysfs serves only 64 bytes of PCI config space → UNKNOWN "Needs root".
 - **Out of scope**: SPI Protected Range registers (PR0–PR4) and anything needing MMIO or `/dev/mem` (blocked by kernel lockdown under Secure Boot) or any register write.
-- **Validation**: parser tests on fixture files; at least one real Intel and one AMD machine before trusting results (VMs emulate or omit these registers).
+- **Validation**: parser tests on fixture files (sparse files stand in for `/dev/cpu/N/msr`); at least one real Intel and one AMD machine before trusting results.
 
 ---
 
@@ -232,6 +232,6 @@ The following improvements are architectural priorities for Booto. Items marked 
   - Pure C mathematical Shannon entropy ($H = -\sum p_i \log_2 p_i$) and section heuristic classifier for zero-day polymorphic rootkits.
 - **Stage 13: Self-Hosted Runner Infrastructure & Zero-Quota Local Builds**:
   - Local Linux x86_64 runners (`runs-on: [self-hosted, linux]`) providing 0-minute cloud billing and sub-minute ISO creation.
-- **Stage 14: Firmware auditor pass 2 (silicon locks)**: see §6.6.
+- **Stage 14: Firmware auditor real-hardware validation**: run pass 2 on real Intel and AMD machines (see §6.6).
 
 
