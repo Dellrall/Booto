@@ -180,6 +180,16 @@ static void test_absent_uses_builtin(void) {
     ASSERT_INT_EQ(lkm->source, RULES_SOURCE_BUILTIN, "LKM built-in");
     ASSERT_INT_EQ(mbr->source, RULES_SOURCE_BUILTIN, "MBR built-in");
     ASSERT_TRUE(dbx->count > 0 && lkm->count > 0 && mbr->count > 0, "Built-in tables non-empty");
+    /* Real data, not placeholders: Ubuntu's shim 15 (revoked 2021, Authenticode hash verified against
+     * Microsoft's list) must be present; the old fabricated "0123ef"-filler hashes must not. */
+    bool real = false, fake = false;
+    for (int i = 0; i < dbx->count; i++) {
+        if (strcmp(dbx->entries[i].sha256, "007f4c95125713b112093e21663e2d23e3c1ae9ce4b5de0d58a297332336a2d8") == 0)
+            real = true;
+        if (strstr(dbx->entries[i].sha256, "0123ef89")) fake = true;
+    }
+    ASSERT_TRUE(real, "Revoked Ubuntu shim 15 is in the built-in dbx");
+    ASSERT_TRUE(!fake, "No fabricated dbx hashes");
     TEST_PASS("test_absent_uses_builtin");
 }
 

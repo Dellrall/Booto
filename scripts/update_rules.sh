@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # Booto Detection Rules Generator
-# Generates the sealed JSON rules files (UEFI DBX revocations, LKM rootkit and
-# MBR/VBR bootkit signatures) from the canonical built-in tables in
-# src/rules_loader.c, plus their "<file>.sha256" seals. Nothing is fetched from
-# the network. Keep this file in sync with src/rules_loader.c; from the repo root,
-# `scripts/update_rules.sh rules` reproduces the committed rules/ byte-for-byte.
+# Generates the sealed JSON rules files plus their "<file>.sha256" seals. Nothing is
+# fetched from the network.
+# - UEFI DBX revocations: from the vendored Microsoft dbx list (rules/sources/) via
+#   scripts/gen_dbx_rules.py, which also writes src/dbx_builtin.inc when run from the repo.
+# - LKM rootkit and MBR/VBR bootkit signatures: kept in sync by hand with the built-in
+#   tables in src/rules_loader.c.
+# From the repo root, `scripts/update_rules.sh rules` reproduces the committed rules/ byte-for-byte.
 # ==============================================================================
 set -euo pipefail
 
@@ -18,49 +20,16 @@ mkdir -p "${RULES_DIR}"
 echo "=== Booto Forensic Threat Rule Generator ==="
 echo "Target Rules Directory: ${RULES_DIR}"
 
-# 1. UEFI DBX revocations (sha256 = Authenticode PE image hash)
-echo "[+] Writing UEFI DBX revocation database..."
-cat << 'EOF_DBX' > "${RULES_DIR}/uefi_dbx_revocations.json"
-{
-  "revocations": [
-    {
-      "sha256": "0c644d57c79e614066929a008c2a382d5e305e9e03d42c38848d7c4dbfc78f24",
-      "threat": "BlackLotus Revoked Windows Bootloader",
-      "cve": "CVE-2022-21894",
-      "severity": "CRITICAL",
-      "description": "Vulnerable Windows EFI boot manager exploited by BlackLotus UEFI bootkit to bypass Secure Boot"
-    },
-    {
-      "sha256": "80b4d96931bf0d02fd91a61e19d14f1da452e66db2408ca44b83993b36a49f63",
-      "threat": "BlackLotus Batched EFI Payload",
-      "cve": "CVE-2023-24932",
-      "severity": "CRITICAL",
-      "description": "BlackLotus second-stage kernel hijacker payload deployed into ESP"
-    },
-    {
-      "sha256": "cb078e4726b008d51624c96ea208d249f3e498c8793b890916d7a46abf1d4f9b",
-      "threat": "BootHole Vulnerable GRUB2 Binary",
-      "cve": "CVE-2020-10713",
-      "severity": "HIGH",
-      "description": "Revoked GRUB2 EFI executable vulnerable to heap-overflow buffer execution in grub.cfg parser"
-    },
-    {
-      "sha256": "5f8a3562a63200dc8ba79198642738a9d9e4a3b17728f3a9e0123ef89a12c451",
-      "threat": "ESPecter UEFI Bootloader Implant",
-      "cve": "ESPecter",
-      "severity": "CRITICAL",
-      "description": "ESPecter bootkit persistence module hidden in the EFI partition"
-    },
-    {
-      "sha256": "a849201bc93ef4a890123ef9a82bc128912ef349a128901bc3412ef89018f4b2",
-      "threat": "MoonBounce Stage-2 Bootloader",
-      "cve": "MoonBounce",
-      "severity": "CRITICAL",
-      "description": "Stage-2 OS-loader interceptor deploying memory implants from ESP"
-    }
-  ]
-}
-EOF_DBX
+# 1. UEFI DBX revocations (sha256 = Authenticode PE image hash), generated from the vendored
+# copy of Microsoft's dbx list. Refresh rules/sources/dbx_info_msft_latest.json from
+# https://github.com/microsoft/secureboot_objects (PreSignedObjects/DBX/) to update it.
+echo "[+] Writing UEFI DBX revocation database from Microsoft's dbx list..."
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+DBX_INC=()
+[ -d "${REPO_ROOT}/src" ] && DBX_INC=("${REPO_ROOT}/src/dbx_builtin.inc")
+DBX_COUNT="$(python3 "${SCRIPT_DIR}/gen_dbx_rules.py" "${REPO_ROOT}/rules/sources/dbx_info_msft_latest.json" \
+    "${RULES_DIR}/uefi_dbx_revocations.json" "${DBX_INC[@]}")"
 
 # 2. Linux LKM / Ring-0 rootkit symbol signatures
 echo "[+] Writing LKM Ring-0 rootkit signatures..."
@@ -247,6 +216,6 @@ for f in uefi_dbx_revocations lkm_rootkit_signatures mbr_bootkit_signatures; do
 done
 
 echo "=== Rules Generated Successfully ==="
-echo "Total DBX Rules: 5"
+echo "Total DBX Rules: ${DBX_COUNT}"
 echo "Total LKM Rules: 15"
 echo "Total MBR Rules: 6"
