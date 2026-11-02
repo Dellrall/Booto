@@ -415,6 +415,8 @@ static void render_findings_pane(wm_node_t *n, bool focused, tui_app_state_t *ap
         if (show_fres) term_puts_clip(frx, y, fdx - frx - 1, firmware_result_str(k->result), ra);
         if (show_fdet) term_puts_clip(fdx, y, right - fdx, k->detail, A_MUTED);
     }
+    if (r->firmware.chipset_unconfirmed)
+        put_row(x0, &y, bottom, iw, "Chipset not confirmed yet: run booto -c -t <disk> to see how to help.", A_WARN);
 }
 
 static void render_persistence_pane(wm_node_t *n, bool focused, tui_app_state_t *app) {

@@ -145,6 +145,7 @@ static int run_cli(booto_context_t *ctx) {
             printf("%-30s | %-7s | %s\n", firmware_check_name((fw_check_id_t)i),
                    firmware_result_str(rep->firmware.checks[i].result), rep->firmware.checks[i].detail);
         }
+        if (rep->firmware.chipset_unconfirmed) printf("\n%s", FW_CHIPSET_HELP);
     }
 
     if (ctx->persistence_dir[0]) write_reports(rep, ctx->persistence_dir);
