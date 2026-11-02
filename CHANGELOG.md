@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **The live ISO can no longer be redirected to the suspect disk.** Before, GRUB booted the first disk containing `/live/vmlinuz`, and live-boot searched every disk for `filesystem.squashfs`. A `/live` tree planted on the scanned disk could therefore replace the forensic system.
+  - GRUB now searches for a marker file named after the build (`/live/booto-<commit>-<epoch>.id`).
+  - live-boot gets `live-media=removable`, so it loads only from removable media (USB sticks, CD/DVD) and never falls back to internal disks.
+  - `systemd.swap=no` keeps swap on the suspect disk from being activated.
+  - Limits: a USB SSD that reports itself as non-removable will no longer boot Booto. The marker name of a published release is public, so this stops opportunistic plants, not an attacker who targets a specific Booto release; only Secure Boot with your own keys authenticates the medium.
+
 ## [1.3.0] - 2026-11-03
 
 ### Added
