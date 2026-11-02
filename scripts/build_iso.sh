@@ -78,6 +78,11 @@ vmlinuz_path=$(ls "${ROOTFS_DIR}/boot"/vmlinuz* | head -n 1)
 initrd_path=$(ls "${ROOTFS_DIR}/boot"/initrd.img* | head -n 1)
 cp "${vmlinuz_path}" "${CD_DIR}/live/vmlinuz"
 cp "${initrd_path}" "${CD_DIR}/live/initrd.img"
+# GRUB must boot this medium, never a /live tree planted on the suspect disk: search for a
+# per-build marker instead of /live/vmlinuz. setup_usb.sh copies it along with the ISO files.
+BOOT_ID="$(git -C "${REPO_ROOT}" rev-parse --short=12 HEAD 2>/dev/null || echo nogit)-${SOURCE_DATE_EPOCH}"
+BOOT_MARKER="/live/booto-${BOOT_ID}.id"
+echo "${BOOT_ID}" > "${CD_DIR}${BOOT_MARKER}"
 
 echo "[+] Step 5/6: Compressing root filesystem into SquashFS..."
 # mksquashfs reads the exported SOURCE_DATE_EPOCH itself and rejects -mkfs-time/-all-time alongside it.
@@ -85,7 +90,9 @@ mksquashfs "${ROOTFS_DIR}" "${CD_DIR}/live/filesystem.squashfs" \
            -comp xz -Xbcj x86 -noappend -wildcards
 
 echo "[+] Step 6/6: Assembling GRUB2 hybrid boot configuration..."
-cat << 'EOF_GRUB' > "${CD_DIR}/boot/grub/grub.cfg"
+# live-media=removable: live-boot must not take filesystem.squashfs from an internal (suspect) disk.
+# systemd.swap=no: never activate swap found on the suspect disk.
+cat << EOF_GRUB > "${CD_DIR}/boot/grub/grub.cfg"
 set default=0
 set timeout=5
 
@@ -100,17 +107,17 @@ insmod linux
 insmod font
 insmod gfxterm
 
-search --no-floppy --set=root --file /live/vmlinuz
+search --no-floppy --set=root --file ${BOOT_MARKER}
 
 menuentry "Booto - Live Rootkit & Bootkit Forensic System (Amnesic RAM Mode)" {
-    search --no-floppy --set=root --file /live/vmlinuz
-    linux  /live/vmlinuz boot=live components quiet splash systemd.show_status=0 loglevel=3
+    search --no-floppy --set=root --file ${BOOT_MARKER}
+    linux  /live/vmlinuz boot=live components live-media=removable systemd.swap=no quiet splash systemd.show_status=0 loglevel=3
     initrd /live/initrd.img
 }
 
 menuentry "Booto - Live Rootkit & Bootkit Forensic System (Debug Verbose)" {
-    search --no-floppy --set=root --file /live/vmlinuz
-    linux  /live/vmlinuz boot=live components verbose
+    search --no-floppy --set=root --file ${BOOT_MARKER}
+    linux  /live/vmlinuz boot=live components live-media=removable systemd.swap=no verbose
     initrd /live/initrd.img
 }
 EOF_GRUB
