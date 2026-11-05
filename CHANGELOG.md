@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `tests/cbmc/pe_authenticode_harness.c` proves that `uefi_parse_pe_buffer()` has no out-of-bounds read or write, invalid pointer, leak, signed or pointer overflow, and hands SHA-256 only ranges inside the buffer, for every 512-byte input. All header fields are unconstrained 32-bit values, so offset-overflow tricks such as a huge `e_lfanew` or section pointer are covered.
   - SHA-256, logging, the dbx loader, `snprintf`, `strcasecmp` and `qsort` are stubs that keep the relevant checks; the comment in the harness lists what each one asserts.
   - Checked against a planted bug: verifying only a section's start offset makes the proof fail with "hashed range inside the buffer".
+- **Bounded model checking of the GPT/MBR ESP parser**: `tests/cbmc/gpt_esp_harness.c` proves `disk_parse_esp_partitions()` memory-safe for every 1536-byte disk prefix and any sector size, with every header field (entry-array LBA, entry count, entry size, header size) unconstrained; it also proves at most `max` partition numbers are returned, each in 1..1024. CRC32 is a stub that checks its range is readable. Checked against a planted bug: dropping the entry-array size check makes the proof fail.
+
+### Changed
+- The GPT header CRC is computed in place (bytes 0..15, four zero bytes, then the rest) instead of copying the header into a 4 KB stack buffer. A header is now accepted up to the sector size, as the UEFI spec allows, instead of being capped at 4096 bytes. The CRC-32 loop moved to `crc32_update()` in `src/crypto_utils.c`.
 
 ### Security
 - **The live ISO can no longer be redirected to the suspect disk.** Before, GRUB booted the first disk containing `/live/vmlinuz`, and live-boot searched every disk for `filesystem.squashfs`. A `/live` tree planted on the scanned disk could therefore replace the forensic system.

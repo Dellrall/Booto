@@ -122,6 +122,14 @@ void sha256_final(sha256_ctx_t *ctx, uint8_t hash[32]) {
     }
 }
 
+uint32_t crc32_update(uint32_t crc, const uint8_t *data, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        crc ^= data[i];
+        for (int k = 0; k < 8; k++) crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
+    }
+    return crc;
+}
+
 void sha256_buffer_hex(const uint8_t *data, size_t len, char hex_out[65]) {
     if (!hex_out) return;
     uint8_t hash[32];
