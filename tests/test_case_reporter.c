@@ -46,14 +46,20 @@ static void test_report_generation(void) {
     ASSERT_TRUE(strstr(json_path, "case_TEST-CASE-001.json") != NULL, "JSON filename must match Case ID");
     char buf[4096];
     slurp(json_path, buf, sizeof(buf));
-    ASSERT_TRUE(strstr(buf, "\"verdict\": \"THREATS\"") != NULL, "JSON must carry the verdict");
-    ASSERT_TRUE(strstr(buf, "\"Ext4 stats\": \"SKIPPED\"") != NULL, "JSON must carry per-module status");
+    ASSERT_TRUE(strstr(buf, "\"verdict\":\"THREATS\"") != NULL, "JSON must carry the verdict");
+    ASSERT_TRUE(strstr(buf, "\"Ext4 stats\":\"SKIPPED\"") != NULL, "JSON must carry per-module status");
 
     char md_path[512];
     ASSERT_INT_EQ(case_report_generate_markdown(&sum, g_dir, md_path, sizeof(md_path)), BOOTO_OK, "Markdown generation must return BOOTO_OK");
     slurp(md_path, buf, sizeof(buf));
-    ASSERT_TRUE(strstr(buf, "| **Ext4 Superblock Stats** | 0 | `SKIPPED` |") != NULL, "Markdown must show module status");
-    ASSERT_TRUE(strstr(buf, "| **Scan Verdict** | `THREATS` |") != NULL, "Markdown must show the verdict");
+    ASSERT_TRUE(strstr(buf, "| Ext4 stats | 0 | `SKIPPED` |") != NULL, "Markdown must show module status");
+    ASSERT_TRUE(strstr(buf, "| MBR/VBR | 1 | `OK` |") != NULL, "Markdown must show per-engine threat counts");
+    ASSERT_TRUE(strstr(buf, "**Verdict:** `THREATS`") != NULL, "Markdown must show the verdict");
+    char seal_path[600];
+    snprintf(seal_path, sizeof(seal_path), "%s.sha256", md_path);
+    slurp(seal_path, buf, sizeof(buf));
+    ASSERT_TRUE(strstr(buf, "  case_TEST-CASE-001.md\n") != NULL && !strchr(buf, '/'),
+                "Seal names the bare file so sha256sum -c works from the cases directory");
 
     char seal[65];
     ASSERT_INT_EQ(case_report_sign_and_seal(md_path, seal), BOOTO_OK, "Seal computation must return BOOTO_OK");
@@ -70,7 +76,7 @@ static void test_json_and_markdown_escaping(void) {
     char path[512], buf[4096];
     ASSERT_INT_EQ(case_report_generate_json(&sum, g_dir, path, sizeof(path)), BOOTO_OK, "JSON generation must succeed");
     slurp(path, buf, sizeof(buf));
-    ASSERT_TRUE(strstr(buf, "\"examiner\": \"a\\\"b\\\\c\\nd|e`f\"") != NULL, "JSON must escape quote, backslash and newline");
+    ASSERT_TRUE(strstr(buf, "\"examiner\":\"a\\\"b\\\\c\\nd|e`f\"") != NULL, "JSON must escape quote, backslash and newline");
 
     ASSERT_INT_EQ(case_report_generate_markdown(&sum, g_dir, path, sizeof(path)), BOOTO_OK, "Markdown generation must succeed");
     slurp(path, buf, sizeof(buf));
@@ -86,7 +92,7 @@ static void test_host_firmware_section(void) {
 
     ASSERT_INT_EQ(case_report_generate_json(&sum, g_dir, path, sizeof(path)), BOOTO_OK, "JSON generation must succeed");
     slurp(path, buf, sizeof(buf));
-    ASSERT_TRUE(strstr(buf, "\"host_firmware\": null") != NULL, "JSON must carry null firmware when not run");
+    ASSERT_TRUE(strstr(buf, "\"host_firmware\":null") != NULL, "JSON must carry null firmware when not run");
     ASSERT_INT_EQ(case_report_generate_markdown(&sum, g_dir, path, sizeof(path)), BOOTO_OK, "Markdown generation must succeed");
     slurp(path, buf, sizeof(buf));
     ASSERT_TRUE(strstr(buf, "Not run (no raw target device).") != NULL, "Markdown must say firmware not run");
@@ -99,10 +105,10 @@ static void test_host_firmware_section(void) {
 
     ASSERT_INT_EQ(case_report_generate_json(&sum, g_dir, path, sizeof(path)), BOOTO_OK, "JSON generation must succeed");
     slurp(path, buf, sizeof(buf));
-    ASSERT_TRUE(strstr(buf, "\"scope\": \"machine running Booto\"") != NULL, "JSON must carry firmware scope");
-    ASSERT_TRUE(strstr(buf, "\"uefi_boot\": true") != NULL, "JSON must carry uefi_boot");
-    ASSERT_TRUE(strstr(buf, "\"result\": \"fail\", \"detail\": \"say \\\"hi\\\" a|b\"") != NULL, "JSON must escape firmware detail");
-    ASSERT_TRUE(strstr(buf, "\"verdict\": \"THREATS\"") != NULL, "Verdict must be untouched");
+    ASSERT_TRUE(strstr(buf, "\"scope\":\"machine running Booto\"") != NULL, "JSON must carry firmware scope");
+    ASSERT_TRUE(strstr(buf, "\"uefi_boot\":true") != NULL, "JSON must carry uefi_boot");
+    ASSERT_TRUE(strstr(buf, "\"result\":\"fail\",\"detail\":\"say \\\"hi\\\" a|b\"") != NULL, "JSON must escape firmware detail");
+    ASSERT_TRUE(strstr(buf, "\"verdict\":\"THREATS\"") != NULL, "Verdict must be untouched");
 
     ASSERT_INT_EQ(case_report_generate_markdown(&sum, g_dir, path, sizeof(path)), BOOTO_OK, "Markdown generation must succeed");
     slurp(path, buf, sizeof(buf));
