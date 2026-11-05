@@ -40,7 +40,7 @@ static const char *err_name(booto_error_t e) {
 }
 
 const char *forensic_scan_module_name(scan_module_id_t id) {
-    static const char *names[SCAN_MOD_COUNT] = {"MBR/VBR", "UEFI ESP", "Kernel LKM", "Initramfs", "LD_PRELOAD", "Ext4 stats"};
+    static const char *names[SCAN_MOD_COUNT] = {"MBR/VBR", "UEFI ESP", "Kernel LKM", "Initramfs", "LD_PRELOAD", "Ext4 stats", "Packages"};
     return ((unsigned)id < SCAN_MOD_COUNT) ? names[id] : "unknown";
 }
 
@@ -68,6 +68,7 @@ int forensic_scan_module_threats(const forensic_scan_report_t *r, scan_module_id
         case SCAN_MOD_KERNEL:    return r->kernel.threats_detected;
         case SCAN_MOD_INITRAMFS: return r->initramfs.threats_detected;
         case SCAN_MOD_PRELOAD:   return r->preload.threats_detected;
+        case SCAN_MOD_PKG:       return r->pkg.threats_detected;
         default:                 return 0;
     }
 }
@@ -270,6 +271,24 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
         }
     }
 
+    if (begin(out, SCAN_MOD_PKG, enabled, cb, user)) {
+        if (!have_root) {
+            set_status(out, SCAN_MOD_PKG, SCAN_STATUS_ERROR, out->mount_err, rootfs_note);
+        } else {
+            booto_error_t e = pkg_integrity_scan_rootfs(root, &out->pkg);
+            if (e == BOOTO_ERR_NOT_FOUND) {
+                set_status(out, SCAN_MOD_PKG, SCAN_STATUS_SKIPPED, BOOTO_OK, "no dpkg database (not Debian-based)");
+            } else if (e == BOOTO_OK) {
+                char note[96];
+                snprintf(note, sizeof(note), "%d files verified, %d listed files missing", out->pkg.files_checked,
+                         out->pkg.files_missing);
+                set_status(out, SCAN_MOD_PKG, SCAN_STATUS_OK, e, note);
+            } else {
+                set_result(out, SCAN_MOD_PKG, e);
+            }
+        }
+    }
+
     if (out->mounted) {
         booto_error_t ue = disk_unmount(SCAN_MOUNT_POINT);
         if (ue != BOOTO_OK) LOG_WARN("Failed to unmount %s: %s", SCAN_MOUNT_POINT, err_name(ue));
@@ -315,6 +334,7 @@ void forensic_scan_fill_case_summary(const forensic_scan_report_t *r, const char
     sum->uefi_threats_count = r->uefi.bootkits_detected;
     sum->initramfs_threats_count = r->initramfs.threats_detected;
     sum->preload_threats_count = r->preload.threats_detected;
+    sum->pkg_threats_count = r->pkg.threats_detected;
     sum->total_threats = r->total_threats;
     snprintf(sum->highest_severity, sizeof(sum->highest_severity), "%s", r->total_threats > 0 ? "CRITICAL" : "NONE");
     snprintf(sum->verdict, sizeof(sum->verdict), "%s", forensic_scan_verdict_str(r->verdict));

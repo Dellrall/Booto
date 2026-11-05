@@ -13,12 +13,15 @@
 #include "initramfs_auditor.h"
 #include "preload_scanner.h"
 #include "ext4_diff.h"
+#include "pkg_integrity.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-typedef enum { SCAN_MOD_MBR, SCAN_MOD_UEFI, SCAN_MOD_KERNEL, SCAN_MOD_INITRAMFS, SCAN_MOD_PRELOAD, SCAN_MOD_EXT4, SCAN_MOD_COUNT } scan_module_id_t;
+typedef enum { SCAN_MOD_MBR, SCAN_MOD_UEFI, SCAN_MOD_KERNEL, SCAN_MOD_INITRAMFS, SCAN_MOD_PRELOAD, SCAN_MOD_EXT4, SCAN_MOD_PKG, SCAN_MOD_COUNT } scan_module_id_t;
+_Static_assert(sizeof(((forensic_case_summary_t *)0)->module_status) / sizeof(((forensic_case_summary_t *)0)->module_status[0]) == SCAN_MOD_COUNT,
+               "forensic_case_summary_t.module_status must hold one entry per scan module");
 typedef enum { SCAN_STATUS_NOT_RUN, SCAN_STATUS_OK, SCAN_STATUS_ERROR, SCAN_STATUS_SKIPPED } scan_status_t;
 typedef enum { SCAN_VERDICT_CLEAN, SCAN_VERDICT_THREATS, SCAN_VERDICT_INCOMPLETE } scan_verdict_t;
 
@@ -37,6 +40,7 @@ typedef struct {
     initramfs_scan_result_t initramfs;
     preload_scan_result_t preload;
     ext4_diff_result_t ext4;
+    pkg_scan_result_t pkg;
     int total_threats;
     scan_verdict_t verdict;
     bool firmware_ran;          /* device mode only; describes this machine, never the verdict */

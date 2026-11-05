@@ -3,7 +3,7 @@
  * @brief Unit tests for forensic case report generation (JSON & Markdown).
  */
 #include "test_framework.h"
-#include "case_reporter.h"
+#include "forensic_scan.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,7 +23,7 @@ static void fill_summary(forensic_case_summary_t *sum, const char *case_id) {
     sum->total_threats = 1;
     snprintf(sum->highest_severity, sizeof(sum->highest_severity), "CRITICAL");
     snprintf(sum->verdict, sizeof(sum->verdict), "THREATS");
-    for (int i = 0; i < 6; i++) snprintf(sum->module_status[i], sizeof(sum->module_status[i]), "OK");
+    for (int i = 0; i < SCAN_MOD_COUNT; i++) snprintf(sum->module_status[i], sizeof(sum->module_status[i]), "OK");
     snprintf(sum->module_status[5], sizeof(sum->module_status[5]), "SKIPPED");
 }
 

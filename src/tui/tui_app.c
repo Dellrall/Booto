@@ -231,6 +231,7 @@ static scan_module_id_t pane_module_to_scan_id(const char *name) {
     if (strstr(name, "Initramfs")) return SCAN_MOD_INITRAMFS;
     if (strncmp(name, "LD_PRELOAD", 10) == 0) return SCAN_MOD_PRELOAD;
     if (strstr(name, "Ext4")) return SCAN_MOD_EXT4;
+    if (strncmp(name, "Package", 7) == 0) return SCAN_MOD_PKG;
     return SCAN_MOD_COUNT;
 }
 
@@ -354,6 +355,12 @@ static void finish_forensic_scan(tui_app_state_t *app) {
             snprintf(app->threat.infected_file, sizeof(app->threat.infected_file), "%.120s", r->preload.findings[0].file_path);
             snprintf(app->threat.hook_type, sizeof(app->threat.hook_type), "Target: %.50s", r->preload.findings[0].target_library);
             snprintf(app->threat.sha256, sizeof(app->threat.sha256), "%.64s", r->preload.findings[0].sha256);
+        } else if (r->pkg.threats_detected > 0) {
+            snprintf(app->threat.threat_name, sizeof(app->threat.threat_name), "Modified package file");
+            snprintf(app->threat.infected_file, sizeof(app->threat.infected_file), "%.120s", r->pkg.findings[0].file_path);
+            snprintf(app->threat.hook_type, sizeof(app->threat.hook_type), "%.30s (%.25s)", r->pkg.findings[0].reason,
+                     r->pkg.findings[0].package);
+            snprintf(app->threat.sha256, sizeof(app->threat.sha256), "MD5 %.32s", r->pkg.findings[0].actual_md5);
         }
         snprintf(app->status_msg, sizeof(app->status_msg), "Scan finished: %d threat%s found. See Findings.",
                  r->total_threats, r->total_threats == 1 ? "" : "s");

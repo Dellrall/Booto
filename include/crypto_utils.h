@@ -50,6 +50,19 @@ bool sha256_file_hex(const char *file_path, char hex_out[65]);
  */
 uint32_t crc32_update(uint32_t crc, const uint8_t *data, size_t len);
 
+typedef struct {
+    uint32_t state[4];
+    uint64_t count;
+    uint8_t buffer[64];
+} md5_ctx_t;
+
+/**
+ * @brief MD5 (RFC 1321). Only for matching dpkg's md5sums lists; never trust it alone as a security hash.
+ */
+void md5_init(md5_ctx_t *ctx);
+void md5_update(md5_ctx_t *ctx, const uint8_t *data, size_t len);
+void md5_final(md5_ctx_t *ctx, uint8_t hash[16]);
+
 #ifdef __cplusplus
 }
 #endif
