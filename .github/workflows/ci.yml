@@ -123,6 +123,22 @@ jobs:
                    -I include \
                    src/
 
+  formal-verification:
+    name: Bounded Model Checking (CBMC)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install CBMC
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cbmc
+          cbmc --version
+
+      - name: Prove PE/Authenticode parser memory safety
+        run: make cbmc
+
   memory-safety:
     name: Memory Leak Validation (Valgrind)
     runs-on: ubuntu-latest
