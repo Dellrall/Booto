@@ -426,9 +426,16 @@ static void render_persistence_pane(wm_node_t *n, bool focused, tui_app_state_t 
     if (iw <= 0) return;
 
     if (y < bottom) {
-        int w = term_puts_clip(x0, y, iw, "Persistence", A_TEXT);
-        term_puts_clip(x0 + w + 1, y, right - (x0 + w + 1), app->luks_unlocked ? "unlocked" : "locked",
-                       app->luks_unlocked ? A_OK : A_BAD);
+        const persistence_mgr_t *p = &app->persist;
+        char state[96];
+        if (p->state == PERSISTENCE_STATE_UNLOCKED) {
+            snprintf(state, sizeof(state), "on USB, %llu MiB free", (unsigned long long)(p->free_bytes >> 20));
+        } else {
+            snprintf(state, sizeof(state), "%s", p->state == PERSISTENCE_STATE_LOCKED ? "locked, saving to RAM" : "RAM only (no USB storage)");
+        }
+        int w = term_puts_clip(x0, y, iw, "Storage", A_TEXT);
+        term_puts_clip(x0 + w + 1, y, right - (x0 + w + 1), state,
+                       p->state == PERSISTENCE_STATE_UNLOCKED ? A_OK : A_BAD);
     }
     y += 2;
 
@@ -437,6 +444,7 @@ static void render_persistence_pane(wm_node_t *n, bool focused, tui_app_state_t 
         const char *what;
     } HINTS[] = {
         {" F3 ", "Unlock a LUKS target"},
+        {" F4 ", "Unlock report storage on the boot USB"},
         {" F6 ", "Export case report (JSON + Markdown, SHA-256 checksum)"},
     };
     for (size_t i = 0; i < sizeof(HINTS) / sizeof(HINTS[0]) && y < bottom; i++, y++) {
@@ -493,6 +501,7 @@ bool pane_handle_input(wm_node_t *node, const input_event_t *event, tui_app_stat
                 app->luks_passphrase_len = 0;
                 app->luks_passphrase_input[0] = '\0';
                 app->luks_status_msg[0] = '\0';
+                app->luks_modal_for_persist = false;
                 app->show_luks_modal = true;
                 return true;
             }

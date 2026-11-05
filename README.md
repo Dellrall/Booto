@@ -14,8 +14,8 @@ Built with **C11**, Booto runs from a trusted Debian Live USB environment so the
 ## Key Features
 
 - **Amnesic Live OS (Debian 12 Base)**: Runs 100% in RAM (`SquashFS` + `OverlayFS`) with zero host disk tampering.
-- **Optional Encrypted Persistence (LUKS2)**: Tails-style secondary encrypted partition (`BOOTO_DATA`) to securely preserve forensic logs, case reports, and custom detection rules.
-- **Dual-Partition USB Setup Utility (`scripts/setup_usb.sh`)**: One-command installer creating the Amnesic Live bootloader partition and LUKS2 persistence volume.
+- **Report Storage on the USB (`BOOTO_DATA`)**: reports, logs and custom rules persist on the stick's second partition, LUKS2-encrypted (passphrase asked when the TUI starts) or plain ext4 (mounted without asking). Booto only uses the partition on the stick it booted from.
+- **Dual-Partition USB Setup Utility (`scripts/setup_usb.sh`)**: One-command installer creating the Amnesic Live bootloader partition and the report partition, with or without a passphrase.
 - **Zellij-Inspired Movable TUI**: Raw termios/ANSI terminal interface (no ncurses) with a Binary Space Partitioning (BSP) window manager supporting movable, resizable, and zoomable panes.
 - **Safe Forensic Storage Discovery & Mounter**: Automatic enumeration of NVMe/SATA/USB block devices via `/proc/partitions` and `sysfs`, enforcing strict read-only mounts (`MS_RDONLY | MS_NODEV | MS_NOEXEC | MS_NOSUID` with `noload`).
 - **Low-Level Forensic Detection Modules**:
@@ -76,8 +76,8 @@ sudo make iso
 
 # Install to USB Flash Drive (Dual Partition)
 sudo ./scripts/setup_usb.sh /dev/sdb
-# Cap the encrypted reports/persistence partition (default: rest of the drive):
-sudo ./scripts/setup_usb.sh --data-size=512M /dev/sdb
+# Cap the reports/persistence partition (default: rest of the drive); --no-encrypt skips the passphrase:
+sudo ./scripts/setup_usb.sh --data-size=512M --no-encrypt /dev/sdb
 # The live system loads only from removable media (USB stick, CD/DVD); a USB SSD that
 # reports itself as non-removable will not boot it. This keeps a /live tree planted on the
 # suspect disk from replacing the forensic system.
@@ -130,6 +130,7 @@ The shipped DBX, LKM and MBR signatures are illustrative samples, not an authori
 | `Enter` | **Mount / Unmount** | Mount target storage strictly READ-ONLY |
 | `Mouse Click` | **Click to Focus** | Focus pane by clicking inside its border |
 | `F3` | **Unlock LUKS** | Unlock an encrypted target partition read-only |
+| `F4` | **Unlock Storage** | Mount the report partition on the boot USB (asks for its passphrase if encrypted) |
 | `F5` | **Start Scan** | Trigger forensic scanning sequence |
 | `F6` | **Export Report** | Export JSON & Markdown case reports with SHA-256 checksums |
 | `F10` / `q` | **Exit** | Gracefully shutdown TUI and restore terminal |
