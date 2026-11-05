@@ -9,6 +9,7 @@
 #include "booto.h"
 #include "logger.h"
 #include "forensic_scan.h"
+#include "persistence_mgr.h"
 
 #include <pthread.h>
 #include <stdatomic.h>
@@ -104,12 +105,14 @@ typedef struct {
     char scan_target[128];
     bool scan_enabled[SCAN_MOD_COUNT];
 
-    // Persistence state
+    // Persistence state: luks_unlocked = scan target opened via F3; persist = report storage on the boot USB
     bool luks_unlocked;
+    persistence_mgr_t persist;
 
     // Status bar & modal state
     bool show_exit_modal;
     bool show_luks_modal;
+    bool luks_modal_for_persist;        // modal unlocks report storage instead of the scan target
     char luks_target_dev[128];
     char luks_passphrase_input[128];
     int luks_passphrase_len;

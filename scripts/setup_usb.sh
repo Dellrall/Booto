@@ -9,21 +9,27 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 usage() {
-    echo "Usage: sudo $0 [--yes] [--force-nonremovable] [--data-size=SIZE] <target_disk e.g. /dev/sdb> [iso_path]"
-    echo "  --data-size=SIZE  size of the encrypted reports/persistence partition, e.g. 256M or 2G (min 64M)."
+    echo "Usage: sudo $0 [--yes] [--force-nonremovable] [--data-size=SIZE] [--encrypt|--no-encrypt] <target_disk e.g. /dev/sdb> [iso_path]"
+    echo "  --data-size=SIZE  size of the reports/persistence partition, e.g. 256M or 2G (min 64M)."
     echo "                    Default: the rest of the drive. Space left after it stays unallocated."
+    echo "  --encrypt         protect the reports partition with a LUKS2 passphrase (default with --yes)."
+    echo "  --no-encrypt      plain ext4 reports partition: Booto mounts it at boot without asking."
+    echo "                    Without either flag you are asked."
     exit 1
 }
 
 ASSUME_YES=0
 FORCE_NONREMOVABLE=0
 DATA_SIZE=""
+ENCRYPT=""
 POSITIONAL=()
 for arg in "$@"; do
     case "${arg}" in
         --yes) ASSUME_YES=1 ;;
         --force-nonremovable) FORCE_NONREMOVABLE=1 ;;
         --data-size=*) DATA_SIZE="${arg#--data-size=}" ;;
+        --encrypt) ENCRYPT=1 ;;
+        --no-encrypt) ENCRYPT=0 ;;
         -h|--help) usage ;;
         -*) echo "[-] Error: unknown option '${arg}'" >&2; usage ;;
         *) POSITIONAL+=("${arg}") ;;
@@ -84,6 +90,14 @@ if [ "${ASSUME_YES}" -ne 1 ]; then
         exit 1
     fi
 fi
+if [ -z "${ENCRYPT}" ]; then
+    ENCRYPT=1
+    if [ "${ASSUME_YES}" -ne 1 ]; then
+        echo "A passphrase keeps reports private if the USB is lost; without one, anyone with the USB can read them."
+        read -rp "Protect the reports partition with a passphrase? [Y/n] " ANSWER
+        [[ "${ANSWER}" =~ ^[Nn] ]] && ENCRYPT=0
+    fi
+fi
 
 # Unmount each mounted child individually; abort if any refuses.
 while read -r name mnt; do
@@ -108,10 +122,12 @@ sgdisk --zap-all "${TARGET_DRIVE}"
 echo "[+] Step 2/5: Partitioning drive (Partition 1: Live OS, Partition 2: Persistence)..."
 # Partition 1: 3GB for Live OS (Type EF00 EFI/FAT32)
 sgdisk -n 1:2048:+3G -t 1:EF00 -c 1:"BOOTO_LIVE" "${TARGET_DRIVE}"
-# Partition 2: LUKS Encrypted Persistence (Type 8309 Linux LUKS), --data-size or the remaining space
+# Partition 2: reports/persistence (8309 Linux LUKS or 8300 Linux filesystem), --data-size or the remaining space
 DATA_END="0"
 [ -n "${DATA_SIZE}" ] && DATA_END="+${DATA_SIZE}"
-sgdisk -n "2:0:${DATA_END}" -t 2:8309 -c 2:"BOOTO_DATA" "${TARGET_DRIVE}"
+DATA_TYPE="8309"
+[ "${ENCRYPT}" -eq 1 ] || DATA_TYPE="8300"
+sgdisk -n "2:0:${DATA_END}" -t "2:${DATA_TYPE}" -c 2:"BOOTO_DATA" "${TARGET_DRIVE}"
 sgdisk -p "${TARGET_DRIVE}"
 
 partprobe "${TARGET_DRIVE}"
@@ -144,19 +160,24 @@ umount "${MNT_ISO}"
 umount "${MNT_LIVE}"
 rm -rf "${MNT_LIVE}" "${MNT_ISO}"
 
-echo "[+] Step 4/5: Initializing Partition 2 as LUKS2 Encrypted Persistence..."
-echo "Enter passphrase for your forensic encrypted persistence container:"
-cryptsetup luksFormat --type luks2 "${PART2}"
-
-echo "[+] Opening LUKS container to create ext4 filesystem..."
-cryptsetup open "${PART2}" booto_persistence_init
+DATA_DEV="${PART2}"
+if [ "${ENCRYPT}" -eq 1 ]; then
+    echo "[+] Step 4/5: Initializing Partition 2 as LUKS2 Encrypted Persistence..."
+    echo "Enter passphrase for your forensic encrypted persistence container:"
+    cryptsetup luksFormat --type luks2 "${PART2}"
+    echo "[+] Opening LUKS container to create ext4 filesystem..."
+    cryptsetup open "${PART2}" booto_persistence_init
+    DATA_DEV="/dev/mapper/booto_persistence_init"
+else
+    echo "[+] Step 4/5: Initializing Partition 2 as plain ext4 persistence (no passphrase)..."
+fi
 # Reports are a few KiB: 1 KiB blocks (-T small) and inline_data (seal files live in the inode) waste far less
 # than 4 KiB blocks; -m 0 drops the 5% root reserve, which on a small partition is pure loss.
-mkfs.ext4 -L "persistence" -T small -O inline_data -m 0 /dev/mapper/booto_persistence_init
+mkfs.ext4 -L "persistence" -T small -O inline_data -m 0 "${DATA_DEV}"
 
 MNT_PERSIST="/tmp/booto_persistence_mount_$$"
 mkdir -p "${MNT_PERSIST}"
-mount /dev/mapper/booto_persistence_init "${MNT_PERSIST}"
+mount "${DATA_DEV}" "${MNT_PERSIST}"
 
 # Create Tails-style persistence configuration file and directory tree
 echo "/ union" > "${MNT_PERSIST}/persistence.conf"
@@ -164,11 +185,15 @@ mkdir -p "${MNT_PERSIST}/cases" "${MNT_PERSIST}/rules" "${MNT_PERSIST}/logs"
 chmod 0700 "${MNT_PERSIST}"/*
 
 umount "${MNT_PERSIST}"
-cryptsetup close booto_persistence_init
+[ "${ENCRYPT}" -eq 1 ] && cryptsetup close booto_persistence_init
 rm -rf "${MNT_PERSIST}"
 
 echo "======================================================================"
 echo "[+] SUCCESS: Booto Dual-Partition Live USB is ready!"
 echo "Partition 1: Amnesic Live OS (${PART1})"
-echo "Partition 2: LUKS2 Encrypted Persistence (${PART2})"
+if [ "${ENCRYPT}" -eq 1 ]; then
+    echo "Partition 2: LUKS2 Encrypted Persistence (${PART2}); Booto asks for the passphrase at start"
+else
+    echo "Partition 2: Plain ext4 Persistence (${PART2}); Booto mounts it at start"
+fi
 echo "======================================================================"

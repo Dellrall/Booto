@@ -179,8 +179,9 @@ static void render_exit_modal(tui_app_state_t *app, int rows, int cols) {
 }
 
 static void render_luks_modal(tui_app_state_t *app, int rows, int cols) {
+    bool persist = app->luks_modal_for_persist;
     int mx, my, mw;
-    modal_frame(rows, cols, 60, 11, "Unlock LUKS volume (read-only)", &mx, &my, &mw);
+    modal_frame(rows, cols, 60, 11, persist ? "Unlock report storage" : "Unlock LUKS volume (read-only)", &mx, &my, &mw);
     int end = mx + mw - 2;
 
     int x = mx + 3;
@@ -202,8 +203,8 @@ static void render_luks_modal(tui_app_state_t *app, int rows, int cols) {
         put_clip(&x, my + 6, end, app->luks_status_msg, A_BAD);
     }
 
-    x = modal_key(mx + 3, my + 8, end, " Enter ", " Unlock read-only");
-    modal_key(x + 3, my + 8, end, " Esc ", " Cancel");
+    x = modal_key(mx + 3, my + 8, end, " Enter ", persist ? " Unlock" : " Unlock read-only");
+    modal_key(x + 3, my + 8, end, " Esc ", persist ? " Skip (reports stay in RAM)" : " Cancel");
 }
 
 static void render_unfocused_leaves(wm_node_t *node, wm_node_t *focused, tui_app_state_t *app) {
@@ -393,10 +394,11 @@ static void export_case_report(tui_app_state_t *app) {
     memset(&sum, 0, sizeof(sum));
     forensic_scan_fill_case_summary(app->last_scan, case_id, examiner, &sum);
 
-    const char *out_dir = "/persistence/cases";
+    bool on_usb = persistence_is_unlocked(&app->persist);
+    const char *out_dir = app->persist.cases_dir;
     booto_error_t err = disk_ensure_private_dir(out_dir);
     if (err != BOOTO_OK) {
-        snprintf(app->status_msg, sizeof(app->status_msg), "Export failed: cannot create %s (error %d)", out_dir, (int)err);
+        snprintf(app->status_msg, sizeof(app->status_msg), "Export failed: cannot create %.150s (error %d)", out_dir, (int)err);
         tui_app_append_log(app, LOG_LEVEL_ERROR, NULL, app->status_msg);
         return;
     }
@@ -413,16 +415,41 @@ static void export_case_report(tui_app_state_t *app) {
     char log_buf[512];
     snprintf(log_buf, sizeof(log_buf), "Exported case report %.31s to %.200s", case_id, saved_md);
     tui_app_append_log(app, LOG_LEVEL_INFO, NULL, log_buf);
-    snprintf(app->status_msg, sizeof(app->status_msg), "Report saved to %.200s.", saved_md);
+    snprintf(app->status_msg, sizeof(app->status_msg), "Report saved to %.200s%s", saved_md,
+             on_usb ? "." : " (RAM only: lost at power-off, press F4 to unlock storage).");
 }
 
-/* Quit/power paths: never exit (or free last_scan) under a running worker; block until it finishes. */
-static void wait_scan_before_exit(tui_app_state_t *app, int rows, int cols) {
-    if (!atomic_load(&app->scan_active)) return;
-    snprintf(app->status_msg, sizeof(app->status_msg), "Waiting for the running scan to finish before exiting...");
-    render_bottom_bar(app, rows, cols);
-    term_present();
-    finish_forensic_scan(app);
+static void open_persist_modal(tui_app_state_t *app) {
+    snprintf(app->luks_target_dev, sizeof(app->luks_target_dev), "%s", app->persist.dev_path);
+    app->luks_passphrase_len = 0;
+    app->luks_passphrase_input[0] = '\0';
+    app->luks_status_msg[0] = '\0';
+    app->luks_modal_for_persist = true;
+    app->show_luks_modal = true;
+}
+
+static void report_persist_result(tui_app_state_t *app, booto_error_t err) {
+    if (err == BOOTO_OK) {
+        snprintf(app->status_msg, sizeof(app->status_msg), "Report storage ready: %.150s, %llu MiB free.",
+                 app->persist.cases_dir, (unsigned long long)(app->persist.free_bytes >> 20));
+        tui_app_append_log(app, LOG_LEVEL_INFO, NULL, app->status_msg);
+    } else {
+        snprintf(app->status_msg, sizeof(app->status_msg), "Report storage %s not mounted (error %d); reports stay in RAM.",
+                 app->persist.dev_path, (int)err);
+        tui_app_append_log(app, LOG_LEVEL_ERROR, NULL, app->status_msg);
+    }
+}
+
+/* Quit/power paths: never exit (or free last_scan) under a running worker; block until it finishes,
+ * then unmount report storage so no report is lost when the USB is pulled. */
+static void prepare_exit(tui_app_state_t *app, int rows, int cols) {
+    if (atomic_load(&app->scan_active)) {
+        snprintf(app->status_msg, sizeof(app->status_msg), "Waiting for the running scan to finish before exiting...");
+        render_bottom_bar(app, rows, cols);
+        term_present();
+        finish_forensic_scan(app);
+    }
+    persistence_lock(&app->persist);
 }
 
 int tui_app_run(booto_context_t *ctx) {
@@ -440,6 +467,12 @@ int tui_app_run(booto_context_t *ctx) {
 
     g_current_app = &app;
     logger_set_callback(tui_logger_hook, NULL);
+
+    // Report storage: encrypted -> ask for the passphrase now (Esc skips); plain -> mount without asking.
+    if (persistence_init(&app.persist, NULL) == BOOTO_OK && app.persist.state == PERSISTENCE_STATE_LOCKED) {
+        if (app.persist.encrypted) open_persist_modal(&app);
+        else report_persist_result(&app, persistence_unlock(&app.persist, NULL));
+    }
 
     while (app.running) {
         if (atomic_load(&app.scan_done)) finish_forensic_scan(&app);
@@ -477,13 +510,13 @@ int tui_app_run(booto_context_t *ctx) {
         if (term_poll_event(&event, 50)) {
             if (app.show_exit_modal) {
                 if (event.type == KEY_CHAR && (event.ch == 'p' || event.ch == 'P' || event.ch == '1')) {
-                    wait_scan_before_exit(&app, rows, cols);
+                    prepare_exit(&app, rows, cols);
                     term_shutdown();
                     int res = system("systemctl poweroff -i 2>/dev/null || poweroff -f 2>/dev/null || halt -p 2>/dev/null");
                     (void)res;
                     exit(0);
                 } else if (event.type == KEY_CHAR && (event.ch == 'r' || event.ch == 'R' || event.ch == '2')) {
-                    wait_scan_before_exit(&app, rows, cols);
+                    prepare_exit(&app, rows, cols);
                     term_shutdown();
                     int res = system("systemctl reboot -i 2>/dev/null || reboot -f 2>/dev/null");
                     (void)res;
@@ -501,6 +534,10 @@ int tui_app_run(booto_context_t *ctx) {
                     app.show_luks_modal = false;
                     memset(app.luks_passphrase_input, 0, sizeof(app.luks_passphrase_input));
                     app.luks_passphrase_len = 0;
+                    if (app.luks_modal_for_persist) {
+                        snprintf(app.status_msg, sizeof(app.status_msg),
+                                 "Report storage locked: reports stay in RAM. Press F4 to unlock it.");
+                    }
                 } else if (event.type == KEY_BACKSPACE) {
                     if (app.luks_passphrase_len > 0) {
                         app.luks_passphrase_len--;
@@ -510,6 +547,16 @@ int tui_app_run(booto_context_t *ctx) {
                     if (app.luks_passphrase_len < (int)sizeof(app.luks_passphrase_input) - 1) {
                         app.luks_passphrase_input[app.luks_passphrase_len++] = (char)event.ch;
                         app.luks_passphrase_input[app.luks_passphrase_len] = '\0';
+                    }
+                } else if (event.type == KEY_ENTER && app.luks_modal_for_persist) {
+                    booto_error_t err = persistence_unlock(&app.persist, app.luks_passphrase_input);
+                    explicit_bzero(app.luks_passphrase_input, sizeof(app.luks_passphrase_input));
+                    app.luks_passphrase_len = 0;
+                    if (err == BOOTO_ERR_PERMISSION_DENIED && disk_is_running_as_root()) {
+                        snprintf(app.luks_status_msg, sizeof(app.luks_status_msg), "Could not unlock: wrong passphrase.");
+                    } else {
+                        app.show_luks_modal = false;
+                        report_persist_result(&app, err);
                     }
                 } else if (event.type == KEY_ENTER) {
                     booto_error_t err = disk_luks_open_ro(app.luks_target_dev, "booto_target_luks", app.luks_passphrase_input);
@@ -549,7 +596,18 @@ int tui_app_run(booto_context_t *ctx) {
                 app.luks_passphrase_len = 0;
                 app.luks_passphrase_input[0] = '\0';
                 app.luks_status_msg[0] = '\0';
+                app.luks_modal_for_persist = false;
                 app.show_luks_modal = true;
+            } else if (event.type == KEY_F4) {
+                if (persistence_is_unlocked(&app.persist)) {
+                    snprintf(app.status_msg, sizeof(app.status_msg), "Report storage is already mounted at %.150s.", app.persist.mount_path);
+                } else if (app.persist.state == PERSISTENCE_STATE_ABSENT) {
+                    snprintf(app.status_msg, sizeof(app.status_msg), "No %s partition on the boot USB; reports stay in RAM.", PERSISTENCE_PART_LABEL);
+                } else if (app.persist.encrypted) {
+                    open_persist_modal(&app);
+                } else {
+                    report_persist_result(&app, persistence_unlock(&app.persist, NULL));
+                }
             } else if (event.type == KEY_TAB) {
                 wm_focus_next(app.wm);
             } else if (event.type == KEY_ALT_LEFT || event.type == KEY_ALT_RIGHT ||
@@ -607,7 +665,7 @@ int tui_app_run(booto_context_t *ctx) {
         }
     }
 
-    wait_scan_before_exit(&app, rows, cols);
+    prepare_exit(&app, rows, cols);
     logger_set_callback(NULL, NULL);
     g_current_app = NULL;
 

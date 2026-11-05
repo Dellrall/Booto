@@ -20,7 +20,7 @@ How to put Booto on a USB stick, boot a suspect machine from it, scan the machin
 | Item | Requirement |
 | :--- | :--- |
 | Size | 4 GB minimum: 3 GiB for the live system plus at least 64 MiB for reports. |
-| Layout made by `setup_usb.sh` | Partition 1 `BOOTO_LIVE`: FAT32, 3 GiB, live system. Partition 2 `BOOTO_DATA`: LUKS2-encrypted ext4, reports and rules. |
+| Layout made by `setup_usb.sh` | Partition 1 `BOOTO_LIVE`: FAT32, 3 GiB, live system. Partition 2 `BOOTO_DATA`: ext4 for reports and rules, LUKS2-encrypted unless you choose no passphrase. |
 | Report space | About 2 KiB per scan (JSON + Markdown reports plus their checksum files), so 64 MiB holds about 30,000 scans. Choose the size with `--data-size`; the default is the rest of the stick. |
 
 ### Computer used to prepare the stick
@@ -80,9 +80,13 @@ Optional check in a VM: `./scripts/run_qemu_vm.sh`.
    ```bash
    sudo ./scripts/setup_usb.sh --data-size=512M /dev/sdX path/to/booto-v1.4.0-amd64.iso
    ```
-   - `--data-size=SIZE` sets the encrypted report partition, e.g. `256M` or `2G` (minimum `64M`). Leave it out to use the rest of the stick.
+   - `--data-size=SIZE` sets the report partition, e.g. `256M` or `2G` (minimum `64M`). Leave it out to use the rest of the stick.
+   - `--encrypt` or `--no-encrypt` decides whether the report partition gets a passphrase. Leave both out to be asked.
    - The script refuses disks that are not removable or that hold the running system.
-3. When asked, type the device path again (e.g. `/dev/sdX`) to confirm, then choose a passphrase for the report partition. Write it down: reports cannot be recovered without it.
+3. When asked, type the device path again (e.g. `/dev/sdX`) to confirm.
+4. Choose whether to protect the reports with a passphrase:
+   - **Yes (default):** anyone who finds the stick cannot read the reports. Write the passphrase down: reports cannot be recovered without it.
+   - **No:** Booto mounts the report partition at start without asking, and anyone with the stick can read the reports.
 
 ### Step 3: Boot the suspect machine
 
@@ -92,22 +96,12 @@ Optional check in a VM: `./scripts/run_qemu_vm.sh`.
 
 ### Step 4: Unlock the report partition
 
-Booto does not unlock its own report partition yet, so do this once per boot before saving reports:
+Booto finds the `BOOTO_DATA` partition on the USB stick it booted from (never one on the suspect disk):
 
-1. Press `q` to leave the TUI; you land in a root shell.
-2. Find the stick's second partition. It is the `BOOTO_DATA` partition on the disk whose `TRAN` is `usb`:
-   ```bash
-   lsblk -o NAME,SIZE,PARTLABEL,TRAN
-   ```
-   Do not trust the name `BOOTO_DATA` alone: a suspect disk could carry a partition with the same name.
-3. Unlock and mount it (replace `/dev/sdX2`):
-   ```bash
-   cryptsetup open /dev/sdX2 booto_persistence
-   mkdir -p /persistence && mount /dev/mapper/booto_persistence /persistence
-   ```
-4. Run `booto` to return to the TUI.
+- **With a passphrase:** a box asks for it when the TUI starts. Type it and press `Enter`. Press `Esc` to skip; reports then go to RAM and are lost at power-off. Press `F4` to unlock later.
+- **Without a passphrase:** it is mounted at start; nothing to do.
 
-If you skip this step, reports are written to RAM and lost at shutdown.
+The Reports pane shows `Storage on USB, N MiB free` when reports will be saved to the stick.
 
 ### Step 5: Scan
 
@@ -128,11 +122,8 @@ booto -c -t /dev/nvme0n1p2 -d                      # dry run: show the plan, tou
 
 ### Step 6: Finish and check the reports
 
-1. Unmount and lock the report partition, then power off:
-   ```bash
-   umount /persistence && cryptsetup close booto_persistence && poweroff
-   ```
-2. On your own computer, unlock the stick's second partition and check that no report was changed:
+1. Press `F10`, then `p` to power off. Booto unmounts and locks the report partition first, so reports are safe to carry away.
+2. On your own computer, open the stick's second partition (enter the passphrase if it has one) and check that no report was changed:
    ```bash
    cd /path/to/mounted/cases && sha256sum -c case_*.sha256
    ```

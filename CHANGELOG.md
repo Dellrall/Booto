@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`setup_usb.sh --data-size=SIZE`** (e.g. `512M`, `2G`, minimum `64M`) caps the encrypted reports/persistence partition; the default is still the rest of the drive. The partition's ext4 now uses 1 KiB blocks, `inline_data` and no root reserve: one case (two reports plus seals) takes 2 KiB on disk instead of 16 KiB.
 
+- **Report storage unlocks from the TUI.** At start Booto finds the `BOOTO_DATA` partition on the USB stick it booted from (via `/run/live/medium`; a same-named partition on the suspect disk is ignored). Encrypted: a passphrase box opens (`Esc` skips to RAM-only, `F4` retries later). Plain: mounted without asking. Quitting, rebooting or powering off from the TUI unmounts and locks it. Before, nothing called the unlock code and `F6` reports silently stayed in RAM unless `/persistence` was mounted by hand.
+- **`setup_usb.sh --encrypt` / `--no-encrypt`**: the report partition can be created without a passphrase (plain ext4, GPT type 8300). Without either flag the script asks; `--yes` keeps encryption.
+
 ### Changed
 - **Compact case reports**: the JSON report is a single line (same keys), and the Markdown report is a short header plus one engine table, with engine names taken from the scanner (new engines appear automatically). Together about 1.3 KB per case instead of 2.2 KB.
 - Report seal files name the bare report file, so `sha256sum -c case_*.sha256` works from wherever the cases directory is mounted.
