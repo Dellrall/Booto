@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Bounded model checking of the PE/Authenticode parser** (`make cbmc`, CI job "Bounded Model Checking (CBMC)").
+  - `tests/cbmc/pe_authenticode_harness.c` proves that `uefi_parse_pe_buffer()` has no out-of-bounds read or write, invalid pointer, leak, signed or pointer overflow, and hands SHA-256 only ranges inside the buffer, for every 512-byte input. All header fields are unconstrained 32-bit values, so offset-overflow tricks such as a huge `e_lfanew` or section pointer are covered.
+  - SHA-256, logging, the dbx loader, `snprintf`, `strcasecmp` and `qsort` are stubs that keep the relevant checks; the comment in the harness lists what each one asserts.
+  - Checked against a planted bug: verifying only a section's start offset makes the proof fail with "hashed range inside the buffer".
+
 ### Security
 - **The live ISO can no longer be redirected to the suspect disk.** Before, GRUB booted the first disk containing `/live/vmlinuz`, and live-boot searched every disk for `filesystem.squashfs`. A `/live` tree planted on the scanned disk could therefore replace the forensic system.
   - GRUB now searches for a marker file named after the build (`/live/booto-<commit>-<epoch>.id`).

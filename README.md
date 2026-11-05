@@ -56,6 +56,9 @@ make test
 # Run with AddressSanitizer & UndefinedBehaviorSanitizer
 make asan
 
+# Prove the PE/Authenticode parser memory-safe on every 512-byte input (needs cbmc)
+make cbmc
+
 # Generate gcov Code Coverage Report
 make coverage
 

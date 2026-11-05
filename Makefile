@@ -84,6 +84,24 @@ fuzz: $(BUILDDIR)/test_fuzz
 	@echo "--- Running Defensive Fuzzing Suite ---"
 	$(BUILDDIR)/test_fuzz
 
+# Bounded model checking (CBMC) of the PE/Authenticode parser; see tests/cbmc/pe_authenticode_harness.c.
+# Each buffer length is proved separately; the section loop bound is (len - 120) / 40 + 1 sections.
+CBMC ?= cbmc
+# 512 takes ~3 min; CBMC_LENGTHS="512 600" adds a ~18 min proof covering up to 12 sections.
+CBMC_LENGTHS ?= 512
+CBMC_FLAGS = --bounds-check --pointer-check --memory-leak-check --signed-overflow-check \
+             --pointer-overflow-check --unwinding-assertions --object-bits 12 --slice-formula
+
+cbmc: version | $(BUILDDIR)
+	@for n in $(CBMC_LENGTHS); do \
+		echo "--- CBMC: uefi_parse_pe_buffer on every $$n-byte input ---"; \
+		$(CBMC) tests/cbmc/pe_authenticode_harness.c src/uefi_analyzer.c $(INCLUDES) -D_DEFAULT_SOURCE \
+			-DPE_LEN=$$n --function harness $(CBMC_FLAGS) --unwind $$(( ($$n - 120) / 40 + 2 )) \
+			--unwindset uefi_parse_pe_buffer.2:33 > $(BUILDDIR)/cbmc_$$n.log 2>&1; rc=$$?; \
+		grep -E '^\*\*|VERIFICATION|FAILURE|Out of memory' $(BUILDDIR)/cbmc_$$n.log; \
+		[ $$rc -eq 0 ] || exit 1; \
+	done
+
 coverage: clean
 	@echo "--- Compiling with gcov Code Coverage Profiling ---"
 	$(MAKE) CFLAGS="-std=c11 -Wall -Wextra -Wpedantic -g -O0 --coverage -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE -pthread" \
