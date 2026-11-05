@@ -4,6 +4,7 @@
  */
 #include "test_framework.h"
 #include "firmware_auditor.h"
+#include "crypto_utils.h"
 
 #include <dirent.h>
 #include <fcntl.h>
@@ -26,7 +27,7 @@ static const uint8_t T_X509[16] = {
 };
 
 static char g_root[64];
-static char g_efi[96], g_acpi[96], g_tb[96], g_cpuinfo[96], g_msr[96], g_pci[96];
+static char g_efi[96], g_acpi[96], g_tb[96], g_cpuinfo[96], g_msr[96], g_pci[96], g_tpm[96], g_tpmlog[96];
 static firmware_paths_t g_paths;
 
 #define CPUINFO_INTEL "vendor_id\t: GenuineIntel\ncpu family\t: 6\nmodel name\t: Intel(R) Core(TM) i7-8550U\n" \
@@ -57,6 +58,10 @@ static void make_root(bool efi, bool acpi, bool tb) {
     g_paths.cpuinfo_path = g_cpuinfo;
     g_paths.msr_dir = g_msr;
     g_paths.pci_devices_dir = g_pci;
+    snprintf(g_tpm, sizeof(g_tpm), "%s/tpm", g_root);
+    snprintf(g_tpmlog, sizeof(g_tpmlog), "%s/tpmlog", g_root);
+    g_paths.tpm_dir = g_tpm;          /* absent unless a test builds it: "No TPM." */
+    g_paths.tpm_log_path = g_tpmlog;
     /* Default: a CPU the silicon checks do not cover, so they report n/a. */
     write_file(g_cpuinfo, "vendor_id\t: OtherVendor\n", 24);
 }
@@ -215,6 +220,93 @@ static void build_intel_silicon(bool d_lck, uint8_t bios_cntl) {
     write_pci("0000:00:1f.5", 0x9D24, 0x0C80, 256, 0xDC, bios_cntl);
 }
 
+/* ---- TPM event log fixture (crypto-agile: SHA-1 + SHA-256 banks) ---- */
+
+static size_t put32(uint8_t *p, size_t off, uint32_t v) {
+    put_le32(p + off, v);
+    return off + 4;
+}
+
+static size_t put16(uint8_t *p, size_t off, uint16_t v) {
+    p[off] = (uint8_t)v;
+    p[off + 1] = (uint8_t)(v >> 8);
+    return off + 2;
+}
+
+/* Appends one TCG_PCR_EVENT2 whose SHA-1 and SHA-256 digests are fill bytes. */
+static size_t put_event2(uint8_t *p, size_t off, uint32_t pcr, uint32_t type, uint8_t fill,
+                         const void *ev, uint32_t ev_len) {
+    off = put32(p, off, pcr);
+    off = put32(p, off, type);
+    off = put32(p, off, 2);
+    off = put16(p, off, 0x0004);
+    memset(p + off, fill, 20);
+    off += 20;
+    off = put16(p, off, 0x000B);
+    memset(p + off, fill, 32);
+    off += 32;
+    off = put32(p, off, ev_len);
+    if (ev_len) memcpy(p + off, ev, ev_len);
+    return off + ev_len;
+}
+
+static void extend(uint8_t pcr[32], uint8_t fill) {
+    uint8_t d[32];
+    memset(d, fill, sizeof(d));
+    sha256_ctx_t ctx;
+    sha256_init(&ctx);
+    sha256_update(&ctx, pcr, 32);
+    sha256_update(&ctx, d, 32);
+    sha256_final(&ctx, pcr);
+}
+
+static void write_pcr(int n, const uint8_t v[32]) {
+    char path[160], hex[66];
+    for (int i = 0; i < 32; i++) snprintf(hex + 2 * i, 3, "%02X", v[i]);
+    hex[64] = '\n';
+    snprintf(path, sizeof(path), "%s/pcr-sha256/%d", g_tpm, n);
+    write_file(path, hex, 65);
+}
+
+/* Log: Spec ID (SHA-1, SHA-256), StartupLocality 3, PCR0 and PCR7 extends, a PCR9 extend (not a
+ * firmware PCR, must be ignored), then zero padding. PCR files hold the matching values. */
+static void build_tpm(bool with_sha256) {
+    uint8_t log[1024];
+    memset(log, 0, sizeof(log));
+    size_t off = put32(log, 0, 0);
+    off = put32(log, off, 3);                       /* EV_NO_ACTION */
+    off += 20;                                      /* SHA-1 digest, zero */
+    off = put32(log, off, 36);
+    memcpy(log + off, "Spec ID Event03", 16);
+    off += 16 + 8;                                  /* platformClass + versions */
+    off = put32(log, off, 2);
+    off = put16(log, off, 0x0004);
+    off = put16(log, off, 20);
+    off = put16(log, off, with_sha256 ? 0x000B : 0x000C);
+    off = put16(log, off, with_sha256 ? 32 : 48);
+    if (!with_sha256) {
+        write_file(g_tpmlog, log, off);
+        return;
+    }
+    static const char locality[17] = "StartupLocality\0\x03";
+    off = put_event2(log, off, 0, 3, 0x00, locality, 17);
+    off = put_event2(log, off, 0, 0x80000008, 0xA1, "fw", 2);
+    off = put_event2(log, off, 7, 0x800000E0, 0xB2, NULL, 0);
+    off = put_event2(log, off, 9, 13, 0xC3, NULL, 0);
+    write_file(g_tpmlog, log, off + 64);            /* trailing zero padding */
+
+    uint8_t pcr[8][32];
+    memset(pcr, 0, sizeof(pcr));
+    pcr[0][31] = 3;
+    extend(pcr[0], 0xA1);
+    extend(pcr[7], 0xB2);
+    char path[160];
+    mkdir(g_tpm, 0755);
+    snprintf(path, sizeof(path), "%s/pcr-sha256", g_tpm);
+    mkdir(path, 0755);
+    for (int i = 0; i < 8; i++) write_pcr(i, pcr[i]);
+}
+
 static void build_good_machine(void) {
     make_root(true, true, true);
     write_byte_var("SecureBoot", 1);
@@ -226,6 +318,7 @@ static void build_good_machine(void) {
     write_dmar(0x04);
     write_tb_domain("1\n");
     build_intel_silicon(true, 0x2A);
+    build_tpm(true);
     for (int cpu = 0; cpu < 2; cpu++) {
         write_msr(cpu, 0xFE, 1u << 11);
         write_msr(cpu, 0x1F3, 0xFF800800u);
@@ -535,6 +628,46 @@ static void test_legacy_chipsets(void) {
     TEST_PASS("test_legacy_chipsets");
 }
 
+static void test_tpm_log(void) {
+    TEST_START("test_tpm_log");
+    firmware_report_t r;
+
+    make_root(false, false, false);
+    firmware_audit(&g_paths, &r);
+    ASSERT_INT_EQ(r.checks[FW_CHECK_TPM_LOG].result, FW_RESULT_NA, "no TPM is n/a");
+
+    build_tpm(true);
+    unlink(g_tpmlog);
+    firmware_audit(&g_paths, &r);
+    ASSERT_INT_EQ(r.checks[FW_CHECK_TPM_LOG].result, FW_RESULT_UNKNOWN, "missing log is unknown, never a pass");
+
+    /* One PCR that does not match its replayed value fails and is named. */
+    build_tpm(true);
+    uint8_t wrong[32];
+    memset(wrong, 0x5A, sizeof(wrong));
+    write_pcr(7, wrong);
+    firmware_audit(&g_paths, &r);
+    ASSERT_INT_EQ(r.checks[FW_CHECK_TPM_LOG].result, FW_RESULT_FAIL, "PCR mismatch fails");
+    ASSERT_TRUE(strstr(r.checks[FW_CHECK_TPM_LOG].detail, "PCR 7 ") != NULL, "names the PCR");
+
+    /* A log cut inside an event is malformed. */
+    build_tpm(true);
+    FILE *fp = fopen(g_tpmlog, "r+b");
+    if (fp) {
+        if (ftruncate(fileno(fp), 150) != 0) perror("ftruncate");
+        fclose(fp);
+    }
+    firmware_audit(&g_paths, &r);
+    ASSERT_INT_EQ(r.checks[FW_CHECK_TPM_LOG].result, FW_RESULT_FAIL, "truncated log fails");
+    ASSERT_TRUE(strstr(r.checks[FW_CHECK_TPM_LOG].detail, "malformed") != NULL, "says malformed");
+
+    build_tpm(false);
+    firmware_audit(&g_paths, &r);
+    remove_tree(g_root);
+    ASSERT_INT_EQ(r.checks[FW_CHECK_TPM_LOG].result, FW_RESULT_UNKNOWN, "no SHA-256 bank is unknown");
+    TEST_PASS("test_tpm_log");
+}
+
 static void test_real_host(void) {
     TEST_START("test_real_host");
     firmware_report_t r;
@@ -560,6 +693,7 @@ int main(void) {
     test_amd_silicon();
     test_silicon_unreadable();
     test_legacy_chipsets();
+    test_tpm_log();
     test_real_host();
     TEST_SUMMARY();
     return 0;

@@ -27,6 +27,7 @@ typedef enum {
     FW_CHECK_SMM_LOCK,         /* "SMM locked" */
     FW_CHECK_SMRAM_RANGE,      /* "SMRAM range protected" */
     FW_CHECK_BIOS_WP,          /* "BIOS write protection" */
+    FW_CHECK_TPM_LOG,          /* "Boot measurements (TPM)" */
     FW_CHECK_COUNT
 } fw_check_id_t;
 
@@ -58,12 +59,15 @@ typedef struct {
     const char *cpuinfo_path;
     const char *msr_dir;       /* holds <cpu>/msr */
     const char *pci_devices_dir;
+    const char *tpm_dir;       /* holds pcr-sha256/<n> */
+    const char *tpm_log_path;  /* TCG PC Client binary event log */
 } firmware_paths_t;
 
 /**
  * @brief Audit host firmware state. Never writes to any firmware interface.
  * @param paths NULL (or NULL fields) = /sys/firmware/efi/efivars, /sys/firmware/acpi/tables,
- *              /sys/bus/thunderbolt/devices, /proc/cpuinfo, /dev/cpu, /sys/bus/pci/devices.
+ *              /sys/bus/thunderbolt/devices, /proc/cpuinfo, /dev/cpu, /sys/bus/pci/devices,
+ *              /sys/class/tpm/tpm0, /sys/kernel/security/tpm0/binary_bios_measurements.
  * @return BOOTO_OK whenever out != NULL (unreadable checks carry UNKNOWN);
  *         BOOTO_ERR_INVALID_ARG if out is NULL.
  */

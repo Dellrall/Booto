@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Firmware audit: TPM boot measurements** (new check "Boot measurements (TPM)").
+  - Replays the SHA-256 bank of the firmware's TPM event log (`/sys/kernel/security/tpm0/binary_bios_measurements`, TCG crypto-agile format, including the StartupLocality rule) and compares the result with the TPM's real PCR 0-7 (`/sys/class/tpm/tpm0/pcr-sha256/`).
+  - Pass shows the start of the PCR0 firmware digest, so scans of the same machine can be compared. A PCR that does not match fails and is named; a malformed log fails; no TPM is n/a; no access, no log or no SHA-256 bank is unknown.
+  - Verified against `tpm2_eventlog` on four logs from tpm2-tools' test fixtures, three of them from real firmware (Arch Linux, GCE Ubuntu 21.04, Fedora 37 with systemd-boot): identical PCR 0-7. Altered PCRs and truncated logs fail; 300 randomly corrupted logs never crashed.
+  - Limits: the replay checks the measured digests, not the event descriptions (changing an event's text without its digest goes unnoticed), and firmware that lies from its very first measurement (a compromised CRTM) can produce a consistent log.
 - **Bounded model checking of the PE/Authenticode parser** (`make cbmc`, CI job "Bounded Model Checking (CBMC)").
   - `tests/cbmc/pe_authenticode_harness.c` proves that `uefi_parse_pe_buffer()` has no out-of-bounds read or write, invalid pointer, leak, signed or pointer overflow, and hands SHA-256 only ranges inside the buffer, for every 512-byte input. All header fields are unconstrained 32-bit values, so offset-overflow tricks such as a huge `e_lfanew` or section pointer are covered.
   - SHA-256, logging, the dbx loader, `snprintf`, `strcasecmp` and `qsort` are stubs that keep the relevant checks; the comment in the harness lists what each one asserts.
