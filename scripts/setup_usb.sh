@@ -9,17 +9,21 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 usage() {
-    echo "Usage: sudo $0 [--yes] [--force-nonremovable] <target_disk e.g. /dev/sdb> [iso_path]"
+    echo "Usage: sudo $0 [--yes] [--force-nonremovable] [--data-size=SIZE] <target_disk e.g. /dev/sdb> [iso_path]"
+    echo "  --data-size=SIZE  size of the encrypted reports/persistence partition, e.g. 256M or 2G (min 64M)."
+    echo "                    Default: the rest of the drive. Space left after it stays unallocated."
     exit 1
 }
 
 ASSUME_YES=0
 FORCE_NONREMOVABLE=0
+DATA_SIZE=""
 POSITIONAL=()
 for arg in "$@"; do
     case "${arg}" in
         --yes) ASSUME_YES=1 ;;
         --force-nonremovable) FORCE_NONREMOVABLE=1 ;;
+        --data-size=*) DATA_SIZE="${arg#--data-size=}" ;;
         -h|--help) usage ;;
         -*) echo "[-] Error: unknown option '${arg}'" >&2; usage ;;
         *) POSITIONAL+=("${arg}") ;;
@@ -31,6 +35,14 @@ ISO_PATH="${POSITIONAL[1]:-${REPO_ROOT}/dist/booto-live-amd64.iso}"
 [ -n "${TARGET_DRIVE}" ] || usage
 
 die() { echo "[-] Error: $*" >&2; exit 1; }
+
+if [ -n "${DATA_SIZE}" ]; then
+    [[ "${DATA_SIZE}" =~ ^([0-9]+)([MG])$ ]] || die "--data-size must look like 256M or 2G, got '${DATA_SIZE}'."
+    size_mib=$((10#${BASH_REMATCH[1]}))
+    [ "${BASH_REMATCH[2]}" = "G" ] && size_mib=$((size_mib * 1024))
+    # LUKS2 header takes 16 MiB; below 64 MiB there is little room left for reports.
+    [ "${size_mib}" -ge 64 ] || die "--data-size must be at least 64M."
+fi
 
 [ "$(id -u)" -eq 0 ] || die "USB setup utility requires root privileges (sudo)."
 
@@ -59,6 +71,7 @@ echo "       BOOT TO FORENSICS (BOOT) - USB INSTALLATION UTILITY             "
 echo "======================================================================"
 echo "Target Block Device: ${TARGET_DRIVE}"
 echo "Model / Size / Serial: $(lsblk -dno MODEL,SIZE,SERIAL "${TARGET_DRIVE}")"
+echo "Data partition size: ${DATA_SIZE:-rest of drive}"
 echo "Source Live ISO:     ${ISO_PATH}"
 echo "Current layout:"
 lsblk -o NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT "${TARGET_DRIVE}"
@@ -95,8 +108,10 @@ sgdisk --zap-all "${TARGET_DRIVE}"
 echo "[+] Step 2/5: Partitioning drive (Partition 1: Live OS, Partition 2: Persistence)..."
 # Partition 1: 3GB for Live OS (Type EF00 EFI/FAT32)
 sgdisk -n 1:2048:+3G -t 1:EF00 -c 1:"BOOTO_LIVE" "${TARGET_DRIVE}"
-# Partition 2: Remaining space for LUKS Encrypted Persistence (Type 8309 Linux LUKS)
-sgdisk -n 2:0:0 -t 2:8309 -c 2:"BOOTO_DATA" "${TARGET_DRIVE}"
+# Partition 2: LUKS Encrypted Persistence (Type 8309 Linux LUKS), --data-size or the remaining space
+DATA_END="0"
+[ -n "${DATA_SIZE}" ] && DATA_END="+${DATA_SIZE}"
+sgdisk -n "2:0:${DATA_END}" -t 2:8309 -c 2:"BOOTO_DATA" "${TARGET_DRIVE}"
 sgdisk -p "${TARGET_DRIVE}"
 
 partprobe "${TARGET_DRIVE}"
@@ -135,7 +150,9 @@ cryptsetup luksFormat --type luks2 "${PART2}"
 
 echo "[+] Opening LUKS container to create ext4 filesystem..."
 cryptsetup open "${PART2}" booto_persistence_init
-mkfs.ext4 -L "persistence" /dev/mapper/booto_persistence_init
+# Reports are a few KiB: 1 KiB blocks (-T small) and inline_data (seal files live in the inode) waste far less
+# than 4 KiB blocks; -m 0 drops the 5% root reserve, which on a small partition is pure loss.
+mkfs.ext4 -L "persistence" -T small -O inline_data -m 0 /dev/mapper/booto_persistence_init
 
 MNT_PERSIST="/tmp/booto_persistence_mount_$$"
 mkdir -p "${MNT_PERSIST}"

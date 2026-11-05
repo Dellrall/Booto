@@ -90,7 +90,9 @@ booto_error_t case_report_sign_and_seal(const char *report_path, char sha256_sea
         LOG_ERROR("Failed to create seal file '%s'", seal_file);
         return BOOTO_ERR_IO;
     }
-    fprintf(fp, "%s  %s\n", sha256_seal, report_path);
+    // Bare file name, so `sha256sum -c` works from the cases directory wherever it is mounted.
+    const char *base = strrchr(report_path, '/');
+    fprintf(fp, "%s  %s\n", sha256_seal, base ? base + 1 : report_path);
     booto_error_t err = finish_report(fp, seal_file);
     if (err != BOOTO_OK) return err;
 
@@ -117,51 +119,44 @@ booto_error_t case_report_generate_json(const forensic_case_summary_t *summary,
         return BOOTO_ERR_IO;
     }
 
-    fprintf(fp, "{\n");
-    fprintf(fp, "  \"generator\": \"Booto Forensic Rootkit & Bootkit Detection Suite\",\n");
-    fprintf(fp, "  \"version\": \"%s\",\n", BOOTO_VERSION_STRING);
-    fprintf(fp, "  \"git_hash\": \"%s\",\n", BOOTO_GIT_HASH);
-    fprintf(fp, "  \"case_metadata\": {\n");
-    fputs("    \"case_id\": ", fp); json_put_string(fp, summary->case_id); fputs(",\n", fp);
-    fputs("    \"timestamp\": ", fp); json_put_string(fp, summary->timestamp); fputs(",\n", fp);
-    fputs("    \"examiner\": ", fp); json_put_string(fp, summary->examiner); fputs(",\n", fp);
-    fputs("    \"target_disk\": ", fp); json_put_string(fp, summary->target_disk); fputs(",\n", fp);
-    fputs("    \"target_fs\": ", fp); json_put_string(fp, summary->target_fs); fputs("\n", fp);
-    fprintf(fp, "  },\n");
-    fprintf(fp, "  \"findings_summary\": {\n");
-    fprintf(fp, "    \"total_threats\": %d,\n", summary->total_threats);
-    fputs("    \"highest_severity\": ", fp); json_put_string(fp, summary->highest_severity); fputs(",\n", fp);
-    fprintf(fp, "    \"mbr_bootkit_threats\": %d,\n", summary->mbr_threats_count);
-    fprintf(fp, "    \"kernel_lkm_threats\": %d,\n", summary->kernel_threats_count);
-    fprintf(fp, "    \"uefi_bootkit_threats\": %d,\n", summary->uefi_threats_count);
-    fprintf(fp, "    \"initramfs_script_threats\": %d,\n", summary->initramfs_threats_count);
-    fprintf(fp, "    \"userland_preload_threats\": %d,\n", summary->preload_threats_count);
-    fprintf(fp, "    \"package_integrity_threats\": %d\n", summary->pkg_threats_count);
-    fprintf(fp, "  },\n");
-    fputs("  \"verdict\": ", fp); json_put_string(fp, summary->verdict); fputs(",\n", fp);
-    fprintf(fp, "  \"module_status\": {\n");
+    // One line, no indentation: the Markdown file is the human-readable copy.
+    fprintf(fp, "{\"generator\":\"Booto\",\"version\":\"%s\",\"git_hash\":\"%s\",\"case_metadata\":{",
+            BOOTO_VERSION_STRING, BOOTO_GIT_HASH);
+    fputs("\"case_id\":", fp); json_put_string(fp, summary->case_id);
+    fputs(",\"timestamp\":", fp); json_put_string(fp, summary->timestamp);
+    fputs(",\"examiner\":", fp); json_put_string(fp, summary->examiner);
+    fputs(",\"target_disk\":", fp); json_put_string(fp, summary->target_disk);
+    fputs(",\"target_fs\":", fp); json_put_string(fp, summary->target_fs);
+    fprintf(fp, "},\"findings_summary\":{\"total_threats\":%d,\"highest_severity\":", summary->total_threats);
+    json_put_string(fp, summary->highest_severity);
+    fprintf(fp, ",\"mbr_bootkit_threats\":%d,\"kernel_lkm_threats\":%d,\"uefi_bootkit_threats\":%d,"
+                "\"initramfs_script_threats\":%d,\"userland_preload_threats\":%d,\"package_integrity_threats\":%d},",
+            summary->mbr_threats_count, summary->kernel_threats_count, summary->uefi_threats_count,
+            summary->initramfs_threats_count, summary->preload_threats_count, summary->pkg_threats_count);
+    fputs("\"verdict\":", fp); json_put_string(fp, summary->verdict);
+    fputs(",\"module_status\":{", fp);
     for (int i = 0; i < SCAN_MOD_COUNT; i++) {
-        fputs("    ", fp); json_put_string(fp, forensic_scan_module_name((scan_module_id_t)i));
-        fputs(": ", fp); json_put_string(fp, summary->module_status[i]);
-        fputs(i + 1 < SCAN_MOD_COUNT ? ",\n" : "\n", fp);
+        if (i) fputc(',', fp);
+        json_put_string(fp, forensic_scan_module_name((scan_module_id_t)i));
+        fputc(':', fp);
+        json_put_string(fp, summary->module_status[i]);
     }
-    fprintf(fp, "  },\n");
-    fputs("  \"host_firmware\": ", fp);
+    fputs("},\"host_firmware\":", fp);
     if (!summary->firmware_ran) {
-        fputs("null\n", fp);
+        fputs("null", fp);
     } else {
-        fprintf(fp, "{\n    \"scope\": \"machine running Booto\",\n    \"uefi_boot\": %s,\n    \"checks\": [\n",
+        fprintf(fp, "{\"scope\":\"machine running Booto\",\"uefi_boot\":%s,\"checks\":[",
                 summary->firmware.uefi_boot ? "true" : "false");
         for (int i = 0; i < FW_CHECK_COUNT; i++) {
             const fw_check_t *c = &summary->firmware.checks[i];
-            fputs("      {\"name\": ", fp); json_put_string(fp, firmware_check_name((fw_check_id_t)i));
-            fputs(", \"result\": ", fp); json_put_string(fp, firmware_result_str(c->result));
-            fputs(", \"detail\": ", fp); json_put_string(fp, c->detail);
-            fputs(i + 1 < FW_CHECK_COUNT ? "},\n" : "}\n", fp);
+            fputs(i ? ",{\"name\":" : "{\"name\":", fp); json_put_string(fp, firmware_check_name((fw_check_id_t)i));
+            fputs(",\"result\":", fp); json_put_string(fp, firmware_result_str(c->result));
+            fputs(",\"detail\":", fp); json_put_string(fp, c->detail);
+            fputc('}', fp);
         }
-        fputs("    ]\n  }\n", fp);
+        fputs("]}", fp);
     }
-    fprintf(fp, "}\n");
+    fputs("}\n", fp);
 
     booto_error_t err = finish_report(fp, filename);
     if (err != BOOTO_OK) return err;
@@ -172,10 +167,16 @@ booto_error_t case_report_generate_json(const forensic_case_summary_t *summary,
     return case_report_sign_and_seal(filename, seal);
 }
 
-static void md_module_row(FILE *fp, const char *engine, int detections, const char *status) {
-    fprintf(fp, "| **%s** | %d | ", engine, detections);
-    md_put_cell(fp, status);
-    fputs(" |\n", fp);
+static int summary_module_threats(const forensic_case_summary_t *s, scan_module_id_t id) {
+    switch (id) {
+        case SCAN_MOD_MBR:       return s->mbr_threats_count;
+        case SCAN_MOD_UEFI:      return s->uefi_threats_count;
+        case SCAN_MOD_KERNEL:    return s->kernel_threats_count;
+        case SCAN_MOD_INITRAMFS: return s->initramfs_threats_count;
+        case SCAN_MOD_PRELOAD:   return s->preload_threats_count;
+        case SCAN_MOD_PKG:       return s->pkg_threats_count;
+        default:                 return 0;
+    }
 }
 
 booto_error_t case_report_generate_markdown(const forensic_case_summary_t *summary,
@@ -197,39 +198,27 @@ booto_error_t case_report_generate_markdown(const forensic_case_summary_t *summa
         return BOOTO_ERR_IO;
     }
 
-    fprintf(fp, "# Booto Forensic Rootkit & Bootkit Detection Report\n\n");
-    fputs("**Case ID:** ", fp); md_put_cell(fp, summary->case_id); fputs("  \n", fp);
-    fputs("**Generated:** ", fp); md_put_cell(fp, summary->timestamp); fputs("  \n", fp);
-    fputs("**Examiner:** ", fp); md_put_cell(fp, summary->examiner); fputs("  \n", fp);
-    fprintf(fp, "**Engine Version:** `%s` (Commit `%s`)  \n\n", BOOTO_VERSION_STRING, BOOTO_GIT_HASH);
+    fputs("# Booto case ", fp); md_put_cell(fp, summary->case_id);
+    fputs("\n\n", fp); md_put_cell(fp, summary->timestamp);
+    fputs(", examiner ", fp); md_put_cell(fp, summary->examiner);
+    fprintf(fp, ", Booto `%s` (`%s`)\n\n", BOOTO_VERSION_STRING, BOOTO_GIT_HASH);
+    fputs("**Verdict:** ", fp); md_put_cell(fp, summary->verdict);
+    fprintf(fp, ", **threats:** %d (", summary->total_threats); md_put_cell(fp, summary->highest_severity);
+    fputs("), **target:** ", fp); md_put_cell(fp, summary->target_disk);
+    fputs("\n\n| Engine | Threats | Status |\n| :--- | ---: | :--- |\n", fp);
+    for (int i = 0; i < SCAN_MOD_COUNT; i++) {
+        fprintf(fp, "| %s | %d | ", forensic_scan_module_name((scan_module_id_t)i),
+                summary_module_threats(summary, (scan_module_id_t)i));
+        md_put_cell(fp, summary->module_status[i]);
+        fputs(" |\n", fp);
+    }
 
-    fprintf(fp, "## 1. Executive Summary\n\n");
-    fprintf(fp, "| Parameter | Details |\n");
-    fprintf(fp, "| :--- | :--- |\n");
-    fputs("| **Target Block Device** | ", fp); md_put_cell(fp, summary->target_disk); fputs(" |\n", fp);
-    fputs("| **Target Filesystem** | ", fp); md_put_cell(fp, summary->target_fs); fputs(" |\n", fp);
-    fputs("| **Scan Verdict** | ", fp); md_put_cell(fp, summary->verdict); fputs(" |\n", fp);
-    fprintf(fp, "| **Total Anomalies Detected** | **%d** |\n", summary->total_threats);
-    fputs("| **Highest Severity Level** | ", fp); md_put_cell(fp, summary->highest_severity); fputs(" |\n\n", fp);
-
-    fprintf(fp, "## 2. Detection Breakdown by Module\n\n");
-    fprintf(fp, "| Forensic Inspection Engine | Detections Count | Status |\n");
-    fprintf(fp, "| :--- | :---: | :--- |\n");
-    md_module_row(fp, "MBR & VBR Boot Sector Auditor", summary->mbr_threats_count, summary->module_status[SCAN_MOD_MBR]);
-    md_module_row(fp, "Kernel LKM & Syscall Hook Inspector", summary->kernel_threats_count, summary->module_status[SCAN_MOD_KERNEL]);
-    md_module_row(fp, "UEFI & ESP Bootkit Analyzer", summary->uefi_threats_count, summary->module_status[SCAN_MOD_UEFI]);
-    md_module_row(fp, "In-Memory Initramfs Script Auditor", summary->initramfs_threats_count, summary->module_status[SCAN_MOD_INITRAMFS]);
-    md_module_row(fp, "Userland `ld.so.preload` Scanner", summary->preload_threats_count, summary->module_status[SCAN_MOD_PRELOAD]);
-    md_module_row(fp, "Ext4 Superblock Stats", 0, summary->module_status[SCAN_MOD_EXT4]);
-    md_module_row(fp, "Package Integrity (dpkg md5sums)", summary->pkg_threats_count, summary->module_status[SCAN_MOD_PKG]);
-    fputs("\n", fp);
-
-    fprintf(fp, "## Host firmware\n\n");
+    fputs("\n## Host firmware\n\n", fp);
     if (!summary->firmware_ran) {
-        fprintf(fp, "Not run (no raw target device).\n\n");
+        fputs("Not run (no raw target device).\n", fp);
     } else {
-        fprintf(fp, "These checks describe the machine Booto booted on and do not affect the disk verdict.\n\n");
-        fprintf(fp, "| Check | Result | Detail |\n| :--- | :--- | :--- |\n");
+        fputs("Describes the machine Booto booted on; these checks do not affect the disk verdict.\n\n", fp);
+        fputs("| Check | Result | Detail |\n| :--- | :--- | :--- |\n", fp);
         for (int i = 0; i < FW_CHECK_COUNT; i++) {
             const fw_check_t *c = &summary->firmware.checks[i];
             fputs("| ", fp); md_put_cell(fp, firmware_check_name((fw_check_id_t)i));
@@ -237,11 +226,7 @@ booto_error_t case_report_generate_markdown(const forensic_case_summary_t *summa
             fputs(" | ", fp); md_put_cell(fp, c->detail);
             fputs(" |\n", fp);
         }
-        fputs("\n", fp);
     }
-
-    fprintf(fp, "## 3. Cryptographic Chain of Custody\n\n");
-    fprintf(fp, "This report was generated in an amnesic Live RAM environment and saved to the LUKS2 encrypted persistence container. Integrity hashes are verified with SHA-256.\n");
 
     booto_error_t err = finish_report(fp, filename);
     if (err != BOOTO_OK) return err;

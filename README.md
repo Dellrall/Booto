@@ -31,7 +31,7 @@ Built with **C11**, Booto runs from a trusted Debian Live USB environment so the
 - **Verdicts**: Every scan ends as `CLEAN`, `THREATS`, or `INCOMPLETE`, with a per-module status; an engine that errors makes the scan `INCOMPLETE` instead of silently passing.
 - **Sealed Detection Rules**: Signatures live in `rules/*.json`, each with a SHA-256 seal (`*.json.sha256`); a file whose seal does not match is refused.
 - **Defensive Fuzzing, ASan & Multi-Compiler CI**: Deterministic 1,500-iteration-per-parser mutation fuzzing of the ELF, PE, MBR/VBR/gap and initramfs parsers, AddressSanitizer/UBSan builds, and a GCC/Clang matrix.
-- **Case Reporting**: Export of machine-readable JSON and human-readable Markdown reports, each with a SHA-256 side file. The side file is an integrity checksum, not a cryptographic signature.
+- **Case Reporting**: Export of a one-line JSON report and a compact Markdown report (about 1.3 KB together per case), each with a SHA-256 side file (`sha256sum -c` works from the cases directory). The side file is an integrity checksum, not a cryptographic signature.
 - **Automated ISO Generation (`make iso`)**: Standalone live bootable ISO output ready for USB deployment.
 
 ---
@@ -74,6 +74,8 @@ sudo make iso
 
 # Install to USB Flash Drive (Dual Partition)
 sudo ./scripts/setup_usb.sh /dev/sdb
+# Cap the encrypted reports/persistence partition (default: rest of the drive):
+sudo ./scripts/setup_usb.sh --data-size=512M /dev/sdb
 # The live system loads only from removable media (USB stick, CD/DVD); a USB SSD that
 # reports itself as non-removable will not boot it. This keeps a /live tree planted on the
 # suspect disk from replacing the forensic system.

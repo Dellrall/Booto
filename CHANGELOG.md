@@ -14,6 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Non-Debian roots (no dpkg database) are SKIPPED. On a real Debian host: 1,310 packages, 33,336 files verified, no false positives.
   - Limit: trusts the md5sums lists on the suspect disk; an attacker with root can rewrite them.
 
+- **`setup_usb.sh --data-size=SIZE`** (e.g. `512M`, `2G`, minimum `64M`) caps the encrypted reports/persistence partition; the default is still the rest of the drive. The partition's ext4 now uses 1 KiB blocks, `inline_data` and no root reserve: one case (two reports plus seals) takes 2 KiB on disk instead of 16 KiB.
+
+### Changed
+- **Compact case reports**: the JSON report is a single line (same keys), and the Markdown report is a short header plus one engine table, with engine names taken from the scanner (new engines appear automatically). Together about 1.3 KB per case instead of 2.2 KB.
+- Report seal files name the bare report file, so `sha256sum -c case_*.sha256` works from wherever the cases directory is mounted.
+
 ## [1.4.0] - 2026-11-05
 
 ### Added
