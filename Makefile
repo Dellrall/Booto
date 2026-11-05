@@ -87,7 +87,10 @@ fuzz: $(BUILDDIR)/test_fuzz
 # Bounded model checking (CBMC) of the parsers that read attacker-controlled bytes; see tests/cbmc/.
 # PE: each buffer length is proved separately; the section loop bound is (len - 120) / 40 + 1 sections.
 # GPT/MBR: a 1536-byte prefix with any sector size; the entry walk holds at most 12 entries.
+# ELF: every 256-byte input (.modinfo walk stubbed), plus the .modinfo loop body on a 128-byte region.
 CBMC ?= cbmc
+GOTO_CC ?= goto-cc
+GOTO_INSTRUMENT ?= goto-instrument
 # 512 takes ~3 min; CBMC_LENGTHS="512 600" adds a ~18 min proof covering up to 12 sections.
 CBMC_LENGTHS ?= 512
 CBMC_FLAGS = --bounds-check --pointer-check --memory-leak-check --signed-overflow-check \
@@ -106,6 +109,19 @@ cbmc: version | $(BUILDDIR)
 	@$(CBMC) tests/cbmc/gpt_esp_harness.c src/disk_mount.c $(INCLUDES) -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L \
 		--function harness $(CBMC_FLAGS) --unwind 13 --unwindset memcmp.0:17 > $(BUILDDIR)/cbmc_gpt.log 2>&1; rc=$$?; \
 		grep -E '^\*\*|VERIFICATION|FAILURE|Out of memory' $(BUILDDIR)/cbmc_gpt.log; [ $$rc -eq 0 ]
+	@echo "--- CBMC: elf_parse_buffer on every 256-byte input ---"
+	@$(GOTO_CC) -o $(BUILDDIR)/cbmc_elf.goto tests/cbmc/elf_harness.c src/elf_analyzer.c $(INCLUDES) \
+		-D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L --function harness && \
+	$(GOTO_INSTRUMENT) --replace-calls elf_parse_modinfo:elf_parse_modinfo_stub \
+		$(BUILDDIR)/cbmc_elf.goto $(BUILDDIR)/cbmc_elf_stubbed.goto > /dev/null && \
+	$(CBMC) $(BUILDDIR)/cbmc_elf_stubbed.goto --function harness $(CBMC_FLAGS) --unwind 4 \
+		--unwindset elf_parse_buffer.1:11,strcmp.0:65 > $(BUILDDIR)/cbmc_elf.log 2>&1; rc=$$?; \
+		grep -E '^\*\*|VERIFICATION|FAILURE|Out of memory' $(BUILDDIR)/cbmc_elf.log; [ $$rc -eq 0 ]
+	@echo "--- CBMC: elf_modinfo_entry (.modinfo loop body) on every 128-byte region ---"
+	@$(CBMC) tests/cbmc/modinfo_harness.c src/elf_analyzer.c $(INCLUDES) -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L \
+		--function harness $(CBMC_FLAGS) --unwind 2 --unwindset strncmp.0:13,nul_before_end.0:129 \
+		> $(BUILDDIR)/cbmc_modinfo.log 2>&1; rc=$$?; \
+		grep -E '^\*\*|VERIFICATION|FAILURE|Out of memory' $(BUILDDIR)/cbmc_modinfo.log; [ $$rc -eq 0 ]
 
 coverage: clean
 	@echo "--- Compiling with gcov Code Coverage Profiling ---"

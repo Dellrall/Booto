@@ -30,6 +30,32 @@ static void copy_table_string(char *dst, size_t dst_size, const char *table, siz
     snprintf(dst, dst_size, "%.*s", n, table + idx);
 }
 
+size_t elf_modinfo_entry(const char *p, size_t rem, elf_modinfo_t *out) {
+    size_t slen = strnlen(p, rem);
+    if (slen == 0 || slen >= rem) return 0;
+    if (strncmp(p, "license=", 8) == 0) {
+        snprintf(out->license, sizeof(out->license), "%.63s", p + 8);
+    } else if (strncmp(p, "author=", 7) == 0) {
+        snprintf(out->author, sizeof(out->author), "%.127s", p + 7);
+    } else if (strncmp(p, "description=", 12) == 0) {
+        snprintf(out->description, sizeof(out->description), "%.255s", p + 12);
+    } else if (strncmp(p, "vermagic=", 9) == 0) {
+        snprintf(out->vermagic, sizeof(out->vermagic), "%.127s", p + 9);
+    } else if (strncmp(p, "srcversion=", 11) == 0) {
+        snprintf(out->srcversion, sizeof(out->srcversion), "%.63s", p + 11);
+    } else if (strncmp(p, "depends=", 8) == 0) {
+        snprintf(out->depends, sizeof(out->depends), "%.255s", p + 8);
+    }
+    return slen + 1;
+}
+
+void elf_parse_modinfo(const char *data, size_t size, elf_modinfo_t *out) {
+    out->has_modinfo = true;
+    /* elf_modinfo_entry returns 0 or at most size - off, so off never passes size. */
+    size_t off = 0, n;
+    while (off < size && (n = elf_modinfo_entry(data + off, size - off, out)) != 0) off += n;
+}
+
 booto_error_t elf_parse_buffer(const uint8_t *buf, size_t len, elf_binary_info_t *info) {
     if (!buf || !info) return BOOTO_ERR_INVALID_ARG;
     if (len < sizeof(Elf64_Ehdr)) return BOOTO_ERR_CORRUPT_DATA;
@@ -126,31 +152,7 @@ booto_error_t elf_parse_buffer(const uint8_t *buf, size_t len, elf_binary_info_t
 
     // 5. Parse .modinfo (for Linux .ko kernel modules)
     if (modinfo_hdr && range_in_bounds(modinfo_hdr->sh_offset, modinfo_hdr->sh_size, len)) {
-        info->modinfo.has_modinfo = true;
-        const char *mptr = (const char *)(buf + modinfo_hdr->sh_offset);
-        const char *mend = mptr + modinfo_hdr->sh_size;
-
-        while (mptr < mend) {
-            size_t rem_bytes = (size_t)(mend - mptr);
-            size_t slen = strnlen(mptr, rem_bytes);
-            if (slen == 0 || slen >= rem_bytes) {
-                break;
-            }
-            if (strncmp(mptr, "license=", 8) == 0) {
-                snprintf(info->modinfo.license, sizeof(info->modinfo.license), "%.63s", mptr + 8);
-            } else if (strncmp(mptr, "author=", 7) == 0) {
-                snprintf(info->modinfo.author, sizeof(info->modinfo.author), "%.127s", mptr + 7);
-            } else if (strncmp(mptr, "description=", 12) == 0) {
-                snprintf(info->modinfo.description, sizeof(info->modinfo.description), "%.255s", mptr + 12);
-            } else if (strncmp(mptr, "vermagic=", 9) == 0) {
-                snprintf(info->modinfo.vermagic, sizeof(info->modinfo.vermagic), "%.127s", mptr + 9);
-            } else if (strncmp(mptr, "srcversion=", 11) == 0) {
-                snprintf(info->modinfo.srcversion, sizeof(info->modinfo.srcversion), "%.63s", mptr + 11);
-            } else if (strncmp(mptr, "depends=", 8) == 0) {
-                snprintf(info->modinfo.depends, sizeof(info->modinfo.depends), "%.255s", mptr + 8);
-            }
-            mptr += slen + 1;
-        }
+        elf_parse_modinfo((const char *)(buf + modinfo_hdr->sh_offset), modinfo_hdr->sh_size, &info->modinfo);
     }
 
     // 6. Parse Symbol Table (.symtab + .strtab)

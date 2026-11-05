@@ -82,6 +82,18 @@ booto_error_t elf_parse_file(const char *path, elf_binary_info_t *info);
 booto_error_t elf_parse_buffer(const uint8_t *buf, size_t len, elf_binary_info_t *info);
 
 /**
+ * @brief Parse a .modinfo section (NUL-separated "key=value" strings) into out.
+ *        Reads only data[0..size); a trailing string without a NUL is ignored.
+ */
+void elf_parse_modinfo(const char *data, size_t size, elf_modinfo_t *out);
+
+/**
+ * @brief Handle the single .modinfo string at p (rem bytes left in the section).
+ * @return Bytes consumed (at most rem), or 0 when no further NUL-terminated string fits.
+ */
+size_t elf_modinfo_entry(const char *p, size_t rem, elf_modinfo_t *out);
+
+/**
  * @brief Search for a specific symbol name in the parsed symbol table.
  * @return Pointer to symbol info, or NULL if not found.
  */
