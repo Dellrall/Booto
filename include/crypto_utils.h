@@ -44,6 +44,12 @@ void sha256_buffer_hex(const uint8_t *data, size_t len, char hex_out[65]);
  */
 bool sha256_file_hex(const char *file_path, char hex_out[65]);
 
+/**
+ * @brief CRC-32 (IEEE 802.3, reflected, polynomial 0xEDB88320) over data, continuing from crc.
+ *        No pre/post inversion: start with 0xFFFFFFFF and invert the final value.
+ */
+uint32_t crc32_update(uint32_t crc, const uint8_t *data, size_t len);
+
 #ifdef __cplusplus
 }
 #endif

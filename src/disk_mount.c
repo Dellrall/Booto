@@ -11,6 +11,7 @@
 
 #include "disk_mount.h"
 #include "logger.h"
+#include "crypto_utils.h"
 
 #include <ctype.h>
 #include <dirent.h>
@@ -714,12 +715,7 @@ static const uint8_t ESP_TYPE_GUID[16] = {0x28, 0x73, 0x2A, 0xC1, 0x1F, 0xF8, 0x
 #define GPT_MAX_READ      (1024u * 1024u)
 
 static uint32_t esp_crc32(const uint8_t *p, size_t len) {
-    uint32_t crc = 0xFFFFFFFFu;
-    for (size_t i = 0; i < len; i++) {
-        crc ^= p[i];
-        for (int k = 0; k < 8; k++) crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
-    }
-    return ~crc;
+    return ~crc32_update(0xFFFFFFFFu, p, len);
 }
 
 static uint32_t rd_le32(const uint8_t *p) {
@@ -739,11 +735,12 @@ static booto_error_t gpt_header(const uint8_t *buf, uint32_t ss, uint64_t *arr_o
     const uint8_t *h = buf + ss;
     uint32_t hsize = rd_le32(h + 12);
     if (hsize < 92 || hsize > ss) return BOOTO_ERR_CORRUPT_DATA;
-    uint8_t tmp[4096];
-    if (hsize > sizeof(tmp)) return BOOTO_ERR_CORRUPT_DATA;
-    memcpy(tmp, h, hsize);
-    memset(tmp + 16, 0, 4);
-    if (esp_crc32(tmp, hsize) != rd_le32(h + 16)) return BOOTO_ERR_CORRUPT_DATA;
+    /* CRC of the header with its own CRC field (bytes 16..19) taken as zero. */
+    static const uint8_t zero_crc[4];
+    uint32_t crc = crc32_update(0xFFFFFFFFu, h, 16);
+    crc = crc32_update(crc, zero_crc, sizeof(zero_crc));
+    crc = ~crc32_update(crc, h + 20, hsize - 20);
+    if (crc != rd_le32(h + 16)) return BOOTO_ERR_CORRUPT_DATA;
     uint64_t lba = rd_le64(h + 72);
     *count = rd_le32(h + 80);
     *esize = rd_le32(h + 84);

@@ -84,8 +84,9 @@ fuzz: $(BUILDDIR)/test_fuzz
 	@echo "--- Running Defensive Fuzzing Suite ---"
 	$(BUILDDIR)/test_fuzz
 
-# Bounded model checking (CBMC) of the PE/Authenticode parser; see tests/cbmc/pe_authenticode_harness.c.
-# Each buffer length is proved separately; the section loop bound is (len - 120) / 40 + 1 sections.
+# Bounded model checking (CBMC) of the parsers that read attacker-controlled bytes; see tests/cbmc/.
+# PE: each buffer length is proved separately; the section loop bound is (len - 120) / 40 + 1 sections.
+# GPT/MBR: a 1536-byte prefix with any sector size; the entry walk holds at most 12 entries.
 CBMC ?= cbmc
 # 512 takes ~3 min; CBMC_LENGTHS="512 600" adds a ~18 min proof covering up to 12 sections.
 CBMC_LENGTHS ?= 512
@@ -101,6 +102,10 @@ cbmc: version | $(BUILDDIR)
 		grep -E '^\*\*|VERIFICATION|FAILURE|Out of memory' $(BUILDDIR)/cbmc_$$n.log; \
 		[ $$rc -eq 0 ] || exit 1; \
 	done
+	@echo "--- CBMC: disk_parse_esp_partitions on every 1536-byte prefix, any sector size ---"
+	@$(CBMC) tests/cbmc/gpt_esp_harness.c src/disk_mount.c $(INCLUDES) -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L \
+		--function harness $(CBMC_FLAGS) --unwind 13 --unwindset memcmp.0:17 > $(BUILDDIR)/cbmc_gpt.log 2>&1; rc=$$?; \
+		grep -E '^\*\*|VERIFICATION|FAILURE|Out of memory' $(BUILDDIR)/cbmc_gpt.log; [ $$rc -eq 0 ]
 
 coverage: clean
 	@echo "--- Compiling with gcov Code Coverage Profiling ---"
