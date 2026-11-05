@@ -8,6 +8,7 @@
  * Register layouts come from the Intel SDM, Intel PCH datasheets and AMD PPRs.
  */
 #include "firmware_auditor.h"
+#include "crypto_utils.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -112,6 +113,7 @@ static const char *const CHECK_NAMES[FW_CHECK_COUNT] = {
     "SMM locked",
     "SMRAM range protected",
     "BIOS write protection",
+    "Boot measurements (TPM)",
 };
 
 typedef struct {
@@ -685,6 +687,176 @@ static void check_silicon(fw_check_t *ck, bool *unconfirmed, const char *cpuinfo
     }
 }
 
+/* ---- TPM event log (TCG PC Client Platform Firmware Profile, crypto-agile format) ---------- */
+
+#define EV_NO_ACTION        3u
+#define TPM_ALG_SHA256      0x000Bu
+#define TPM_REPLAY_PCRS     8   /* firmware PCRs 0-7 */
+#define TPM_MAX_ALGS        8
+
+typedef enum { REPLAY_OK, REPLAY_MALFORMED, REPLAY_NO_SHA256 } replay_result_t;
+
+static uint16_t rd_le16(const uint8_t *p) {
+    return (uint16_t)(p[0] | (p[1] << 8));
+}
+
+static int hex_nibble(char ch) {
+    if (ch >= '0' && ch <= '9') return ch - '0';
+    if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
+    if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
+    return -1;
+}
+
+/* Replays the SHA-256 bank of the log into pcr[0..7]. Every length is checked against the
+ * bytes left before it is used; the log is firmware-written, so any inconsistency is MALFORMED. */
+static replay_result_t tpm_replay(const uint8_t *d, size_t len, uint8_t pcr[TPM_REPLAY_PCRS][32]) {
+    memset(pcr, 0, TPM_REPLAY_PCRS * 32);
+    /* First entry: legacy TCG_PCR_EVENT (pcr, type, sha1[20], size) holding the Spec ID event:
+     * signature[16], platformClass, versions[4], numberOfAlgorithms, {algId, digestSize}[]. */
+    if (len < 32) return REPLAY_MALFORMED;
+    uint32_t spec_size = rd_le32(d + 28);
+    if (rd_le32(d) != 0 || rd_le32(d + 4) != EV_NO_ACTION || spec_size > len - 32 || spec_size < 28 ||
+        memcmp(d + 32, "Spec ID Event03", 16) != 0)
+        return REPLAY_MALFORMED;
+    const uint8_t *spec = d + 32;
+    uint32_t nalg = rd_le32(spec + 24);
+    if (nalg == 0 || nalg > TPM_MAX_ALGS || (spec_size - 28) / 4 < nalg) return REPLAY_MALFORMED;
+    uint16_t alg_id[TPM_MAX_ALGS], alg_size[TPM_MAX_ALGS];
+    bool has_sha256 = false;
+    for (uint32_t i = 0; i < nalg; i++) {
+        alg_id[i] = rd_le16(spec + 28 + 4 * i);
+        alg_size[i] = rd_le16(spec + 30 + 4 * i);
+        if (alg_size[i] == 0 || alg_size[i] > 64) return REPLAY_MALFORMED;
+        if (alg_id[i] == TPM_ALG_SHA256) {
+            if (alg_size[i] != 32) return REPLAY_MALFORMED;
+            has_sha256 = true;
+        }
+    }
+    if (!has_sha256) return REPLAY_NO_SHA256;
+
+    /* Then TCG_PCR_EVENT2 entries: pcr, type, count, {algId, digest}[count], size, event[size]. */
+    size_t off = 32 + (size_t)spec_size;
+    bool pcr0_extended = false;
+    while (off < len) {
+        if (len - off < 12) return REPLAY_MALFORMED;
+        uint32_t idx = rd_le32(d + off), type = rd_le32(d + off + 4), count = rd_le32(d + off + 8);
+        if (type == 0 && count == 0) break;     /* zero padding after the last event */
+        if (count != nalg) return REPLAY_MALFORMED;
+        off += 12;
+        const uint8_t *digest256 = NULL;
+        for (uint32_t c = 0; c < count; c++) {
+            if (len - off < 2) return REPLAY_MALFORMED;
+            uint16_t alg = rd_le16(d + off);
+            size_t dsize = 0;
+            for (uint32_t i = 0; i < nalg; i++)
+                if (alg_id[i] == alg) dsize = alg_size[i];
+            if (dsize == 0 || len - off - 2 < dsize) return REPLAY_MALFORMED;
+            if (alg == TPM_ALG_SHA256) digest256 = d + off + 2;
+            off += 2 + dsize;
+        }
+        if (len - off < 4) return REPLAY_MALFORMED;
+        uint32_t ev_size = rd_le32(d + off);
+        off += 4;
+        if (ev_size > len - off) return REPLAY_MALFORMED;
+        const uint8_t *ev = d + off;
+        off += ev_size;
+
+        if (type == EV_NO_ACTION) {
+            /* Not extended; "StartupLocality" sets PCR0's starting value (locality in the last byte). */
+            if (idx == 0 && !pcr0_extended && ev_size >= 17 && memcmp(ev, "StartupLocality", 16) == 0)
+                pcr[0][31] = ev[16];
+            continue;
+        }
+        if (idx >= TPM_REPLAY_PCRS) continue;
+        if (!digest256) return REPLAY_MALFORMED;
+        sha256_ctx_t ctx;
+        sha256_init(&ctx);
+        sha256_update(&ctx, pcr[idx], 32);
+        sha256_update(&ctx, digest256, 32);
+        sha256_final(&ctx, pcr[idx]);
+        if (idx == 0) pcr0_extended = true;
+    }
+    return REPLAY_OK;
+}
+
+/* sysfs pcr-sha256/<n>: 64 hex digits (the kernel prints uppercase), then a newline. */
+static int read_pcr(const char *tpm_dir, int n, uint8_t out[32]) {
+    char path[4096];
+    int w = snprintf(path, sizeof(path), "%s/pcr-sha256/%d", tpm_dir, n);
+    if (w < 0 || (size_t)w >= sizeof(path)) return ENAMETOOLONG;
+    uint8_t *buf;
+    size_t len;
+    int err = read_file(path, &buf, &len);
+    if (err) return err;
+    if (len < 64) err = EIO;
+    for (size_t i = 0; i < 32 && !err; i++) {
+        int hi = hex_nibble((char)buf[2 * i]), lo = hex_nibble((char)buf[2 * i + 1]);
+        if (hi < 0 || lo < 0) err = EIO;
+        else out[i] = (uint8_t)(hi << 4 | lo);
+    }
+    free(buf);
+    return err;
+}
+
+static void check_tpm_log(fw_check_t *c, const char *tpm_dir, const char *log_path) {
+    struct stat sb;
+    if (stat(tpm_dir, &sb) != 0) {
+        set_check(c, FW_RESULT_NA, "No TPM.");
+        return;
+    }
+    uint8_t *log;
+    size_t len;
+    int err = read_file(log_path, &log, &len);
+    if (err) {
+        c->result = FW_RESULT_UNKNOWN;
+        if (err == EACCES || err == EPERM)
+            snprintf(c->detail, sizeof(c->detail), "Needs root to read the TPM event log.");
+        else if (err == ENOENT)
+            snprintf(c->detail, sizeof(c->detail), "Firmware provided no TPM event log.");
+        else
+            snprintf(c->detail, sizeof(c->detail), "Could not read the TPM event log: %s.", strerror(err));
+        return;
+    }
+    uint8_t replay[TPM_REPLAY_PCRS][32];
+    replay_result_t r = tpm_replay(log, len, replay);
+    free(log);
+    if (r == REPLAY_MALFORMED) {
+        set_check(c, FW_RESULT_FAIL, "TPM event log is malformed: boot measurements cannot be verified.");
+        return;
+    }
+    if (r == REPLAY_NO_SHA256) {
+        set_check(c, FW_RESULT_UNKNOWN, "TPM event log has no SHA-256 measurements.");
+        return;
+    }
+    char bad[32] = "";
+    size_t bad_len = 0;
+    uint8_t pcr0[32] = { 0 };
+    for (int i = 0; i < TPM_REPLAY_PCRS; i++) {
+        uint8_t actual[32];
+        err = read_pcr(tpm_dir, i, actual);
+        if (err) {
+            c->result = FW_RESULT_UNKNOWN;
+            snprintf(c->detail, sizeof(c->detail), "Could not read TPM PCR %d (SHA-256 bank): %s.", i, strerror(err));
+            return;
+        }
+        if (i == 0) memcpy(pcr0, actual, sizeof(pcr0));
+        if (memcmp(actual, replay[i], 32) != 0) {
+            int w = snprintf(bad + bad_len, sizeof(bad) - bad_len, bad_len ? ", %d" : "%d", i);
+            if (w > 0 && (size_t)w < sizeof(bad) - bad_len) bad_len += (size_t)w;
+        }
+    }
+    if (bad_len) {
+        c->result = FW_RESULT_FAIL;
+        snprintf(c->detail, sizeof(c->detail),
+                 "PCR %s do not match the event log: boot measurements were altered or the log is incomplete.", bad);
+        return;
+    }
+    c->result = FW_RESULT_PASS;
+    snprintf(c->detail, sizeof(c->detail),
+             "Event log matches PCR 0-7; firmware digest (PCR0) %02x%02x%02x%02x%02x%02x%02x%02x...",
+             pcr0[0], pcr0[1], pcr0[2], pcr0[3], pcr0[4], pcr0[5], pcr0[6], pcr0[7]);
+}
+
 booto_error_t firmware_audit(const firmware_paths_t *paths, firmware_report_t *out) {
     if (!out) return BOOTO_ERR_INVALID_ARG;
     memset(out, 0, sizeof(*out));
@@ -695,6 +867,9 @@ booto_error_t firmware_audit(const firmware_paths_t *paths, firmware_report_t *o
     const char *cpuinfo = (paths && paths->cpuinfo_path) ? paths->cpuinfo_path : "/proc/cpuinfo";
     const char *msr = (paths && paths->msr_dir) ? paths->msr_dir : "/dev/cpu";
     const char *pci = (paths && paths->pci_devices_dir) ? paths->pci_devices_dir : "/sys/bus/pci/devices";
+    const char *tpm = (paths && paths->tpm_dir) ? paths->tpm_dir : "/sys/class/tpm/tpm0";
+    const char *tpm_log = (paths && paths->tpm_log_path) ? paths->tpm_log_path
+                                                         : "/sys/kernel/security/tpm0/binary_bios_measurements";
 
     struct stat sb;
     out->uefi_boot = stat(efi, &sb) == 0 && S_ISDIR(sb.st_mode);
@@ -727,6 +902,7 @@ booto_error_t firmware_audit(const firmware_paths_t *paths, firmware_report_t *o
     check_iommu(&ck[FW_CHECK_IOMMU], acpi);
     check_thunderbolt(&ck[FW_CHECK_THUNDERBOLT_DMA], tb);
     check_silicon(ck, &out->chipset_unconfirmed, cpuinfo, msr, pci);
+    check_tpm_log(&ck[FW_CHECK_TPM_LOG], tpm, tpm_log);
 
     for (int i = 0; i < FW_CHECK_COUNT; i++) {
         if (ck[i].result == FW_RESULT_FAIL) out->fail_count++;
