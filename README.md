@@ -38,6 +38,8 @@ Built with **C11**, Booto runs from a trusted Debian Live USB environment so the
 
 ## Quick Start & Build Instructions
 
+Full requirements and step-by-step USB setup, boot and scan instructions: [docs/SETUP.md](docs/SETUP.md).
+
 ### Dependencies (Debian / Ubuntu)
 ```bash
 sudo apt-get install -y build-essential libblkid-dev libudev-dev
