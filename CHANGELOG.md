@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-11-05
+
 ### Added
 - **Firmware audit: TPM boot measurements** (new check "Boot measurements (TPM)").
   - Replays the SHA-256 bank of the firmware's TPM event log (`/sys/kernel/security/tpm0/binary_bios_measurements`, TCG crypto-agile format, including the StartupLocality rule) and compares the result with the TPM's real PCR 0-7 (`/sys/class/tpm/tpm0/pcr-sha256/`).
