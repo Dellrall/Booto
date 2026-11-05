@@ -13,9 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - SHA-256, logging, the dbx loader, `snprintf`, `strcasecmp` and `qsort` are stubs that keep the relevant checks; the comment in the harness lists what each one asserts.
   - Checked against a planted bug: verifying only a section's start offset makes the proof fail with "hashed range inside the buffer".
 - **Bounded model checking of the GPT/MBR ESP parser**: `tests/cbmc/gpt_esp_harness.c` proves `disk_parse_esp_partitions()` memory-safe for every 1536-byte disk prefix and any sector size, with every header field (entry-array LBA, entry count, entry size, header size) unconstrained; it also proves at most `max` partition numbers are returned, each in 1..1024. CRC32 is a stub that checks its range is readable. Checked against a planted bug: dropping the entry-array size check makes the proof fail.
+- **Bounded model checking of the ELF / kernel-module parser**:
+  - `tests/cbmc/elf_harness.c` proves `elf_parse_buffer()` memory-safe for every 256-byte input, with all header fields, table offsets, sizes and name indices unconstrained (tables may overlap). It also checks every string-table copy reads only bytes inside the buffer.
+  - `tests/cbmc/modinfo_harness.c` proves the `.modinfo` loop body (`elf_modinfo_entry()`) for every 128-byte region: each copy starts at a string NUL-terminated inside the section, and at most the remaining bytes are consumed, which is the loop's invariant. Unrolling the whole walk does not fit in memory, because each string's offset depends on every earlier one.
+  - Checked against two planted bugs: copying a table name without its end-of-table bound, and accepting a `.modinfo` string without a NUL in the section. Both make the proofs fail.
 
 ### Changed
 - The GPT header CRC is computed in place (bytes 0..15, four zero bytes, then the rest) instead of copying the header into a 4 KB stack buffer. A header is now accepted up to the sector size, as the UEFI spec allows, instead of being capped at 4096 bytes. The CRC-32 loop moved to `crc32_update()` in `src/crypto_utils.c`.
+- `.modinfo` parsing moved out of `elf_parse_buffer()` into `elf_parse_modinfo()` and its per-string body `elf_modinfo_entry()`; behaviour is unchanged.
 
 ### Security
 - **The live ISO can no longer be redirected to the suspect disk.** Before, GRUB booted the first disk containing `/live/vmlinuz`, and live-boot searched every disk for `filesystem.squashfs`. A `/live` tree planted on the scanned disk could therefore replace the forensic system.
