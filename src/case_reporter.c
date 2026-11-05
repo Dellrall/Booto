@@ -135,7 +135,8 @@ booto_error_t case_report_generate_json(const forensic_case_summary_t *summary,
     fprintf(fp, "    \"kernel_lkm_threats\": %d,\n", summary->kernel_threats_count);
     fprintf(fp, "    \"uefi_bootkit_threats\": %d,\n", summary->uefi_threats_count);
     fprintf(fp, "    \"initramfs_script_threats\": %d,\n", summary->initramfs_threats_count);
-    fprintf(fp, "    \"userland_preload_threats\": %d\n", summary->preload_threats_count);
+    fprintf(fp, "    \"userland_preload_threats\": %d,\n", summary->preload_threats_count);
+    fprintf(fp, "    \"package_integrity_threats\": %d\n", summary->pkg_threats_count);
     fprintf(fp, "  },\n");
     fputs("  \"verdict\": ", fp); json_put_string(fp, summary->verdict); fputs(",\n", fp);
     fprintf(fp, "  \"module_status\": {\n");
@@ -220,6 +221,7 @@ booto_error_t case_report_generate_markdown(const forensic_case_summary_t *summa
     md_module_row(fp, "In-Memory Initramfs Script Auditor", summary->initramfs_threats_count, summary->module_status[SCAN_MOD_INITRAMFS]);
     md_module_row(fp, "Userland `ld.so.preload` Scanner", summary->preload_threats_count, summary->module_status[SCAN_MOD_PRELOAD]);
     md_module_row(fp, "Ext4 Superblock Stats", 0, summary->module_status[SCAN_MOD_EXT4]);
+    md_module_row(fp, "Package Integrity (dpkg md5sums)", summary->pkg_threats_count, summary->module_status[SCAN_MOD_PKG]);
     fputs("\n", fp);
 
     fprintf(fp, "## Host firmware\n\n");

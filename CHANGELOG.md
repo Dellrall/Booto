@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Package integrity engine** ("Packages", 7th scan engine; debsums-style, offline).
+  - Hashes every file listed in the target's `/var/lib/dpkg/info/*.md5sums` under `bin`, `sbin`, `lib*`, `usr/bin`, `usr/sbin`, `usr/lib*` and `boot`, and flags a THREAT when the content differs from the package or the file was replaced by a symlink or non-file.
+  - Paths resolve inside the target root only (`openat2` `RESOLVE_IN_ROOT`), so a planted absolute symlink cannot point the check at the live system's clean files. Files diverted with `dpkg-divert` are skipped; files deleted since install are counted, not flagged.
+  - Non-Debian roots (no dpkg database) are SKIPPED. On a real Debian host: 1,310 packages, 33,336 files verified, no false positives.
+  - Limit: trusts the md5sums lists on the suspect disk; an attacker with root can rewrite them.
+
 ## [1.4.0] - 2026-11-05
 
 ### Added

@@ -29,6 +29,7 @@ static const struct {
     {"Initramfs scripts", "/boot/initrd.img*"},
     {"LD_PRELOAD hooks", "/etc/ld.so.preload, /etc/environment"},
     {"Ext4 superblock", "superblock"},
+    {"Package integrity", "/var/lib/dpkg/info/*.md5sums"},
 };
 
 void tui_app_state_init(tui_app_state_t *app, booto_context_t *ctx) {
