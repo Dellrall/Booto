@@ -911,6 +911,57 @@ booto_error_t firmware_audit(const firmware_paths_t *paths, firmware_report_t *o
     return BOOTO_OK;
 }
 
+#define NVRAM_BLOB_MIN     4096u
+#define NVRAM_BLOB_ENTROPY 7.5
+
+/* Why this variable data looks like hidden code, or NULL. */
+static const char *nvram_suspect(const uint8_t *d, size_t len) {
+    for (size_t i = 0; i + 0x40 <= len; i++) {
+        if (d[i] == 0x7f && memcmp(d + i, "\x7f" "ELF", 4) == 0) return "holds an ELF executable";
+        if (d[i] != 'M' || d[i + 1] != 'Z') continue;
+        uint32_t lfanew = rd_le32(d + i + 0x3c);
+        if (lfanew <= len - i - 4 && memcmp(d + i + lfanew, "PE\0\0", 4) == 0) return "holds a PE executable";
+    }
+    if (len < NVRAM_BLOB_MIN) return NULL;
+    siglist_stats_t st;
+    memset(&st, 0, sizeof(st));
+    if (parse_siglists(d, len, &st)) return NULL;   /* PK/KEK/db/dbx/MokList: certificates and hashes are meant to look random */
+    size_t hist[256] = { 0 };
+    for (size_t i = 0; i < len; i++) hist[d[i]]++;
+    return entropy_bits(hist, len) > NVRAM_BLOB_ENTROPY ? "large packed or encrypted blob" : NULL;
+}
+
+booto_error_t firmware_nvram_scan(const char *efivars_dir, fw_nvram_report_t *out) {
+    if (!out) return BOOTO_ERR_INVALID_ARG;
+    memset(out, 0, sizeof(*out));
+    const char *dir = efivars_dir ? efivars_dir : "/sys/firmware/efi/efivars";
+    DIR *dp = opendir(dir);
+    if (!dp) return BOOTO_ERR_NOT_FOUND;
+    struct dirent *de;
+    while ((de = readdir(dp)) != NULL) {
+        if (de->d_name[0] == '.') continue;
+        char path[4096];
+        int w = snprintf(path, sizeof(path), "%s/%s", dir, de->d_name);
+        uint8_t *buf = NULL;
+        size_t len = 0;
+        if (w < 0 || (size_t)w >= sizeof(path) || read_file(path, &buf, &len) != 0) {
+            out->unreadable++;
+            continue;
+        }
+        out->vars_scanned++;
+        const char *why = len > EFIVAR_ATTR_SIZE ? nvram_suspect(buf + EFIVAR_ATTR_SIZE, len - EFIVAR_ATTR_SIZE) : NULL;
+        if (why && out->count < FW_NVRAM_MAX_FINDINGS) {
+            fw_nvram_finding_t *f = &out->findings[out->count++];
+            snprintf(f->name, sizeof(f->name), "%s", de->d_name);
+            snprintf(f->reason, sizeof(f->reason), "%s", why);
+            f->size = len - EFIVAR_ATTR_SIZE;
+        }
+        free(buf);
+    }
+    closedir(dp);
+    return BOOTO_OK;
+}
+
 const char *firmware_check_name(fw_check_id_t id) {
     return (size_t)id < FW_CHECK_COUNT ? CHECK_NAMES[id] : "?";
 }

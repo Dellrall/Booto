@@ -680,6 +680,65 @@ static void test_real_host(void) {
     TEST_PASS("test_real_host");
 }
 
+static void fill_random(uint8_t *d, size_t n) {
+    uint32_t x = 0x9e3779b9u;
+    for (size_t i = 0; i < n; i++) {
+        x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+        d[i] = (uint8_t)x;
+    }
+}
+
+static const fw_nvram_finding_t *nvram_find(const fw_nvram_report_t *r, const char *prefix) {
+    for (int i = 0; i < r->count; i++)
+        if (strncmp(r->findings[i].name, prefix, strlen(prefix)) == 0) return &r->findings[i];
+    return NULL;
+}
+
+static void test_nvram_scan(void) {
+    TEST_START("test_nvram_scan");
+    make_root(true, false, false);
+    static uint8_t big[16384];
+    char path[256];
+
+    write_var("BootOrder", GLOBAL_GUID, (const uint8_t *)"\x01\x00\x02\x00", 4);
+    uint8_t pe[256] = { 0 };
+    memcpy(pe + 32, "MZ", 2);                 /* image hidden at an offset, not at byte 0 */
+    put_le32(pe + 32 + 0x3c, 0x80);
+    memcpy(pe + 32 + 0x80, "PE\0\0", 4);
+    write_var("Payload", GLOBAL_GUID, pe, sizeof(pe));
+    uint8_t mz_only[128] = { 'M', 'Z' };      /* "MZ" with no PE header is just data */
+    write_var("Text", GLOBAL_GUID, mz_only, sizeof(mz_only));
+    uint8_t elf[128] = { 0x7f, 'E', 'L', 'F' };
+    write_var("Implant", GLOBAL_GUID, elf, sizeof(elf));
+
+    memset(big, 0, 4);
+    fill_random(big + 4, 8192);
+    snprintf(path, sizeof(path), "%s/Blob-%s", g_efi, GLOBAL_GUID);
+    write_file(path, big, 4 + 8192);
+
+    static uint8_t cert[8192];               /* certificates look random too; a signature list must pass */
+    fill_random(cert, sizeof(cert));
+    size_t len = append_siglist(big, 4, T_X509, cert, sizeof(cert), 1);
+    snprintf(path, sizeof(path), "%s/db-%s", g_efi, IMAGE_GUID);
+    write_file(path, big, len);
+
+    fw_nvram_report_t r;
+    ASSERT_INT_EQ(firmware_nvram_scan(g_efi, &r), BOOTO_OK, "Scan runs");
+    ASSERT_INT_EQ(r.vars_scanned, 6, "Every variable is read");
+    ASSERT_INT_EQ(r.count, 3, "Only the three hiding code are flagged");
+    const fw_nvram_finding_t *f = nvram_find(&r, "Payload-");
+    ASSERT_TRUE(f && strstr(f->reason, "PE"), "Embedded PE flagged");
+    f = nvram_find(&r, "Implant-");
+    ASSERT_TRUE(f && strstr(f->reason, "ELF"), "ELF flagged");
+    f = nvram_find(&r, "Blob-");
+    ASSERT_TRUE(f && f->size == 8192, "Random blob flagged with its size");
+    ASSERT_TRUE(nvram_find(&r, "db-") == NULL, "Signature database is not flagged");
+
+    ASSERT_INT_EQ(firmware_nvram_scan("/nonexistent/efivars", &r), BOOTO_ERR_NOT_FOUND, "Missing dir reported");
+    remove_tree(g_root);
+    TEST_PASS("test_nvram_scan");
+}
+
 int main(void) {
     printf("\n--- Running Firmware Auditor Tests ---\n");
     test_good_machine();
@@ -695,6 +754,7 @@ int main(void) {
     test_legacy_chipsets();
     test_tpm_log();
     test_real_host();
+    test_nvram_scan();
     TEST_SUMMARY();
     return 0;
 }
