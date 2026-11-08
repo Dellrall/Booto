@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Bold TUI text uses the terminal's own text color instead of bright white, so it stays readable on light terminal themes.
+
 ## [1.4.1-beta] - 2026-11-08
 
 ### Fixed
