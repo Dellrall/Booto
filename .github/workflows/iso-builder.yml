@@ -99,4 +99,4 @@ jobs:
             dist/*.iso
             dist/*.sha256
           draft: false
-          prerelease: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
