@@ -43,7 +43,7 @@ make -C "${REPO_ROOT}" clean all
 echo "[+] Step 2/6: Bootstrapping Debian 12 (Bookworm) minimal rootfs..."
 debootstrap --arch=amd64 \
             --variant=minbase \
-            --include=linux-image-amd64,live-boot,systemd,systemd-sysv,libncurses6,libblkid1,libudev1,cryptsetup,util-linux,gzip,xz-utils,zstd,lz4,bzip2,flashrom,gpm,plymouth,plymouth-label \
+            --include=linux-image-amd64,live-boot,systemd,systemd-sysv,libncurses6,libblkid1,libudev1,cryptsetup,util-linux,gzip,xz-utils,zstd,lz4,bzip2,flashrom,gpm,plymouth,plymouth-label,console-setup-linux \
             "${DEBIAN_VERSION}" "${ROOTFS_DIR}" "${DEBIAN_MIRROR}"
 
 echo "[+] Step 3/6: Installing Booto binary into rootfs..."
@@ -73,6 +73,8 @@ SYSCONFIG
 mkdir -p "${ROOTFS_DIR}/etc/systemd/system/getty@tty1.service.d"
 cat << 'SYSCONFIG' > "${ROOTFS_DIR}/etc/systemd/system/getty@tty1.service.d/override.conf"
 [Service]
+# Terminus: crisper than the VGA font, same 8x16 cell, and has every glyph the TUI draws
+ExecStartPre=-/usr/bin/setfont /usr/share/consolefonts/Uni2-Terminus16.psf.gz
 ExecStart=
 ExecStart=-/bin/bash -c "/usr/local/bin/booto; exec /bin/bash 2>&1"
 StandardInput=tty
