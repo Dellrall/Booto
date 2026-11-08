@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Expert firmware mode (`-x`, `--expert-firmware`)**, off by default, CLI as root:
+  - NVRAM scan: every UEFI variable is read; one holding a PE or ELF image, or a blob of 4 KiB or more with entropy above 7.5 bits/byte that is not a signature list (PK/KEK/db/dbx/MokList), is flagged. On a real host: 158 variables, no false positives.
+  - SPI flash dump: `flashrom -p internal -r` (read-only; the chip is never written) saves `spi_flash.bin` and prints its SHA-256 to compare with the vendor image. `flashrom` now ships on the ISO.
+  - Results describe this machine and, like the host firmware audit, never change the verdict.
+- **Sandboxed decompressors.** Every tool that decompresses suspect data (initramfs segments, compressed kernel modules) runs with 60 s CPU, 1 GiB memory, no file writes, no core dumps, `no_new_privs`, and as `nobody` when Booto is root. Tests try to write a file, allocate 1.5 GiB, `sudo` and read a root-only file from inside it; CI runs them as root.
+- **`UEFI_PACKED_CODE_SECTION`**: the UEFI engine flags EFI binaries whose code section looks packed or encrypted.
 - **Package integrity engine** ("Packages", 7th scan engine; debsums-style, offline).
   - Hashes every file listed in the target's `/var/lib/dpkg/info/*.md5sums` under `bin`, `sbin`, `lib*`, `usr/bin`, `usr/sbin`, `usr/lib*` and `boot`, and flags a THREAT when the content differs from the package or the file was replaced by a symlink or non-file.
   - Paths resolve inside the target root only (`openat2` `RESOLVE_IN_ROOT`), so a planted absolute symlink cannot point the check at the live system's clean files. Files diverted with `dpkg-divert` are skipped; files deleted since install are counted, not flagged.
