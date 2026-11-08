@@ -739,6 +739,38 @@ static void test_nvram_scan(void) {
     TEST_PASS("test_nvram_scan");
 }
 
+static void test_spi_dump(void) {
+    TEST_START("test_spi_dump");
+    make_root(false, false, false);
+    char tool[128], image[128], oldpath[4096], newpath[4352];
+    snprintf(tool, sizeof(tool), "%s/flashrom", g_root);
+    snprintf(image, sizeof(image), "%s/spi.bin", g_root);
+    static const char script[] = "#!/bin/sh\n[ \"$1 $2 $3\" = \"-p internal -r\" ] || exit 1\nprintf flash > \"$4\"\n";
+    write_file(tool, script, strlen(script));
+    chmod(tool, 0755);
+    snprintf(oldpath, sizeof(oldpath), "%s", getenv("PATH") ? getenv("PATH") : "/usr/bin:/bin");
+    snprintf(newpath, sizeof(newpath), "%s:%s", g_root, oldpath);
+    setenv("PATH", newpath, 1);
+
+    char hex[65], want[65];
+    booto_error_t e = firmware_spi_dump(image, hex);
+    sha256_buffer_hex((const uint8_t *)"flash", 5, want);
+    ASSERT_INT_EQ(e, BOOTO_OK, "Dump succeeds with read-only flags");
+    ASSERT_STR_EQ(hex, want, "Image is hashed");
+
+    static const char failing[] = "#!/bin/sh\nexit 1\n";
+    write_file(tool, failing, strlen(failing));
+    ASSERT_INT_EQ(firmware_spi_dump(image, hex), BOOTO_ERR_IO, "flashrom failure is IO error");
+    ASSERT_TRUE(hex[0] == '\0', "No hash on failure");
+
+    setenv("PATH", g_root, 1);
+    unlink(tool);
+    ASSERT_INT_EQ(firmware_spi_dump(image, hex), BOOTO_ERR_NOT_FOUND, "Missing flashrom reported");
+    setenv("PATH", oldpath, 1);
+    remove_tree(g_root);
+    TEST_PASS("test_spi_dump");
+}
+
 int main(void) {
     printf("\n--- Running Firmware Auditor Tests ---\n");
     test_good_machine();
@@ -755,6 +787,7 @@ int main(void) {
     test_tpm_log();
     test_real_host();
     test_nvram_scan();
+    test_spi_dump();
     TEST_SUMMARY();
     return 0;
 }

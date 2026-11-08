@@ -9,6 +9,7 @@
  */
 #include "firmware_auditor.h"
 #include "crypto_utils.h"
+#include "disk_mount.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -960,6 +961,17 @@ booto_error_t firmware_nvram_scan(const char *efivars_dir, fw_nvram_report_t *ou
     }
     closedir(dp);
     return BOOTO_OK;
+}
+
+booto_error_t firmware_spi_dump(const char *out_path, char sha256_hex[65]) {
+    if (!out_path || !sha256_hex) return BOOTO_ERR_INVALID_ARG;
+    sha256_hex[0] = '\0';
+    const char *const argv[] = { "flashrom", "-p", "internal", "-r", out_path, NULL };
+    int status = 0;
+    booto_error_t e = disk_exec_argv(argv, NULL, 0, &status);
+    if (e == BOOTO_ERR_NOT_FOUND) return e;
+    if (e != BOOTO_OK) return BOOTO_ERR_IO;
+    return sha256_file_hex(out_path, sha256_hex) ? BOOTO_OK : BOOTO_ERR_IO;
 }
 
 const char *firmware_check_name(fw_check_id_t id) {
