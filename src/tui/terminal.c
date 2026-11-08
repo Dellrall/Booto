@@ -467,7 +467,7 @@ void term_present(void) {
 }
 
 /* Decodes a complete CSI sequence s[0..len) (ESC '[' params final, len >= 3); leaves KEY_NONE if unknown. */
-static void parse_csi(const unsigned char *s, size_t len, input_event_t *event) {
+void term_parse_csi(const unsigned char *s, size_t len, input_event_t *event) {
     unsigned char final = s[len - 1];
     const unsigned char *p = s + 2;
     size_t plen = len - 3;
@@ -478,8 +478,9 @@ static void parse_csi(const unsigned char *s, size_t len, input_event_t *event) 
         memcpy(tmp, p + 1, plen - 1);
         tmp[plen - 1] = '\0';
         int btn = 0, mx = 0, my = 0;
-        if (sscanf(tmp, "%d;%d;%d", &btn, &mx, &my) == 3) {
-            event->type = KEY_MOUSE_CLICK;
+        /* SGR: 'm' = release, +32 = drag motion, +64 = wheel (bit 0: down); only presses and wheel count. */
+        if (sscanf(tmp, "%d;%d;%d", &btn, &mx, &my) == 3 && final == 'M' && !(btn & 32)) {
+            event->type = (btn & 64) ? ((btn & 1) ? KEY_MOUSE_WHEEL_DOWN : KEY_MOUSE_WHEEL_UP) : KEY_MOUSE_CLICK;
             event->mouse_btn = btn;
             event->mouse_x = mx - 1;
             event->mouse_y = my - 1;
@@ -559,7 +560,7 @@ static size_t parse_input(const unsigned char *buf, size_t n, input_event_t *eve
         size_t end = 2;
         while (end < n && (buf[end] < 0x40 || buf[end] > 0x7E)) end++;
         if (end == n) return n; /* truncated sequence: drop it */
-        parse_csi(buf, end + 1, event);
+        term_parse_csi(buf, end + 1, event);
         return end + 1;
     }
 
