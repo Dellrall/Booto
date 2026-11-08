@@ -50,6 +50,11 @@ bool sha256_file_hex(const char *file_path, char hex_out[65]);
  */
 uint32_t crc32_update(uint32_t crc, const uint8_t *data, size_t len);
 
+/**
+ * @brief Shannon entropy in bits per byte of n bytes whose byte-value counts are hist (0 when n == 0).
+ */
+double entropy_bits(const size_t hist[256], size_t n);
+
 typedef struct {
     uint32_t state[4];
     uint64_t count;
