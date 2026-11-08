@@ -43,7 +43,7 @@ make -C "${REPO_ROOT}" clean all
 echo "[+] Step 2/6: Bootstrapping Debian 12 (Bookworm) minimal rootfs..."
 debootstrap --arch=amd64 \
             --variant=minbase \
-            --include=linux-image-amd64,live-boot,systemd,systemd-sysv,libncurses6,libblkid1,libudev1,cryptsetup,util-linux,gzip,xz-utils,zstd,lz4,bzip2 \
+            --include=linux-image-amd64,live-boot,systemd,systemd-sysv,libncurses6,libblkid1,libudev1,cryptsetup,util-linux,gzip,xz-utils,zstd,lz4,bzip2,flashrom \
             "${DEBIAN_VERSION}" "${ROOTFS_DIR}" "${DEBIAN_MIRROR}"
 
 echo "[+] Step 3/6: Installing Booto binary into rootfs..."
