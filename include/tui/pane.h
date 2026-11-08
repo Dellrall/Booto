@@ -117,6 +117,10 @@ typedef struct {
     // Status bar & modal state
     bool show_exit_modal;
     bool show_luks_modal;
+    bool show_inspect;                  // Inspect view of last_scan->inspect (Enter on Findings)
+    int inspect_tab;                    // 0 = Map, 1 = Hex
+    int inspect_scroll;                 // first line shown in the current tab
+    int inspect_hint_y;                 // screen row of the Findings "Enter  Inspect" line, -1 when hidden
     bool luks_modal_for_persist;        // modal unlocks report storage instead of the scan target
     char luks_target_dev[128];
     char luks_passphrase_input[128];
