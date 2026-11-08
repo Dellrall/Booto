@@ -10,10 +10,10 @@
 #endif
 
 #include "tui/terminal.h"
+#include "tui/evdev_ptr.h"
 
 #include <errno.h>
 #include <fcntl.h>
-#include <linux/input.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -127,80 +127,23 @@ static void update_dimensions(void) {
     memset(g_back_attrs, 0, cells * sizeof(uint32_t));
 }
 
-#define BIT_SET(arr, bit) ((arr)[(bit) / (8 * sizeof(long))] & (1UL << ((bit) % (8 * sizeof(long)))))
-
-/* Needs root (the live ISO); silently finds nothing otherwise. */
-static void open_abs_pointers(void) {
-    g_abs_count = 0;
-    for (int n = 0; n < 32 && g_abs_count < MAX_ABS_PTRS; n++) {
-        char path[32];
-        snprintf(path, sizeof(path), "/dev/input/event%d", n);
-        int fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
-        if (fd < 0) continue;
-        unsigned long abs_bits[ABS_CNT / (8 * sizeof(long)) + 1] = {0};
-        unsigned long key_bits[KEY_CNT / (8 * sizeof(long)) + 1] = {0};
-        unsigned long props[INPUT_PROP_CNT / (8 * sizeof(long)) + 1] = {0};
-        struct input_absinfo ax, ay;
-        bool ok = ioctl(fd, EVIOCGBIT(EV_ABS, sizeof(abs_bits)), abs_bits) >= 0 &&
-                  ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(key_bits)), key_bits) >= 0 &&
-                  BIT_SET(abs_bits, ABS_X) && BIT_SET(abs_bits, ABS_Y) &&
-                  (BIT_SET(key_bits, BTN_LEFT) || BIT_SET(key_bits, BTN_TOUCH)) &&
-                  ioctl(fd, EVIOCGABS(ABS_X), &ax) >= 0 && ioctl(fd, EVIOCGABS(ABS_Y), &ay) >= 0 &&
-                  ax.maximum > ax.minimum && ay.maximum > ay.minimum;
-        /* Touchpads report ABS_X/Y too, but relative to the pad, not the screen: leave them to gpm. */
-        if (ok && ioctl(fd, EVIOCGPROP(sizeof(props)), props) >= 0 && BIT_SET(props, INPUT_PROP_POINTER)) ok = false;
-        /* Grab so mousedev (and gpm behind it) stops turning these positions into drifting relative motion. */
-        if (!ok || ioctl(fd, EVIOCGRAB, 1) < 0) {
-            close(fd);
-            continue;
-        }
-        g_abs[g_abs_count++] = (term_abs_ptr_t){.fd = fd, .x_min = ax.minimum, .x_max = ax.maximum,
-                                                .y_min = ay.minimum, .y_max = ay.maximum, .x = -1, .y = -1};
-    }
-}
-
-int term_abs_to_cell(int value, int min, int max, int cells) {
-    if (cells <= 0 || max <= min) return 0;
-    long long c = (long long)(value - min) * cells / ((long long)max - min + 1);
-    return c < 0 ? 0 : c >= cells ? cells - 1 : (int)c;
-}
-
-bool term_abs_feed(term_abs_ptr_t *p, unsigned type, unsigned code, int value, int rows, int cols, input_event_t *out) {
-    if (type == EV_ABS && code == ABS_X) {
-        p->x = term_abs_to_cell(value, p->x_min, p->x_max, cols);
-        return false;
-    }
-    if (type == EV_ABS && code == ABS_Y) {
-        p->y = term_abs_to_cell(value, p->y_min, p->y_max, rows);
-        return false;
-    }
-    if (p->x >= 0 && p->y >= 0 && type == EV_KEY && value == 1 &&
-               (code == BTN_LEFT || code == BTN_TOUCH || code == BTN_RIGHT)) {
-        out->type = KEY_MOUSE_CLICK;
-        out->mouse_btn = code == BTN_RIGHT ? 2 : 0; /* X10/SGR button numbers */
-    } else if (p->x >= 0 && p->y >= 0 && type == EV_REL && code == REL_WHEEL && value != 0) {
-        out->type = value > 0 ? KEY_MOUSE_WHEEL_UP : KEY_MOUSE_WHEEL_DOWN;
-    } else {
-        return false;
-    }
-    out->mouse_x = p->x;
-    out->mouse_y = p->y;
-    return true;
-}
-
 /* Drains one device until it yields a click or wheel event; motion only moves the drawn pointer. */
 static bool read_abs_pointer(term_abs_ptr_t *p, input_event_t *event) {
-    struct input_event ev;
-    while (read(p->fd, &ev, sizeof(ev)) == (ssize_t)sizeof(ev)) {
-        bool hit = term_abs_feed(p, ev.type, ev.code, ev.value, g_rows, g_cols, event);
-        if (p->x >= 0 && p->y >= 0) {
-            g_ptr_x = p->x;
-            g_ptr_y = p->y;
-        }
-        if (hit) return true;
-        memset(event, 0, sizeof(*event));
+    ptr_action_t a = evdev_ptr_read(p, g_rows, g_cols);
+    if (p->x >= 0 && p->y >= 0) {
+        g_ptr_x = p->x;
+        g_ptr_y = p->y;
     }
-    return false;
+    switch (a) {
+        case PTR_CLICK_LEFT:  event->type = KEY_MOUSE_CLICK; event->mouse_btn = 0; break;
+        case PTR_CLICK_RIGHT: event->type = KEY_MOUSE_CLICK; event->mouse_btn = 2; break; /* X10/SGR button numbers */
+        case PTR_WHEEL_UP:    event->type = KEY_MOUSE_WHEEL_UP; break;
+        case PTR_WHEEL_DOWN:  event->type = KEY_MOUSE_WHEEL_DOWN; break;
+        default: return false;
+    }
+    event->mouse_x = p->x;
+    event->mouse_y = p->y;
+    return true;
 }
 
 int term_init(void) {
@@ -249,7 +192,7 @@ int term_init(void) {
     (void)w;
 
     update_dimensions();
-    open_abs_pointers();
+    g_abs_count = evdev_ptr_open_all(g_abs, MAX_ABS_PTRS);
     return 0;
 }
 
