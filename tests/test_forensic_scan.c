@@ -34,7 +34,7 @@ static void build_rootfs(void) {
 static void test_rootfs_dir_scan(void) {
     TEST_START("test_rootfs_dir_scan");
     forensic_scan_report_t *r = calloc(1, sizeof(*r));
-    ASSERT_INT_EQ(forensic_scan_run(NULL, g_root, NULL, NULL, NULL, r), BOOTO_OK, "Scan must run");
+    ASSERT_INT_EQ(forensic_scan_run(NULL, g_root, NULL, NULL, NULL, NULL, r), BOOTO_OK, "Scan must run");
     ASSERT_INT_EQ(r->mount_err, BOOTO_OK, "rootfs_dir needs no mount");
     ASSERT_TRUE(!r->mounted, "rootfs_dir must not be mounted");
     ASSERT_INT_EQ(r->status[SCAN_MOD_MBR], SCAN_STATUS_SKIPPED, "MBR skipped without raw device");
@@ -98,7 +98,7 @@ static void test_rootfs_esp_used(void) {
     ASSERT_TRUE(wr == len, "Write BOOTX64.EFI");
 
     forensic_scan_report_t *r = calloc(1, sizeof(*r));
-    ASSERT_INT_EQ(forensic_scan_run(NULL, g_root, NULL, NULL, NULL, r), BOOTO_OK, "Scan must run");
+    ASSERT_INT_EQ(forensic_scan_run(NULL, g_root, NULL, NULL, NULL, NULL, r), BOOTO_OK, "Scan must run");
     ASSERT_INT_EQ(r->status[SCAN_MOD_UEFI], SCAN_STATUS_OK, "UEFI runs on the rootfs ESP");
     ASSERT_INT_EQ(r->uefi.efi_files_scanned, 1, "One EFI file scanned");
     size_t n = strlen(r->esp_dev);
@@ -111,7 +111,7 @@ static void test_rootfs_esp_used(void) {
 static void test_unreadable_partition_table(void) {
     TEST_START("test_unreadable_partition_table");
     forensic_scan_report_t *r = calloc(1, sizeof(*r));
-    ASSERT_INT_EQ(forensic_scan_run("/nonexistent/disk", NULL, NULL, NULL, NULL, r), BOOTO_OK, "Scan must run");
+    ASSERT_INT_EQ(forensic_scan_run("/nonexistent/disk", NULL, NULL, NULL, NULL, NULL, r), BOOTO_OK, "Scan must run");
     ASSERT_INT_EQ(r->status[SCAN_MOD_UEFI], SCAN_STATUS_ERROR, "Unreadable partition table: UEFI error");
     ASSERT_TRUE(strncmp(r->note[SCAN_MOD_UEFI], "cannot read partition table:", 28) == 0, "UEFI error reason");
     ASSERT_INT_EQ(r->verdict, SCAN_VERDICT_INCOMPLETE, "UEFI error must be INCOMPLETE");
@@ -124,7 +124,7 @@ static void test_unreadable_partition_table(void) {
 static void test_mount_failure_never_clean(void) {
     TEST_START("test_mount_failure_never_clean");
     forensic_scan_report_t *r = calloc(1, sizeof(*r));
-    ASSERT_INT_EQ(forensic_scan_run("/nonexistent/dev", NULL, NULL, NULL, NULL, r), BOOTO_OK, "Scan must run");
+    ASSERT_INT_EQ(forensic_scan_run("/nonexistent/dev", NULL, NULL, NULL, NULL, NULL, r), BOOTO_OK, "Scan must run");
     ASSERT_TRUE(r->mount_err != BOOTO_OK, "Mounting a nonexistent device must fail");
     ASSERT_TRUE(!r->mounted, "Nothing mounted");
     ASSERT_INT_EQ(r->status[SCAN_MOD_UEFI], SCAN_STATUS_ERROR, "UEFI error without rootfs");
@@ -141,7 +141,7 @@ static void test_all_disabled(void) {
     TEST_START("test_all_disabled");
     bool enabled[SCAN_MOD_COUNT] = {false};
     forensic_scan_report_t *r = calloc(1, sizeof(*r));
-    ASSERT_INT_EQ(forensic_scan_run(NULL, g_root, enabled, NULL, NULL, r), BOOTO_OK, "Scan must run");
+    ASSERT_INT_EQ(forensic_scan_run(NULL, g_root, enabled, NULL, NULL, NULL, r), BOOTO_OK, "Scan must run");
     for (int i = 0; i < SCAN_MOD_COUNT; i++) {
         ASSERT_INT_EQ(r->status[i], SCAN_STATUS_SKIPPED, "Disabled module must be SKIPPED");
     }
@@ -178,10 +178,41 @@ static void test_highest_severity(void) {
 static void test_invalid_args(void) {
     TEST_START("test_invalid_args");
     forensic_scan_report_t *r = calloc(1, sizeof(*r));
-    ASSERT_INT_EQ(forensic_scan_run(NULL, NULL, NULL, NULL, NULL, r), BOOTO_ERR_INVALID_ARG, "No target is invalid");
-    ASSERT_INT_EQ(forensic_scan_run(NULL, g_root, NULL, NULL, NULL, NULL), BOOTO_ERR_INVALID_ARG, "NULL out is invalid");
+    ASSERT_INT_EQ(forensic_scan_run(NULL, NULL, NULL, NULL, NULL, NULL, r), BOOTO_ERR_INVALID_ARG, "No target is invalid");
+    ASSERT_INT_EQ(forensic_scan_run(NULL, g_root, NULL, NULL, NULL, NULL, NULL), BOOTO_ERR_INVALID_ARG, "NULL out is invalid");
     free(r);
     TEST_PASS("test_invalid_args");
+}
+
+static void test_quarantine_export(void) {
+    TEST_START("test_quarantine_export");
+    char p[256], lib[256], qdir[256];
+    snprintf(lib, sizeof(lib), "%s/lib/evil.so", g_root);
+    FILE *fp = fopen(lib, "w");
+    ASSERT_TRUE(fp != NULL, "Create evil.so");
+    fputs("payload", fp);
+    fclose(fp);
+    snprintf(p, sizeof(p), "%s/etc/ld.so.preload", g_root);
+    fp = fopen(p, "w");
+    ASSERT_TRUE(fp != NULL, "Write ld.so.preload");
+    fputs("/lib/evil.so\n", fp);
+    fclose(fp);
+    snprintf(qdir, sizeof(qdir), "%s/quarantine", g_root);
+    mkdir(qdir, 0700);
+
+    forensic_scan_report_t *r = calloc(1, sizeof(*r));
+    ASSERT_INT_EQ(forensic_scan_run(NULL, g_root, NULL, NULL, NULL, NULL, r), BOOTO_OK, "Scan without quarantine");
+    ASSERT_TRUE(r->preload.threats_detected > 0, "Preload entry is a threat");
+    ASSERT_STR_EQ(r->quarantine_zip, "", "Quarantine off by default");
+    ASSERT_INT_EQ(forensic_scan_run(NULL, g_root, NULL, qdir, NULL, NULL, r), BOOTO_OK, "Scan with quarantine");
+    ASSERT_INT_EQ(r->quarantined, 1, "Flagged library exported");
+    struct stat st;
+    ASSERT_TRUE(stat(r->quarantine_zip, &st) == 0 && (st.st_mode & 0777) == 0400, "Read-only archive written");
+    free(r);
+    fp = fopen(p, "w");
+    if (fp) fclose(fp);
+    unlink(lib);
+    TEST_PASS("test_quarantine_export");
 }
 
 int main(void) {
@@ -200,6 +231,7 @@ int main(void) {
     test_all_disabled();
     test_highest_severity();
     test_invalid_args();
+    test_quarantine_export();
     char cmd[128];
     snprintf(cmd, sizeof(cmd), "rm -rf '%s'", g_root);
     if (system(cmd) != 0) fprintf(stderr, "warning: cleanup of %s failed\n", g_root);

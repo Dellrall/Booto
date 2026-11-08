@@ -239,7 +239,7 @@ static scan_module_id_t pane_module_to_scan_id(const char *name) {
 /* Worker thread: touches only its own pending_* / scan_* inputs, the log (locked) and the atomics. */
 static void *scan_worker(void *arg) {
     tui_app_state_t *app = arg;
-    app->pending_err = forensic_scan_run(app->scan_target, NULL, app->scan_enabled, scan_progress_cb, app,
+    app->pending_err = forensic_scan_run(app->scan_target, NULL, app->scan_enabled, NULL, scan_progress_cb, app,
                                          app->pending_scan);
     atomic_store(&app->scan_done, true);
     return NULL;

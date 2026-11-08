@@ -45,6 +45,8 @@ typedef struct {
     scan_verdict_t verdict;
     bool firmware_ran;          /* device mode only; describes this machine, never the verdict */
     firmware_report_t firmware;
+    int quarantined;            /* files exported to quarantine_zip; -1 when the archive could not be finished */
+    char quarantine_zip[512];   /* "" when quarantine was off or nothing was flagged */
 } forensic_scan_report_t;
 
 /* step is 1..SCAN_MOD_COUNT, called before each module runs. */
@@ -56,10 +58,13 @@ typedef void (*forensic_scan_progress_cb)(int step, int total, const char *msg, 
  * UEFI: <root>/boot/efi if it holds EFI files, else the ESP on target_dev's disk (GPT/MBR lookup) mounted RO at
  *   /tmp/booto_esp_target and unmounted after the scan; no ESP anywhere -> UEFI SKIPPED.
  * enabled: NULL = all enabled. Disabled modules -> SKIPPED, note "disabled".
+ * quarantine_dir: NULL = off; else every flagged file (MBR: first 1 MiB of target_dev) is exported to an
+ *   encrypted ZIP in this existing directory before the target is unmounted (see quarantine.h).
  * out: caller-allocated (it is large; heap-allocate it). Returns BOOTO_OK when the scan ran (whatever the verdict),
  * BOOTO_ERR_INVALID_ARG if both target_dev and rootfs_dir are NULL or out is NULL. */
 booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, const bool *enabled,
-                                forensic_scan_progress_cb cb, void *user, forensic_scan_report_t *out);
+                                const char *quarantine_dir, forensic_scan_progress_cb cb, void *user,
+                                forensic_scan_report_t *out);
 const char *forensic_scan_module_name(scan_module_id_t id);
 const char *forensic_scan_status_str(scan_status_t s);
 const char *forensic_scan_verdict_str(scan_verdict_t v);
