@@ -6,7 +6,9 @@
 #include "disk_mount.h"
 #include "initramfs_auditor.h"
 
+#include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #define CPIO_BUF_CAP 8192
@@ -196,6 +198,52 @@ static void test_exec_capture_sandboxed(void) {
     TEST_PASS("test_exec_capture_sandboxed");
 }
 
+/* Run sh -c script in the sandbox; returns its status and frees the output. */
+static booto_error_t sandbox_run(const char *script) {
+    const char *const argv[] = {"sh", "-c", script, NULL};
+    uint8_t *out = NULL;
+    size_t out_len = 0;
+    booto_error_t err = disk_exec_capture(argv, NULL, 0, &out, &out_len, 4096);
+    free(out);
+    return err;
+}
+
+/* Escape attempts a hostile decompressor could make: each must fail inside the sandbox. */
+static void test_exec_capture_escape_attempts(void) {
+    TEST_START("test_exec_capture_escape_attempts");
+    if (!tool_available("sh")) return;
+    char script[512];
+
+    char path[] = "/tmp/booto_sandbox_XXXXXX";
+    int fd = mkstemp(path);
+    ASSERT_TRUE(fd >= 0, "Temp file created");
+    close(fd);
+    chmod(path, 0666);
+    snprintf(script, sizeof(script), "echo escaped > %s", path);
+    sandbox_run(script);
+    struct stat st;
+    ASSERT_TRUE(stat(path, &st) == 0 && st.st_size == 0, "Child must not write to disk");
+
+    if (tool_available("dd"))
+        ASSERT_TRUE(sandbox_run("dd if=/dev/zero of=/dev/null bs=1500M count=1") != BOOTO_OK,
+                    "Child must not allocate past the 1 GiB memory cap");
+
+    if (tool_available("sudo"))
+        ASSERT_TRUE(sandbox_run("sudo -n true") != BOOTO_OK, "Child must not gain root through setuid sudo");
+
+    if (geteuid() == 0) {
+        FILE *f = fopen(path, "w");
+        ASSERT_TRUE(f != NULL, "Root writes the secret");
+        if (f) { fputs("secret", f); fclose(f); }
+        chmod(path, 0600);
+        snprintf(script, sizeof(script), "cat %s", path);
+        ASSERT_TRUE(sandbox_run(script) != BOOTO_OK, "Child must not read a root-only file");
+    }
+    unlink(path);
+
+    TEST_PASS("test_exec_capture_escape_attempts");
+}
+
 int main(void) {
     printf("\n--- Running Initramfs CPIO Auditor Tests ---\n");
     test_cpio_archive_and_script_audit();
@@ -205,6 +253,7 @@ int main(void) {
     test_padded_line_detected();
     test_exec_capture_output_cap();
     test_exec_capture_sandboxed();
+    test_exec_capture_escape_attempts();
     TEST_SUMMARY();
     return 0;
 }
