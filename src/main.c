@@ -58,6 +58,8 @@ static void print_help(const char *prog_name) {
     printf("  -s, --scan-dir <path>      Specify local rootfs path to inspect\n");
     printf("  -p, --persistence-dir <dir>Write JSON+Markdown case reports to <dir>\n");
     printf("  -u, --update-rules         Regenerate sealed rule files (scripts/update_rules.sh)\n");
+    printf("  -x, --expert-firmware      CLI, as root: also scan UEFI variables for hidden code and\n");
+    printf("                             dump the SPI flash read-only with flashrom (slower; off by default)\n");
     printf("  -V, --verbose              Enable verbose/debug logging\n\n");
     printf("CLI exit codes:\n");
     printf("  0  CLEAN       every enabled engine ran and found nothing\n");
@@ -102,6 +104,34 @@ static void write_reports(const forensic_scan_report_t *rep, const char *dir) {
     else fprintf(stderr, "Failed to write Markdown report to %s (error %d)\n", dir, e);
 }
 
+/* Host-machine checks like firmware_audit, so they are reported but never change the verdict. */
+static void run_expert_firmware(const char *dir) {
+    printf("\nExpert firmware (this machine, not part of the verdict)\n");
+    fw_nvram_report_t *nv = calloc(1, sizeof(*nv));
+    if (!nv) {
+        LOG_ERROR("Out of memory allocating NVRAM report");
+        return;
+    }
+    if (firmware_nvram_scan(NULL, nv) != BOOTO_OK) {
+        printf("NVRAM: no UEFI variables to scan (BIOS boot, or efivarfs not mounted)\n");
+    } else {
+        printf("NVRAM: %d variable(s) read, %d unreadable, %d suspicious\n", nv->vars_scanned, nv->unreadable, nv->count);
+        for (int i = 0; i < nv->count; i++)
+            printf("  %s (%zu bytes): %s\n", nv->findings[i].name, nv->findings[i].size, nv->findings[i].reason);
+    }
+    free(nv);
+
+    char image[600], hex[65];
+    snprintf(image, sizeof(image), "%s/spi_flash.bin", dir[0] ? dir : "/tmp");
+    booto_error_t e = firmware_spi_dump(image, hex);
+    if (e == BOOTO_OK)
+        printf("SPI flash: saved %s\n  SHA-256 %s\n  Compare it with the vendor's firmware image for this model.\n", image, hex);
+    else if (e == BOOTO_ERR_NOT_FOUND)
+        printf("SPI flash: flashrom is not installed\n");
+    else
+        printf("SPI flash: flashrom could not read the chip (needs root; some chipsets block reads)\n");
+}
+
 static int run_cli(booto_context_t *ctx) {
     LOG_INFO("Booto CLI Mode initialized (Version: %s)", BOOTO_VERSION_STRING);
     if (!resolve_target(ctx)) {
@@ -141,6 +171,7 @@ static int run_cli(booto_context_t *ctx) {
         if (rep->firmware.chipset_unconfirmed) printf("\n%s", FW_CHIPSET_HELP);
     }
 
+    if (ctx->expert_firmware) run_expert_firmware(ctx->persistence_dir);
     if (ctx->persistence_dir[0]) write_reports(rep, ctx->persistence_dir);
 
     int code = rep->verdict == SCAN_VERDICT_CLEAN ? EXIT_CLEAN
@@ -161,6 +192,7 @@ static void print_dry_run(const booto_context_t *ctx) {
     printf("  Modules       :");
     for (int i = 0; i < SCAN_MOD_COUNT; i++) printf(" %s%s", forensic_scan_module_name((scan_module_id_t)i), i + 1 < SCAN_MOD_COUNT ? "," : "\n");
     printf("  Firmware      : Secure Boot keys, dbx and DMA protection of this machine (device mode only)\n");
+    printf("  Expert fw     : %s\n", ctx->expert_firmware ? "NVRAM scan and read-only SPI flash dump (CLI, root)" : "off");
     printf("  Report dir    : %s\n", ctx->persistence_dir[0] ? ctx->persistence_dir : "(none)");
 }
 
@@ -179,12 +211,13 @@ int main(int argc, char *argv[]) {
         {"persistence-dir", required_argument, 0, 'p'},
         {"update-rules",    no_argument,       0, 'u'},
         {"verbose",         no_argument,       0, 'V'},
+        {"expert-firmware", no_argument,       0, 'x'},
         {0, 0, 0, 0}
     };
 
     int opt;
     int option_index = 0;
-    while ((opt = getopt_long(argc, argv, "hvcdmt:s:p:uV", long_options, &option_index)) != -1) {
+    while ((opt = getopt_long(argc, argv, "hvcdmt:s:p:uVx", long_options, &option_index)) != -1) {
         switch (opt) {
             case 'h':
                 print_help(argv[0]);
@@ -220,6 +253,9 @@ int main(int argc, char *argv[]) {
                 break;
             case 'V':
                 ctx.verbose = true;
+                break;
+            case 'x':
+                ctx.expert_firmware = true;
                 break;
             default:
                 print_help(argv[0]);
