@@ -22,6 +22,7 @@ typedef enum {
     FW_CHECK_PLATFORM_KEY,     /* "Platform key" */
     FW_CHECK_TEST_KEYS,        /* "No test keys (PKfail)" */
     FW_CHECK_DBX,              /* "Revocation list (dbx)" */
+    FW_CHECK_MOK,              /* "Shim MOK keys known" */
     FW_CHECK_IOMMU,            /* "IOMMU described (DMAR/IVRS)" */
     FW_CHECK_THUNDERBOLT_DMA,  /* "Thunderbolt DMA protection" */
     FW_CHECK_SMM_LOCK,         /* "SMM locked" */
