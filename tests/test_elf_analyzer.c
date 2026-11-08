@@ -113,11 +113,38 @@ static void test_elf_unterminated_shstrtab(void) {
     TEST_PASS("test_elf_unterminated_shstrtab");
 }
 
+/* A compressed module is read by Booto and piped to the sandboxed decompressor, so a 0600 file still scans. */
+static void test_compressed_lkm_piped(void) {
+    TEST_START("test_compressed_lkm_piped");
+    char dir[] = "/tmp/booto_lkm_gz_XXXXXX";
+    ASSERT_TRUE(mkdtemp(dir) != NULL, "mkdtemp");
+    char cmd[256];
+    /* /bin/true plus a .modinfo without license= : parsing it yields LKM_MISSING_LICENSE. */
+    snprintf(cmd, sizeof(cmd),
+             "cd %s && printf 'author=x\\0' > mi && objcopy --add-section .modinfo=mi /bin/true m.ko && "
+             "gzip m.ko && chmod 600 m.ko.gz && rm mi", dir);
+    if (system(cmd) != 0) {
+        printf("    [SKIP] objcopy, gzip or /bin/true unavailable\n");
+        return;
+    }
+
+    kernel_scan_result_t res;
+    memset(&res, 0, sizeof(res));
+    kernel_inspect_directory(dir, &res);
+    ASSERT_INT_EQ(res.modules_scanned, 1, "Compressed module scanned");
+    ASSERT_TRUE(res.threats_detected >= 1, "Decompressed ELF parsed: missing license flagged");
+
+    snprintf(cmd, sizeof(cmd), "rm -rf %s", dir);
+    ASSERT_TRUE(system(cmd) == 0, "cleanup");
+    TEST_PASS("test_compressed_lkm_piped");
+}
+
 int main(void) {
     printf("\n--- Running ELF Parser & Kernel Rootkit Scanner Tests ---\n");
     test_sha256_known_vector();
     test_elf_parser_on_binary();
     test_rootkit_lkm_detection();
+    test_compressed_lkm_piped();
     test_elf_wrapping_shoff_rejected();
     test_elf_unterminated_shstrtab();
     TEST_SUMMARY();
