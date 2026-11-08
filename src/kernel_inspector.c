@@ -63,6 +63,46 @@ static const lkm_codec_t G_LKM_CODECS[] = {
 
 #define LKM_CODEC_COUNT (sizeof(G_LKM_CODECS) / sizeof(G_LKM_CODECS[0]))
 
+/* scripts/sign-file appends the PKCS#7 blob, a module_signature struct, then this marker. */
+#define LKM_SIG_MAGIC "~Module signature appended~\n"
+#define LKM_SIG_MAGIC_LEN (sizeof(LKM_SIG_MAGIC) - 1)
+#define LKM_UNSIGNED_CAP 32
+
+static bool lkm_tail_signed(const uint8_t *buf, size_t len) {
+    return len >= LKM_SIG_MAGIC_LEN && memcmp(buf + len - LKM_SIG_MAGIC_LEN, LKM_SIG_MAGIC, LKM_SIG_MAGIC_LEN) == 0;
+}
+
+static bool lkm_file_signed(const char *path) {
+    uint8_t tail[LKM_SIG_MAGIC_LEN];
+    FILE *fp = fopen(path, "rb");
+    if (!fp) return false;
+    bool ok = fseek(fp, -(long)LKM_SIG_MAGIC_LEN, SEEK_END) == 0 && fread(tail, 1, sizeof(tail), fp) == sizeof(tail);
+    fclose(fp);
+    return ok && lkm_tail_signed(tail, sizeof(tail));
+}
+
+/* Directory walk state: unsigned modules are held back until we know whether this kernel signs modules at all. */
+typedef struct {
+    unsigned missing_tools; /* bitmask over G_LKM_CODECS of decompressors found absent */
+    int signed_count;
+    int unsigned_count;
+    char unsigned_paths[LKM_UNSIGNED_CAP][256];
+    char unsigned_sha[LKM_UNSIGNED_CAP][65];
+} lkm_walk_t;
+
+static void note_signature(lkm_walk_t *w, const char *path, const char *sha, bool is_signed) {
+    if (!w) return;
+    if (is_signed) {
+        w->signed_count++;
+        return;
+    }
+    if (w->unsigned_count < LKM_UNSIGNED_CAP) {
+        snprintf(w->unsigned_paths[w->unsigned_count], sizeof(w->unsigned_paths[0]), "%s", path);
+        snprintf(w->unsigned_sha[w->unsigned_count], sizeof(w->unsigned_sha[0]), "%s", sha);
+    }
+    w->unsigned_count++;
+}
+
 /* Rule + modinfo checks on a parsed module; frees elf's symbol table. */
 static void analyze_lkm(const char *ko_path, const rules_lkm_set_t *rules, elf_binary_info_t *elf, kernel_scan_result_t *result) {
     // 1. Symbol Table Signature Matching
@@ -105,8 +145,7 @@ static void analyze_lkm(const char *ko_path, const rules_lkm_set_t *rules, elf_b
     elf_free_info(elf);
 }
 
-booto_error_t kernel_inspect_lkm_file(const char *ko_path, kernel_scan_result_t *result) {
-    if (!ko_path || !result) return BOOTO_ERR_INVALID_ARG;
+static booto_error_t inspect_lkm_file(const char *ko_path, kernel_scan_result_t *result, lkm_walk_t *w) {
 
     const rules_lkm_set_t *rules;
     booto_error_t err = rules_get_lkm(&rules);
@@ -120,12 +159,19 @@ booto_error_t kernel_inspect_lkm_file(const char *ko_path, kernel_scan_result_t 
         LOG_WARN("Could not parse ELF binary '%s' (err: %d)", ko_path, err);
         return err;
     }
+    note_signature(w, ko_path, elf.sha256, lkm_file_signed(ko_path));
     analyze_lkm(ko_path, rules, &elf, result);
     return BOOTO_OK;
 }
 
+booto_error_t kernel_inspect_lkm_file(const char *ko_path, kernel_scan_result_t *result) {
+    if (!ko_path || !result) return BOOTO_ERR_INVALID_ARG;
+    return inspect_lkm_file(ko_path, result, NULL);
+}
+
 /* Decompress a .ko.{xz,zst,gz} via the external tool and run the same ELF checks on the buffer. */
-static booto_error_t inspect_compressed_lkm(const char *ko_path, const lkm_codec_t *codec, kernel_scan_result_t *result) {
+static booto_error_t inspect_compressed_lkm(const char *ko_path, const lkm_codec_t *codec, kernel_scan_result_t *result,
+                                           lkm_walk_t *w) {
     const rules_lkm_set_t *rules;
     booto_error_t err = rules_get_lkm(&rules);
     if (err != BOOTO_OK) return err;
@@ -164,18 +210,19 @@ static booto_error_t inspect_compressed_lkm(const char *ko_path, const lkm_codec
 
     elf_binary_info_t elf;
     err = raw ? elf_parse_buffer(raw, raw_len, &elf) : BOOTO_ERR_CORRUPT_DATA;
+    bool is_signed = raw && lkm_tail_signed(raw, raw_len);
     free(raw);
     if (err != BOOTO_OK) {
         LOG_WARN("Could not parse decompressed ELF binary '%s' (err: %d)", ko_path, err);
         return err;
     }
     snprintf(elf.file_path, sizeof(elf.file_path), "%s", ko_path);
+    note_signature(w, ko_path, elf.sha256, is_signed);
     analyze_lkm(ko_path, rules, &elf, result);
     return BOOTO_OK;
 }
 
-/* missing_tools: bitmask over G_LKM_CODECS of decompressors found absent (logged once, skipped afterwards). */
-static void scan_dir_recursive(const char *base_path, kernel_scan_result_t *result, int depth, unsigned *missing_tools) {
+static void scan_dir_recursive(const char *base_path, kernel_scan_result_t *result, int depth, lkm_walk_t *w) {
     if (depth > 6) return;
 
     DIR *dir = opendir(base_path);
@@ -193,19 +240,19 @@ static void scan_dir_recursive(const char *base_path, kernel_scan_result_t *resu
         struct stat st;
         if (stat(full_path, &st) == 0) {
             if (S_ISDIR(st.st_mode)) {
-                scan_dir_recursive(full_path, result, depth + 1, missing_tools);
+                scan_dir_recursive(full_path, result, depth + 1, w);
             } else if (S_ISREG(st.st_mode)) {
                 size_t nlen = strlen(entry->d_name);
                 if (nlen > 3 && strcmp(entry->d_name + nlen - 3, ".ko") == 0) {
-                    kernel_inspect_lkm_file(full_path, result);
+                    inspect_lkm_file(full_path, result, w);
                     continue;
                 }
                 for (size_t c = 0; c < LKM_CODEC_COUNT; c++) {
                     size_t slen = strlen(G_LKM_CODECS[c].suffix);
                     if (nlen <= slen || strcmp(entry->d_name + nlen - slen, G_LKM_CODECS[c].suffix) != 0) continue;
-                    if (!(*missing_tools & (1U << c)) &&
-                        inspect_compressed_lkm(full_path, &G_LKM_CODECS[c], result) == BOOTO_ERR_NOT_FOUND) {
-                        *missing_tools |= 1U << c;
+                    if (!(w->missing_tools & (1U << c)) &&
+                        inspect_compressed_lkm(full_path, &G_LKM_CODECS[c], result, w) == BOOTO_ERR_NOT_FOUND) {
+                        w->missing_tools |= 1U << c;
                     }
                     break;
                 }
@@ -224,8 +271,25 @@ booto_error_t kernel_inspect_directory(const char *lib_modules_dir, kernel_scan_
     if (err != BOOTO_OK) return err;
 
     LOG_INFO("Scanning kernel modules in directory: %s", lib_modules_dir);
-    unsigned missing_tools = 0;
-    scan_dir_recursive(lib_modules_dir, result, 0, &missing_tools);
+    lkm_walk_t *w = calloc(1, sizeof(*w));
+    if (!w) return BOOTO_ERR_OUT_OF_MEMORY;
+    scan_dir_recursive(lib_modules_dir, result, 0, w);
+
+    /* A kernel that signs its modules (every distro kernel) never ships an unsigned one; a self-built kernel signs none. */
+    if (w->signed_count > 0) {
+        int shown = w->unsigned_count < LKM_UNSIGNED_CAP ? w->unsigned_count : LKM_UNSIGNED_CAP;
+        for (int i = 0; i < shown; i++) {
+            add_threat_finding(result, "Unsigned Kernel Module", w->unsigned_paths[i], w->unsigned_sha[i], "LKM_UNSIGNED",
+                               "", 0, SEVERITY_HIGH,
+                               "Module has no signature while the kernel's own modules are signed: added after install "
+                               "(rootkit, or a DKMS driver built without the MOK key)");
+        }
+        if (w->unsigned_count > shown) {
+            LOG_WARN("%d more unsigned kernel modules not listed", w->unsigned_count - shown);
+        }
+    }
+    unsigned missing_tools = w->missing_tools;
+    free(w);
 
     LOG_INFO("Kernel module scan complete: %d modules inspected, %d threats flagged",
              result->modules_scanned, result->threats_detected);

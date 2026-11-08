@@ -139,12 +139,55 @@ static void test_compressed_lkm_piped(void) {
     TEST_PASS("test_compressed_lkm_piped");
 }
 
+static int count_rule(const kernel_scan_result_t *r, const char *rule) {
+    int n = 0;
+    for (int i = 0; i < r->threats_detected; i++) n += strcmp(r->findings[i].detection_rule, rule) == 0;
+    return n;
+}
+
+/* Unsigned modules count only when the kernel signs its modules: a self-built kernel signs none. */
+static void test_unsigned_lkm_flagged(void) {
+    TEST_START("test_unsigned_lkm_flagged");
+    char dir[] = "/tmp/booto_lkm_sig_XXXXXX";
+    ASSERT_TRUE(mkdtemp(dir) != NULL, "mkdtemp");
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd),
+             "cd %s && printf 'license=GPL\\0' > mi && objcopy --add-section .modinfo=mi /bin/true a.ko && "
+             "cp a.ko b.ko && rm mi", dir);
+    if (system(cmd) != 0) {
+        printf("    [SKIP] objcopy or /bin/true unavailable\n");
+        return;
+    }
+
+    kernel_scan_result_t res;
+    memset(&res, 0, sizeof(res));
+    kernel_inspect_directory(dir, &res);
+    ASSERT_INT_EQ(res.modules_scanned, 2, "Both modules scanned");
+    ASSERT_INT_EQ(count_rule(&res, "LKM_UNSIGNED"), 0, "No module signed: kernel does not sign, nothing flagged");
+
+    snprintf(cmd, sizeof(cmd), "printf 'SIG~Module signature appended~\\n' >> %s/a.ko", dir);
+    ASSERT_TRUE(system(cmd) == 0, "append signature marker");
+    memset(&res, 0, sizeof(res));
+    kernel_inspect_directory(dir, &res);
+    ASSERT_INT_EQ(count_rule(&res, "LKM_UNSIGNED"), 1, "Kernel signs modules: the unsigned one is flagged");
+    for (int i = 0; i < res.threats_detected; i++) {
+        if (strcmp(res.findings[i].detection_rule, "LKM_UNSIGNED") == 0) {
+            ASSERT_TRUE(strstr(res.findings[i].file_path, "/b.ko") != NULL, "Flagged module is b.ko");
+        }
+    }
+
+    snprintf(cmd, sizeof(cmd), "rm -rf %s", dir);
+    ASSERT_TRUE(system(cmd) == 0, "cleanup");
+    TEST_PASS("test_unsigned_lkm_flagged");
+}
+
 int main(void) {
     printf("\n--- Running ELF Parser & Kernel Rootkit Scanner Tests ---\n");
     test_sha256_known_vector();
     test_elf_parser_on_binary();
     test_rootkit_lkm_detection();
     test_compressed_lkm_piped();
+    test_unsigned_lkm_flagged();
     test_elf_wrapping_shoff_rejected();
     test_elf_unterminated_shstrtab();
     TEST_SUMMARY();
