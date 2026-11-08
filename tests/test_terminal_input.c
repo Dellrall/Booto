@@ -5,6 +5,7 @@
 #include "test_framework.h"
 #include "tui/terminal.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 static input_event_t parse(const char *seq) {
@@ -36,6 +37,12 @@ static void test_sgr_attrs(void) {
     ASSERT_TRUE(strcmp(b, "\033[0;1;2;4;31m") == 0, "Bold, dim, underline and red fg");
     term_sgr(MAKE_ATTR(COLOR_BRIGHT_WHITE, COLOR_BLUE, ATTR_REVERSE), b, sizeof(b));
     ASSERT_TRUE(strcmp(b, "\033[0;7;97;44m") == 0, "Reverse, bright fg, normal bg");
+    setenv("NO_COLOR", "1", 1);
+    term_sgr(MAKE_ATTR(COLOR_RED, COLOR_BLUE, ATTR_BOLD | ATTR_REVERSE), b, sizeof(b));
+    ASSERT_STR_EQ(b, "\033[0;1;7m", "NO_COLOR keeps attributes and drops colors");
+    term_sgr(MAKE_ATTR(COLOR_BLACK, COLOR_CYAN, ATTR_NONE), b, sizeof(b));
+    ASSERT_STR_EQ(b, "\033[0;7m", "NO_COLOR shows a background band as reverse");
+    unsetenv("NO_COLOR");
     ASSERT_INT_EQ((int)term_sgr(MAKE_ATTR(COLOR_RED, COLOR_BLUE, ATTR_BOLD), b, 4), 0, "Too-small buffer writes nothing usable");
     TEST_PASS("test_sgr_attrs");
 }
