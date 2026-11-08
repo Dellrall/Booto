@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **ESP scan by content**: every file starting with `MZ` is inspected, not only `*.efi`. A payload renamed to `grubx64.bak`, or a systemd-boot kernel without an extension, is no longer skipped.
 
 ### Added
+- **Inspect view**: press Enter (or click "Inspect") under a scan's first finding to open a read-only view of that file. Map shows its format, size, SHA-256 and MD5, the PE or ELF section table (or the MBR boot code, partition table and post-MBR gap) with each region's entropy, and an entropy strip of the first 256 KiB, one cell per 4 KiB; packed or encrypted regions (over 7.2 bits per byte) are yellow. Hex shows the bytes, 16 per line. The bytes are copied during the scan, before the target is unmounted, through the same inside-the-target check as the quarantine export. Nothing is disassembled or run.
 - **Resizable panes**: drag any pane border with the mouse, or press Ctrl+R and move the focused pane's border with h/j/k/l or the arrows (H/J/K/L move 5 cells; Esc finishes). On the Linux console, which reports no motion, the border jumps to where the button is released.
 - **Text editors on the live ISO**: `vi` (vim-tiny) and `nano` are available from the root shell (F10, then S).
 - **Clickable buttons**: the bottom-bar hints (F5, F6, F3, Tab, Alt+Z, F10) and the Exit and LUKS window buttons respond to a left click, the same as their keys.
