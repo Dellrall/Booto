@@ -275,19 +275,6 @@ static bool gap_has_any(const uint8_t *buf, size_t len, const gap_pattern_t *pat
     return false;
 }
 
-// log2 without libm (the project links nothing): scale into [1,2), then ln via the atanh series.
-static double log2_nolibm(double x) {
-    double exponent = 0.0;
-    while (x >= 2.0) { x /= 2.0; exponent += 1.0; }
-    while (x < 1.0) { x *= 2.0; exponent -= 1.0; }
-    double z = (x - 1.0) / (x + 1.0), z2 = z * z, term = z, sum = 0.0;
-    for (int k = 1; k < 40; k += 2) {
-        sum += term / (double)k;
-        term *= z2;
-    }
-    return exponent + 2.0 * sum / 0.69314718055994530942;
-}
-
 // Shannon entropy (bits/byte) over the sectors holding any non-zero byte; *region_len gets their size.
 static double gap_nonzero_entropy(const uint8_t *g, size_t len, size_t *region_len) {
     size_t hist[256] = { 0 };
@@ -301,12 +288,7 @@ static double gap_nonzero_entropy(const uint8_t *g, size_t len, size_t *region_l
         n += chunk;
     }
     *region_len = n;
-    if (n == 0) return 0.0;
-    double weighted = 0.0;
-    for (size_t b = 0; b < 256; b++) {
-        if (hist[b]) weighted += (double)hist[b] * log2_nolibm((double)hist[b]);
-    }
-    return log2_nolibm((double)n) - weighted / (double)n;
+    return entropy_bits(hist, n);
 }
 
 #define GAP_PACKED_ENTROPY_BITS 7.2

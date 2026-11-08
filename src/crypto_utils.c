@@ -245,3 +245,25 @@ void md5_final(md5_ctx_t *ctx, uint8_t hash[16]) {
     for (int i = 0; i < 4; i++)
         for (int j = 0; j < 4; j++) hash[i * 4 + j] = (uint8_t)(ctx->state[i] >> (8 * j));
 }
+
+// log2 without libm (the project links nothing): scale into [1,2), then ln via the atanh series.
+static double log2_nolibm(double x) {
+    double exponent = 0.0;
+    while (x >= 2.0) { x /= 2.0; exponent += 1.0; }
+    while (x < 1.0) { x *= 2.0; exponent -= 1.0; }
+    double z = (x - 1.0) / (x + 1.0), z2 = z * z, term = z, sum = 0.0;
+    for (int k = 1; k < 40; k += 2) {
+        sum += term / (double)k;
+        term *= z2;
+    }
+    return exponent + 2.0 * sum / 0.69314718055994530942;
+}
+
+double entropy_bits(const size_t hist[256], size_t n) {
+    if (n == 0) return 0.0;
+    double weighted = 0.0;
+    for (size_t b = 0; b < 256; b++) {
+        if (hist[b]) weighted += (double)hist[b] * log2_nolibm((double)hist[b]);
+    }
+    return log2_nolibm((double)n) - weighted / (double)n;
+}
