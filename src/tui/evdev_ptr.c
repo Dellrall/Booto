@@ -1,0 +1,76 @@
+/**
+ * @file evdev_ptr.c
+ * @brief Absolute pointers (VM tablets, touchscreens) read straight from evdev: gpm only handles relative mice.
+ */
+#include "tui/evdev_ptr.h"
+
+#include <fcntl.h>
+#include <linux/input.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
+
+#define BIT_SET(arr, bit) ((arr)[(bit) / (8 * sizeof(long))] & (1UL << ((bit) % (8 * sizeof(long)))))
+
+/* Needs root (the live ISO); silently finds nothing otherwise. */
+int evdev_ptr_open_all(term_abs_ptr_t *out, int max) {
+    int count = 0;
+    for (int n = 0; n < 32 && count < max; n++) {
+        char path[32];
+        snprintf(path, sizeof(path), "/dev/input/event%d", n);
+        int fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+        if (fd < 0) continue;
+        unsigned long abs_bits[ABS_CNT / (8 * sizeof(long)) + 1] = {0};
+        unsigned long key_bits[KEY_CNT / (8 * sizeof(long)) + 1] = {0};
+        unsigned long props[INPUT_PROP_CNT / (8 * sizeof(long)) + 1] = {0};
+        struct input_absinfo ax, ay;
+        bool ok = ioctl(fd, EVIOCGBIT(EV_ABS, sizeof(abs_bits)), abs_bits) >= 0 &&
+                  ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(key_bits)), key_bits) >= 0 &&
+                  BIT_SET(abs_bits, ABS_X) && BIT_SET(abs_bits, ABS_Y) &&
+                  (BIT_SET(key_bits, BTN_LEFT) || BIT_SET(key_bits, BTN_TOUCH)) &&
+                  ioctl(fd, EVIOCGABS(ABS_X), &ax) >= 0 && ioctl(fd, EVIOCGABS(ABS_Y), &ay) >= 0 &&
+                  ax.maximum > ax.minimum && ay.maximum > ay.minimum;
+        /* Touchpads report ABS_X/Y too, but relative to the pad, not the screen: leave them to gpm. */
+        if (ok && ioctl(fd, EVIOCGPROP(sizeof(props)), props) >= 0 && BIT_SET(props, INPUT_PROP_POINTER)) ok = false;
+        /* Grab so mousedev (and gpm behind it) stops turning these positions into drifting relative motion. */
+        if (!ok || ioctl(fd, EVIOCGRAB, 1) < 0) {
+            close(fd);
+            continue;
+        }
+        out[count++] = (term_abs_ptr_t){.fd = fd, .x_min = ax.minimum, .x_max = ax.maximum,
+                                        .y_min = ay.minimum, .y_max = ay.maximum, .x = -1, .y = -1};
+    }
+    return count;
+}
+
+int term_abs_to_cell(int value, int min, int max, int cells) {
+    if (cells <= 0 || max <= min) return 0;
+    long long c = (long long)(value - min) * cells / ((long long)max - min + 1);
+    return c < 0 ? 0 : c >= cells ? cells - 1 : (int)c;
+}
+
+ptr_action_t term_abs_feed(term_abs_ptr_t *p, unsigned type, unsigned code, int value, int rows, int cols) {
+    if (type == EV_ABS && code == ABS_X) {
+        p->x = term_abs_to_cell(value, p->x_min, p->x_max, cols);
+        return PTR_NONE;
+    }
+    if (type == EV_ABS && code == ABS_Y) {
+        p->y = term_abs_to_cell(value, p->y_min, p->y_max, rows);
+        return PTR_NONE;
+    }
+    if (p->x < 0 || p->y < 0) return PTR_NONE;
+    if (type == EV_KEY && value == 1 && (code == BTN_LEFT || code == BTN_TOUCH)) return PTR_CLICK_LEFT;
+    if (type == EV_KEY && value == 1 && code == BTN_RIGHT) return PTR_CLICK_RIGHT;
+    if (type == EV_REL && code == REL_WHEEL && value != 0) return value > 0 ? PTR_WHEEL_UP : PTR_WHEEL_DOWN;
+    return PTR_NONE;
+}
+
+ptr_action_t evdev_ptr_read(term_abs_ptr_t *p, int rows, int cols) {
+    struct input_event ev;
+    while (read(p->fd, &ev, sizeof(ev)) == (ssize_t)sizeof(ev)) {
+        ptr_action_t a = term_abs_feed(p, ev.type, ev.code, ev.value, rows, cols);
+        if (a != PTR_NONE) return a;
+    }
+    return PTR_NONE;
+}

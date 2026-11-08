@@ -29,6 +29,7 @@ SOURCES = $(SRCDIR)/logger.c \
           $(SRCDIR)/firmware_auditor.c \
           $(SRCDIR)/quarantine.c \
           $(SRCDIR)/tui/terminal.c \
+          $(SRCDIR)/tui/evdev_ptr.c \
           $(SRCDIR)/tui/wm.c \
           $(SRCDIR)/tui/pane.c \
           $(SRCDIR)/tui/tui_app.c

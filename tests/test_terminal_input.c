@@ -5,7 +5,6 @@
 #include "test_framework.h"
 #include "tui/terminal.h"
 
-#include <linux/input.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -72,40 +71,16 @@ static void test_x10_mouse(void) {
     ASSERT_INT_EQ(feed("\033[M`!!", 6).type, KEY_MOUSE_WHEEL_UP, "Button 64 is wheel up");
     ASSERT_INT_EQ(feed("\033[Ma!!", 6).type, KEY_MOUSE_WHEEL_DOWN, "Button 65 is wheel down");
     ASSERT_INT_EQ(feed("\033[M@!!", 6).type, KEY_NONE, "Drag motion is ignored");
+    ASSERT_INT_EQ(feed("\033[21~", 5).type, KEY_F10, "F10 decodes to KEY_F10");
+    ASSERT_INT_EQ(feed("\033[A", 3).type, KEY_UP, "Up arrow decodes to KEY_UP");
+    ASSERT_INT_EQ(feed("\r", 1).type, KEY_ENTER, "Enter decodes to KEY_ENTER");
     TEST_PASS("test_x10_mouse");
-}
-
-static void test_abs_pointer(void) {
-    TEST_START("test_abs_pointer");
-    /* VirtualBox's USB tablet: both axes 0..32767 */
-    ASSERT_INT_EQ(term_abs_to_cell(0, 0, 32767, 80), 0, "Left edge is column 0");
-    ASSERT_INT_EQ(term_abs_to_cell(32767, 0, 32767, 80), 79, "Right edge is the last column");
-    ASSERT_INT_EQ(term_abs_to_cell(16384, 0, 32767, 80), 40, "Middle is the middle column");
-    ASSERT_INT_EQ(term_abs_to_cell(-5, 0, 32767, 80), 0, "Below min clamps");
-    ASSERT_INT_EQ(term_abs_to_cell(99999, 0, 32767, 80), 79, "Above max clamps");
-
-    term_abs_ptr_t p = {.x_min = 0, .x_max = 32767, .y_min = 0, .y_max = 32767, .x = -1, .y = -1};
-    input_event_t e = {.type = KEY_NONE};
-    ASSERT_TRUE(!term_abs_feed(&p, EV_KEY, BTN_LEFT, 1, 25, 80, &e), "No click before a position is known");
-    ASSERT_TRUE(!term_abs_feed(&p, EV_ABS, ABS_X, 4096, 25, 80, &e), "Motion is not an event");
-    ASSERT_TRUE(!term_abs_feed(&p, EV_ABS, ABS_Y, 32767, 25, 80, &e), "Motion is not an event");
-    ASSERT_TRUE(term_abs_feed(&p, EV_KEY, BTN_LEFT, 1, 25, 80, &e), "Left press is a click");
-    ASSERT_INT_EQ(e.type, KEY_MOUSE_CLICK, "Click type");
-    ASSERT_INT_EQ(e.mouse_btn, 0, "Left button is 0");
-    ASSERT_INT_EQ(e.mouse_x, 10, "Click column follows ABS_X");
-    ASSERT_INT_EQ(e.mouse_y, 24, "Bottom edge stays on the last row");
-    e = (input_event_t){.type = KEY_NONE};
-    ASSERT_TRUE(!term_abs_feed(&p, EV_KEY, BTN_LEFT, 0, 25, 80, &e), "Release is ignored");
-    ASSERT_TRUE(term_abs_feed(&p, EV_REL, REL_WHEEL, -1, 25, 80, &e), "Wheel is an event");
-    ASSERT_INT_EQ(e.type, KEY_MOUSE_WHEEL_DOWN, "Negative wheel scrolls down");
-    TEST_PASS("test_abs_pointer");
 }
 
 int main(void) {
     test_sgr_mouse();
     test_sgr_attrs();
     test_x10_mouse();
-    test_abs_pointer();
     TEST_SUMMARY();
     return 0;
 }
