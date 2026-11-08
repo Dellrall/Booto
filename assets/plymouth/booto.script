@@ -1,0 +1,27 @@
+# Solid white Booto logo centred on black, loading bar underneath.
+Window.SetBackgroundTopColor(0, 0, 0);
+Window.SetBackgroundBottomColor(0, 0, 0);
+
+logo = Image("logo.png");
+pixel = Image("pixel.png");
+bar_w = logo.GetWidth();
+bar_h = 6;
+x = Window.GetX() + (Window.GetWidth() - bar_w) / 2;
+y = Window.GetY() + Window.GetHeight() / 2 - logo.GetHeight();
+
+logo_sprite = Sprite(logo);
+logo_sprite.SetPosition(x, y, 1);
+
+track = Sprite(pixel.Scale(bar_w, bar_h));
+track.SetPosition(x, y + logo.GetHeight() + 40, 1);
+track.SetOpacity(0.25);
+
+fill = Sprite(pixel.Scale(1, bar_h));
+fill.SetPosition(x, y + logo.GetHeight() + 40, 2);
+
+fun progress_callback(duration, progress) {
+    w = Math.Int(bar_w * progress);
+    if (w < 1) w = 1;
+    fill.SetImage(pixel.Scale(w, bar_h));
+}
+Plymouth.SetBootProgressFunction(progress_callback);

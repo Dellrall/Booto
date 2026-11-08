@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=Booto
+Description=Booto logo with a loading bar
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/booto
+ScriptFile=/usr/share/plymouth/themes/booto/booto.script
