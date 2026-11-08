@@ -34,7 +34,10 @@ typedef struct {
 /**
  * @brief Audit every library listed in <root>/etc/ld.so.preload (whitespace/':' separated, '#' comments),
  *        LD_PRELOAD in <root>/etc/environment, suspicious ld.so.conf.d search paths, modprobe.d
- *        install hooks (PERSIST_MODPROBE_INSTALL) and udev RUN hooks (PERSIST_UDEV_RUN).
+ *        install hooks (PERSIST_MODPROBE_INSTALL), udev RUN hooks (PERSIST_UDEV_RUN), systemd Exec lines
+ *        (PERSIST_SYSTEMD_EXEC), cron jobs and rc.local (PERSIST_CRON), shell profiles (PERSIST_SHELL_PROFILE)
+ *        and authorized_keys forced commands (PERSIST_SSH_FORCED_COMMAND) that run temp/hidden-path programs
+ *        or code fetched at run time (curl/wget/base64 piped into a shell).
  * @param target_rootfs Path to mounted target rootfs (e.g. /tmp/booto_target_mnt).
  * @param result Output structure to record findings.
  * @return BOOTO_OK on success; BOOTO_ERR_IO if a present preload/environment file cannot be read,

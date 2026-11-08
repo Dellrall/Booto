@@ -162,8 +162,32 @@ static booto_error_t scan_environment(const char *rootfs, preload_scan_result_t 
     return BOOTO_OK;
 }
 
+static bool is_temp_path(const char *s) {
+    return strstr(s, "/tmp") || strstr(s, "/dev/shm") || strstr(s, "/var/tmp");
+}
+
 static bool is_suspicious_path(const char *s) {
-    return strstr(s, "/tmp") || strstr(s, "/dev/shm") || strstr(s, "/var/tmp") || strstr(s, "/.");
+    return is_temp_path(s) || strstr(s, "/.");
+}
+
+// A program run from a temp dir or a hidden (dot) path; prefixes, so /usr/sbin/tmpwatch is not a temp path.
+static bool is_suspicious_program(const char *p) {
+    return strncmp(p, "/tmp/", 5) == 0 || strncmp(p, "/var/tmp/", 9) == 0 || strncmp(p, "/dev/shm/", 9) == 0 ||
+           strstr(p, "/.");
+}
+
+// curl/wget/base64 output piped into a shell: the code that runs is fetched or unpacked at run time, never on disk.
+static bool runs_hidden_code(const char *s) {
+    if (!strstr(s, "curl") && !strstr(s, "wget") && !strstr(s, "base64")) return false;
+    for (const char *p = strchr(s, '|'); p; p = strchr(p + 1, '|')) {
+        const char *q = p + 1;
+        while (*q == ' ') q++;
+        if (strncmp(q, "/usr", 4) == 0) q += 4;
+        if (strncmp(q, "/bin/", 5) == 0) q += 5;
+        size_t n = strncmp(q, "bash", 4) == 0 ? 4 : strncmp(q, "dash", 4) == 0 ? 4 : strncmp(q, "sh", 2) == 0 ? 2 : 0;
+        if (n && !isalnum((unsigned char)q[n])) return true;
+    }
+    return false;
 }
 
 typedef void (*conf_line_fn)(const char *rootfs, const char *file, const char *line, preload_scan_result_t *result);
@@ -239,6 +263,85 @@ static void report_program(const char *rootfs, const char *file, const char *pro
     add_preload_threat(result, file, threat_name, program, sha256, rule_id, description);
 }
 
+// Copies the first absolute path in s (the program a hook runs) into out; empty when there is none.
+static void first_abs_path(const char *s, char *out, size_t out_len) {
+    const char *p = s;
+    while ((p = strchr(p, '/')) && ((p != s && !strchr(" \t\"'=-@+!:", p[-1])) || p[1] == '/'))
+        p += p[1] == '/' ? 2 : 1;  // "//" is a URL (curl http://x/a), not a program path
+    out[0] = '\0';
+    if (p) first_program(p, out, out_len);
+}
+
+// Reports cmd when the program it runs lives in a temp/hidden path or it pipes fetched code into a shell.
+// Only the program is path-checked: vendor units and cron jobs pass /tmp as an argument all the time.
+static void check_command(const char *rootfs, const char *file, const char *cmd, const char *threat_name,
+                          const char *rule_id, const char *description, preload_scan_result_t *result) {
+    char program[256];
+    first_abs_path(cmd, program, sizeof(program));
+    if (is_suspicious_program(program) || runs_hidden_code(cmd))
+        report_program(rootfs, file, program, threat_name, rule_id, description, result);
+}
+
+// ExecStart=/ExecStartPre=/... run as the unit's user (root by default) at boot or on activation.
+static void systemd_line(const char *rootfs, const char *file, const char *line, preload_scan_result_t *result) {
+    const char *eq = strchr(line, '=');
+    if (strncmp(line, "Exec", 4) == 0 && eq)
+        check_command(rootfs, file, eq + 1, "systemd Unit Execution Hook", "PERSIST_SYSTEMD_EXEC",
+                      "systemd unit runs a temp/hidden-path program or fetched code", result);
+}
+
+static void cron_line(const char *rootfs, const char *file, const char *line, preload_scan_result_t *result) {
+    check_command(rootfs, file, line, "Scheduled Task Hook", "PERSIST_CRON",
+                  "cron job or boot script runs a temp/hidden-path program or fetched code", result);
+}
+
+// Profiles source dotfiles and set TMPDIR=/tmp all the time: only a line that starts by running a temp-path
+// program, fetched code, or LD_PRELOAD counts.
+static void profile_line(const char *rootfs, const char *file, const char *line, preload_scan_result_t *result) {
+    const char *p = line;
+    static const char *const lead[] = { ". ", "source ", "nohup ", "exec " };
+    for (size_t i = 0; i < sizeof(lead) / sizeof(lead[0]); i++)
+        if (strncmp(p, lead[i], strlen(lead[i])) == 0) p += strlen(lead[i]);
+    char program[256];
+    first_program(p, program, sizeof(program));
+    /* Temp dirs only: profiles source dotfiles (~/.cargo/env) all the time. */
+    bool temp = strncmp(program, "/tmp/", 5) == 0 || strncmp(program, "/var/tmp/", 9) == 0 ||
+                strncmp(program, "/dev/shm/", 9) == 0;
+    if (!temp && !runs_hidden_code(line) && !strstr(line, "LD_PRELOAD")) return;
+    first_abs_path(p, program, sizeof(program));
+    report_program(rootfs, file, program, "Shell Login Hook", "PERSIST_SHELL_PROFILE",
+                   "shell profile runs a temp-path program, fetched code or sets LD_PRELOAD on every login", result);
+}
+
+// command="..." forces a program on every login with that key: a backdoor when it runs from temp or fetches code.
+static void ssh_key_line(const char *rootfs, const char *file, const char *line, preload_scan_result_t *result) {
+    const char *cmd = strstr(line, "command=\"");
+    if (!cmd) return;
+    char value[512];
+    snprintf(value, sizeof(value), "%.*s", (int)strcspn(cmd + 9, "\""), cmd + 9);  /* not the key's base64 */
+    check_command(rootfs, file, value, "SSH Forced Command", "PERSIST_SSH_FORCED_COMMAND",
+                      "authorized_keys entry forces a temp/hidden-path program or fetched code on login", result);
+}
+
+// Per-user dotfiles; entries must be real directories so a planted /home/x -> / symlink cannot reach the live system.
+static void scan_homes(const char *rootfs, preload_scan_result_t *result) {
+    char home[512];
+    snprintf(home, sizeof(home), "%.400s/home", rootfs);
+    DIR *dir = opendir(home);
+    if (!dir) return;
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (entry->d_name[0] == '.' || entry->d_type != DT_DIR) continue;
+        char rel[300];
+        snprintf(rel, sizeof(rel), "/home/%.255s", entry->d_name);
+        scan_conf_dir(rootfs, rel, "bashrc", profile_line, result);
+        scan_conf_dir(rootfs, rel, "profile", profile_line, result);
+        snprintf(rel, sizeof(rel), "/home/%.255s/.ssh", entry->d_name);
+        scan_conf_dir(rootfs, rel, "authorized_keys", ssh_key_line, result);
+    }
+    closedir(dir);
+}
+
 // "install <module> <command>" runs <command> as root whenever the module is requested. Distros only use it to
 // blacklist (true/false) or chain modprobe calls; anything else, or a temp/hidden path anywhere, is a hook.
 static void modprobe_line(const char *rootfs, const char *file, const char *line, preload_scan_result_t *result) {
@@ -308,6 +411,22 @@ booto_error_t preload_scan_rootfs(const char *target_rootfs, preload_scan_result
     scan_conf_dir(target_rootfs, "/etc/udev/rules.d", ".rules", udev_admin_line, result);
     scan_conf_dir(target_rootfs, "/usr/lib/udev/rules.d", ".rules", udev_vendor_line, result);
     scan_conf_dir(target_rootfs, "/lib/udev/rules.d", ".rules", udev_vendor_line, result);
+    static const char *const unit_dirs[] = { "/etc/systemd/system", "/usr/lib/systemd/system", "/lib/systemd/system" };
+    for (size_t i = 0; i < sizeof(unit_dirs) / sizeof(unit_dirs[0]); i++)
+        scan_conf_dir(target_rootfs, unit_dirs[i], ".service", systemd_line, result);
+    static const char *const cron_dirs[] = { "/etc/cron.d", "/etc/cron.hourly", "/etc/cron.daily", "/etc/cron.weekly",
+                                             "/etc/cron.monthly", "/var/spool/cron", "/var/spool/cron/crontabs" };
+    for (size_t i = 0; i < sizeof(cron_dirs) / sizeof(cron_dirs[0]); i++)
+        scan_conf_dir(target_rootfs, cron_dirs[i], "", cron_line, result);
+    scan_conf_dir(target_rootfs, "/etc", "crontab", cron_line, result);   /* crontab and anacrontab */
+    scan_conf_dir(target_rootfs, "/etc", "rc.local", cron_line, result);
+    scan_conf_dir(target_rootfs, "/etc/profile.d", ".sh", profile_line, result);
+    scan_conf_dir(target_rootfs, "/etc", "bashrc", profile_line, result);  /* bash.bashrc, bashrc */
+    scan_conf_dir(target_rootfs, "/etc", "profile", profile_line, result);
+    scan_conf_dir(target_rootfs, "/root", "bashrc", profile_line, result);
+    scan_conf_dir(target_rootfs, "/root", "profile", profile_line, result);
+    scan_conf_dir(target_rootfs, "/root/.ssh", "authorized_keys", ssh_key_line, result);
+    scan_homes(target_rootfs, result);
     if (err == BOOTO_OK) err = env_err;
 
     LOG_INFO("Preload scanner complete: %d config files audited, %d userland threats flagged",
