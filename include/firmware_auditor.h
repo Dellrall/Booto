@@ -73,6 +73,29 @@ typedef struct {
  */
 booto_error_t firmware_audit(const firmware_paths_t *paths, firmware_report_t *out);
 
+/* Expert mode (--expert-firmware, off by default): deeper reads that need root and take longer. */
+#define FW_NVRAM_MAX_FINDINGS 32
+typedef struct {
+    char name[256];            /* efivarfs entry, Name-GUID */
+    char reason[96];
+    size_t size;               /* data bytes, without the 4-byte attributes */
+} fw_nvram_finding_t;
+
+typedef struct {
+    int vars_scanned;
+    int unreadable;
+    int count;
+    fw_nvram_finding_t findings[FW_NVRAM_MAX_FINDINGS];
+} fw_nvram_report_t;
+
+/**
+ * @brief Flag UEFI variables that hide code: a PE or ELF image anywhere in the data, or a large
+ *        high-entropy blob that is not a signature database. Read-only.
+ * @param efivars_dir NULL = /sys/firmware/efi/efivars.
+ * @return BOOTO_OK; BOOTO_ERR_NOT_FOUND if the directory cannot be opened; BOOTO_ERR_INVALID_ARG if out is NULL.
+ */
+booto_error_t firmware_nvram_scan(const char *efivars_dir, fw_nvram_report_t *out);
+
 const char *firmware_check_name(fw_check_id_t id);
 const char *firmware_result_str(fw_result_t r);   /* "pass" "fail" "unknown" "n/a" */
 
