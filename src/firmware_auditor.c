@@ -117,6 +117,7 @@ static const char *const CHECK_NAMES[FW_CHECK_COUNT] = {
     "No test keys (PKfail)",
     "Revocation list (dbx)",
     "Shim MOK keys known",
+    "No pending BootNext",
     "IOMMU described (DMAR/IVRS)",
     "Thunderbolt DMA protection",
     "SMM locked",
@@ -404,6 +405,73 @@ static void check_mok(fw_check_t *c, const efivar_t *mok) {
         snprintf(c->detail, sizeof(c->detail), "%d distro key%s, first \"%.80s\".", st.x509_count,
                  st.x509_count == 1 ? "" : "s", st.first_cn);
     }
+}
+
+/* UTF-16LE to printable ASCII, stopping at NUL or end; always terminates out. Returns bytes consumed. */
+static size_t ucs2_ascii(const uint8_t *p, size_t len, char *out, size_t out_size) {
+    size_t i = 0, n = 0;
+    while (i + 1 < len) {
+        uint16_t ch = (uint16_t)(p[i] | (p[i + 1] << 8));
+        i += 2;
+        if (ch == 0) break;
+        if (n + 1 < out_size) out[n++] = (ch >= 0x20 && ch < 0x7f) ? (char)ch : '?';
+    }
+    out[n] = '\0';
+    return i;
+}
+
+/* EFI_LOAD_OPTION: Attributes(4) FilePathListLength(2) Description(UTF-16, NUL) FilePathList. Never reads past len. */
+static void parse_load_option(const uint8_t *d, size_t len, char *desc, size_t desc_size, char *path, size_t path_size) {
+    desc[0] = path[0] = '\0';
+    if (len < 6) return;
+    size_t fp_len = (size_t)(d[4] | (d[5] << 8));
+    size_t off = 6 + ucs2_ascii(d + 6, len - 6, desc, desc_size);
+    if (off > len || fp_len > len - off) return;
+    const uint8_t *node = d + off, *end = node + fp_len;
+    size_t plen = 0;
+    while (end - node >= 4 && node[0] != 0x7f) {
+        size_t nlen = (size_t)(node[2] | (node[3] << 8));
+        if (nlen < 4 || nlen > (size_t)(end - node)) break;
+        if (node[0] == 0x04 && node[1] == 0x04 && plen + 1 < path_size) { // media / file path
+            ucs2_ascii(node + 4, nlen - 4, path + plen, path_size - plen);
+            plen += strlen(path + plen);
+        }
+        node += nlen;
+    }
+}
+
+/* BootNext overrides BootOrder for one boot: a quiet way to run a planted loader once. */
+static void check_boot_entry(fw_check_t *c, const char *dir) {
+    efivar_t order = read_efivar(dir, "BootOrder", EFI_GLOBAL_GUID);
+    efivar_t next = read_efivar(dir, "BootNext", EFI_GLOBAL_GUID);
+    efivar_t *pick = (!next.err && efivar_data_len(&next) >= 2) ? &next : &order;
+    if (pick->err || efivar_data_len(pick) < 2) {
+        if (pick->err && pick->err != ENOENT) {
+            c->result = FW_RESULT_UNKNOWN;
+            snprintf(c->detail, sizeof(c->detail), "Could not read BootOrder: %s.", strerror(pick->err));
+        } else {
+            set_check(c, FW_RESULT_NA, "No boot order set.");
+        }
+        free(order.buf);
+        free(next.buf);
+        return;
+    }
+    unsigned id = (unsigned)(efivar_data(pick)[0] | (efivar_data(pick)[1] << 8));
+    char name[16], desc[48], path[96];
+    snprintf(name, sizeof(name), "Boot%04X", id);
+    efivar_t opt = read_efivar(dir, name, EFI_GLOBAL_GUID);
+    if (opt.err) {
+        desc[0] = path[0] = '\0';
+    } else {
+        parse_load_option(efivar_data(&opt), efivar_data_len(&opt), desc, sizeof(desc), path, sizeof(path));
+    }
+    c->result = pick == &next ? FW_RESULT_FAIL : FW_RESULT_PASS;
+    snprintf(c->detail, sizeof(c->detail), "%s%.8s \"%.47s\"%s%.64s%s",
+             pick == &next ? "BootNext is set: next boot runs " : "Boots ", name, desc,
+             path[0] ? " (" : "", path, path[0] ? ")" : "");
+    free(opt.buf);
+    free(order.buf);
+    free(next.buf);
 }
 
 static void check_iommu(fw_check_t *c, const char *acpi_dir) {
@@ -927,7 +995,7 @@ booto_error_t firmware_audit(const firmware_paths_t *paths, firmware_report_t *o
     out->uefi_boot = stat(efi, &sb) == 0 && S_ISDIR(sb.st_mode);
     fw_check_t *ck = out->checks;
     if (!out->uefi_boot) {
-        for (int i = FW_CHECK_SECURE_BOOT; i <= FW_CHECK_MOK; i++)
+        for (int i = FW_CHECK_SECURE_BOOT; i <= FW_CHECK_BOOT_ENTRY; i++)
             set_check(&ck[i], FW_RESULT_NA, "Booted in BIOS mode: no UEFI variables.");
     } else {
         check_flag_var(&ck[FW_CHECK_SECURE_BOOT], efi, "SecureBoot", 1, "Secure Boot is enabled.",
@@ -948,6 +1016,7 @@ booto_error_t firmware_audit(const firmware_paths_t *paths, firmware_report_t *o
         efivar_t mok = read_efivar(efi, "MokListRT", SHIM_LOCK_GUID);
         check_mok(&ck[FW_CHECK_MOK], &mok);
         free(mok.buf);
+        check_boot_entry(&ck[FW_CHECK_BOOT_ENTRY], efi);
 
         free(pk.buf);
         free(kek.buf);

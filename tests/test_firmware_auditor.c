@@ -308,6 +308,30 @@ static void build_tpm(bool with_sha256) {
     for (int i = 0; i < 8; i++) write_pcr(i, pcr[i]);
 }
 
+/* EFI_LOAD_OPTION with one file-path node; trunc > 0 cuts that many bytes off the end. */
+static void write_boot_option(unsigned id, const char *desc, const char *path, size_t trunc) {
+    uint8_t b[512];
+    size_t n = 6, dlen = strlen(desc), plen = strlen(path);
+    memset(b, 0, sizeof(b));
+    b[0] = 1;                                          /* LOAD_OPTION_ACTIVE */
+    for (size_t i = 0; i <= dlen; i++) { b[n++] = (uint8_t)desc[i]; b[n++] = 0; }
+    size_t node_len = 4 + (plen + 1) * 2, fp_len = node_len + 4;
+    b[4] = (uint8_t)fp_len;
+    b[n] = 0x04; b[n + 1] = 0x04; b[n + 2] = (uint8_t)node_len;
+    n += 4;
+    for (size_t i = 0; i <= plen; i++) { b[n++] = (uint8_t)path[i]; b[n++] = 0; }
+    b[n] = 0x7f; b[n + 1] = 0xff; b[n + 2] = 4;
+    n += 4;
+    char name[16];
+    snprintf(name, sizeof(name), "Boot%04X", id);
+    write_var(name, GLOBAL_GUID, b, n - trunc);
+}
+
+static void write_u16_var(const char *name, uint16_t v) {
+    uint8_t b[2] = { (uint8_t)v, (uint8_t)(v >> 8) };
+    write_var(name, GLOBAL_GUID, b, 2);
+}
+
 static void build_good_machine(void) {
     make_root(true, true, true);
     write_byte_var("SecureBoot", 1);
@@ -317,6 +341,8 @@ static void build_good_machine(void) {
     write_cert_var("db", IMAGE_GUID, "Contoso CA", NULL);
     write_dbx(3);
     write_cert_var("MokListRT", SHIM_GUID, "Fedora Secure Boot CA", NULL);
+    write_u16_var("BootOrder", 1);
+    write_boot_option(1, "Fedora", "\\EFI\\fedora\\shimx64.efi", 0);
     write_dmar(0x04);
     write_tb_domain("1\n");
     build_intel_silicon(true, 0x2A);
@@ -373,6 +399,38 @@ static void test_mok_list(void) {
     remove_tree(g_root);
     ASSERT_INT_EQ(r.checks[FW_CHECK_MOK].result, FW_RESULT_NA, "no shim, no MOK list");
     TEST_PASS("test_mok_list");
+}
+
+static void test_boot_entry(void) {
+    TEST_START("test_boot_entry");
+    firmware_report_t r;
+    build_good_machine();
+    firmware_audit(&g_paths, &r);
+    ASSERT_STR_EQ(r.checks[FW_CHECK_BOOT_ENTRY].detail, "Boots Boot0001 \"Fedora\" (\\EFI\\fedora\\shimx64.efi)",
+                  "first BootOrder entry shown");
+
+    write_u16_var("BootNext", 0x2a);
+    write_boot_option(0x2a, "Updater", "\\EFI\\x\\y.efi", 0);
+    firmware_audit(&g_paths, &r);
+    ASSERT_INT_EQ(r.checks[FW_CHECK_BOOT_ENTRY].result, FW_RESULT_FAIL, "BootNext fails");
+    ASSERT_STR_EQ(r.checks[FW_CHECK_BOOT_ENTRY].detail,
+                  "BootNext is set: next boot runs Boot002A \"Updater\" (\\EFI\\x\\y.efi)", "BootNext target named");
+
+    for (size_t t = 1; t < 40; t++) {             /* truncated options never read past the variable */
+        write_boot_option(0x2a, "Updater", "\\EFI\\x\\y.efi", t);
+        firmware_audit(&g_paths, &r);
+    }
+    ASSERT_INT_EQ(r.checks[FW_CHECK_BOOT_ENTRY].result, FW_RESULT_FAIL, "truncated option still reported");
+
+    char path[160];
+    snprintf(path, sizeof(path), "%s/BootNext-%s", g_efi, GLOBAL_GUID);
+    unlink(path);
+    snprintf(path, sizeof(path), "%s/BootOrder-%s", g_efi, GLOBAL_GUID);
+    unlink(path);
+    firmware_audit(&g_paths, &r);
+    remove_tree(g_root);
+    ASSERT_INT_EQ(r.checks[FW_CHECK_BOOT_ENTRY].result, FW_RESULT_NA, "no boot order is n/a");
+    TEST_PASS("test_boot_entry");
 }
 
 static void test_pkfail(void) {
@@ -805,6 +863,7 @@ int main(void) {
     test_good_machine();
     test_pkfail();
     test_mok_list();
+    test_boot_entry();
     test_insecure_keys();
     test_bios_boot();
     test_no_iommu_no_thunderbolt();
