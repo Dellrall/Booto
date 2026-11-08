@@ -32,6 +32,7 @@ add_compile_options(
     -Wformat=2
     -Wconversion
     -fstack-protector-strong
+    -O2
     -D_FORTIFY_SOURCE=2
     -fPIE
     -D_POSIX_C_SOURCE=200809L
@@ -68,6 +69,7 @@ set(BOOT_LIB_SOURCES
     src/mbr_auditor.c
     src/initramfs_auditor.c
     src/preload_scanner.c
+    src/pkg_integrity.c
     src/ext4_diff.c
     src/persistence_mgr.c
     src/case_reporter.c
