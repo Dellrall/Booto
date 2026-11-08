@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Authenticode signature check**: each ESP binary's PKCS#7 signature is now verified (OpenSSL), not just detected. A signed image changed after signing raises `UEFI_AUTHENTICODE_HASH_MISMATCH` (critical); a malformed or broken signature raises `UEFI_AUTHENTICODE_INVALID` (high). Whether the signer is trusted is not checked yet.
+
 ## [1.5.4-beta] - 2026-11-08
 
 ### Changed
