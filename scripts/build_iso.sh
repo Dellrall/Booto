@@ -43,7 +43,7 @@ make -C "${REPO_ROOT}" clean all
 echo "[+] Step 2/6: Bootstrapping Debian 12 (Bookworm) minimal rootfs..."
 debootstrap --arch=amd64 \
             --variant=minbase \
-            --include=linux-image-amd64,live-boot,systemd,systemd-sysv,libncurses6,libblkid1,libudev1,cryptsetup,util-linux,gzip,xz-utils,zstd,lz4,bzip2,flashrom \
+            --include=linux-image-amd64,live-boot,systemd,systemd-sysv,libncurses6,libblkid1,libudev1,cryptsetup,util-linux,gzip,xz-utils,zstd,lz4,bzip2,flashrom,gpm \
             "${DEBIAN_VERSION}" "${ROOTFS_DIR}" "${DEBIAN_MIRROR}"
 
 echo "[+] Step 3/6: Installing Booto binary into rootfs..."
@@ -55,6 +55,8 @@ install -m 644 "${REPO_ROOT}/rules/sources/secureboot_objects-License.txt" "${RO
 # The firmware audit reads SMM/SMRR lock bits through /dev/cpu/N/msr (read-only).
 install -d -m 755 "${ROOTFS_DIR}/etc/modules-load.d"
 echo "msr" > "${ROOTFS_DIR}/etc/modules-load.d/booto.conf"
+# gpm passes the mouse to the text console, which forwards it to the TUI as X10 reports
+chroot "${ROOTFS_DIR}" systemctl enable gpm.service
 
 # Configure Hostname and Network
 echo "booto-live" > "${ROOTFS_DIR}/etc/hostname"
