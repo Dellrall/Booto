@@ -320,9 +320,13 @@ static void scan_esp_dir_recursive(const char *base_path, uefi_scan_result_t *re
             if (S_ISDIR(st.st_mode)) {
                 scan_esp_dir_recursive(full_path, result, depth + 1);
             } else if (S_ISREG(st.st_mode)) {
-                size_t nlen = strlen(entry->d_name);
-                if (nlen > 4 && strcasecmp(entry->d_name + nlen - 4, ".efi") == 0) {
-                    uefi_inspect_efi_file(full_path, result);
+                // By content, not name: a renamed payload (grubx64.bak) or a systemd-boot kernel is still a PE.
+                char magic[2] = { 0 };
+                FILE *fp = fopen(full_path, "rb");
+                if (fp) {
+                    size_t got = fread(magic, 1, sizeof(magic), fp);
+                    fclose(fp);
+                    if (got == 2 && magic[0] == 'M' && magic[1] == 'Z') uefi_inspect_efi_file(full_path, result);
                 }
             }
         }
