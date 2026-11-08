@@ -373,43 +373,21 @@ static size_t encode_cell(uint32_t cp, char *out) {
     return 4;
 }
 
+size_t term_sgr(uint32_t attr, char *out, size_t len) {
+    int fg = (int)((attr >> 4) & 0x1F), bg = (int)((attr >> 9) & 0x1F);
+    char fgs[8] = "", bgs[8] = "";
+    if (fg >= 1 && fg <= 16) snprintf(fgs, sizeof(fgs), ";%d", fg <= 8 ? 29 + fg : 81 + fg);
+    if (bg >= 1 && bg <= 16) snprintf(bgs, sizeof(bgs), ";%d", bg <= 8 ? 39 + bg : 91 + bg);
+    int n = snprintf(out, len, "\033[0%s%s%s%s%s%sm", (attr & ATTR_BOLD) ? ";1" : "", (attr & ATTR_DIM) ? ";2" : "",
+                     (attr & ATTR_UNDERLINE) ? ";4" : "", (attr & ATTR_REVERSE) ? ";7" : "", fgs, bgs);
+    return (n > 0 && (size_t)n < len) ? (size_t)n : 0;
+}
+
 static void apply_attr(uint32_t attr, uint32_t prev_attr, char **buf, size_t *rem) {
     if (attr == prev_attr) return;
-
-    int fg = (int)((attr >> 4) & 0x1F);
-    int bg = (int)((attr >> 9) & 0x1F);
-    uint32_t style = attr & 0x0F;
-
-    int written = snprintf(*buf, *rem, "\033[0");
-    if (written > 0 && (size_t)written < *rem) { *buf += written; *rem -= (size_t)written; }
-
-    if (style & ATTR_BOLD) {
-        written = snprintf(*buf, *rem, ";1");
-        if (written > 0 && (size_t)written < *rem) { *buf += written; *rem -= (size_t)written; }
-    }
-    if (style & ATTR_REVERSE) {
-        written = snprintf(*buf, *rem, ";7");
-        if (written > 0 && (size_t)written < *rem) { *buf += written; *rem -= (size_t)written; }
-    }
-
-    if (fg > 0 && fg <= 8) {
-        written = snprintf(*buf, *rem, ";%d", 29 + fg);
-        if (written > 0 && (size_t)written < *rem) { *buf += written; *rem -= (size_t)written; }
-    } else if (fg > 8 && fg <= 16) {
-        written = snprintf(*buf, *rem, ";%d", 81 + fg);
-        if (written > 0 && (size_t)written < *rem) { *buf += written; *rem -= (size_t)written; }
-    }
-
-    if (bg > 0 && bg <= 8) {
-        written = snprintf(*buf, *rem, ";%d", 39 + bg);
-        if (written > 0 && (size_t)written < *rem) { *buf += written; *rem -= (size_t)written; }
-    } else if (bg > 8 && bg <= 16) {
-        written = snprintf(*buf, *rem, ";%d", 91 + bg);
-        if (written > 0 && (size_t)written < *rem) { *buf += written; *rem -= (size_t)written; }
-    }
-
-    written = snprintf(*buf, *rem, "m");
-    if (written > 0 && (size_t)written < *rem) { *buf += written; *rem -= (size_t)written; }
+    size_t n = term_sgr(attr, *buf, *rem);
+    *buf += n;
+    *rem -= n;
 }
 
 /* Writes all of buf: a terminal can accept a frame in parts, and a dropped part leaves the screen out of sync with g_front_*. */

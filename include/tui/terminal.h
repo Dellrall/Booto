@@ -117,6 +117,9 @@ int term_init(void);
 /** Decodes one complete CSI sequence s[0..len) (ESC '[' ... final) into event; leaves KEY_NONE if unknown. */
 void term_parse_csi(const unsigned char *s, size_t len, input_event_t *event);
 
+/** Writes the SGR escape for attr into out; returns its length, or 0 if it does not fit. */
+size_t term_sgr(uint32_t attr, char *out, size_t len);
+
 /**
  * @brief Restore original terminal settings.
  */

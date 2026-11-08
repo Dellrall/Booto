@@ -1,6 +1,6 @@
 /**
  * @file test_terminal_input.c
- * @brief SGR mouse decoding: presses and wheel become events; releases and drag motion are ignored.
+ * @brief Terminal input and output: SGR mouse decoding and SGR attribute encoding.
  */
 #include "test_framework.h"
 #include "tui/terminal.h"
@@ -27,8 +27,22 @@ static void test_sgr_mouse(void) {
     TEST_PASS("test_sgr_mouse");
 }
 
+static void test_sgr_attrs(void) {
+    TEST_START("test_sgr_attrs");
+    char b[64];
+    term_sgr(MAKE_ATTR(COLOR_DEFAULT, COLOR_DEFAULT, ATTR_NONE), b, sizeof(b));
+    ASSERT_TRUE(strcmp(b, "\033[0m") == 0, "Plain text resets only");
+    term_sgr(MAKE_ATTR(COLOR_RED, COLOR_DEFAULT, ATTR_BOLD | ATTR_DIM | ATTR_UNDERLINE), b, sizeof(b));
+    ASSERT_TRUE(strcmp(b, "\033[0;1;2;4;31m") == 0, "Bold, dim, underline and red fg");
+    term_sgr(MAKE_ATTR(COLOR_BRIGHT_WHITE, COLOR_BLUE, ATTR_REVERSE), b, sizeof(b));
+    ASSERT_TRUE(strcmp(b, "\033[0;7;97;44m") == 0, "Reverse, bright fg, normal bg");
+    ASSERT_INT_EQ((int)term_sgr(MAKE_ATTR(COLOR_RED, COLOR_BLUE, ATTR_BOLD), b, 4), 0, "Too-small buffer writes nothing usable");
+    TEST_PASS("test_sgr_attrs");
+}
+
 int main(void) {
     test_sgr_mouse();
+    test_sgr_attrs();
     TEST_SUMMARY();
     return 0;
 }
