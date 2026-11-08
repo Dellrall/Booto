@@ -203,6 +203,7 @@ booto_error_t uefi_parse_pe_file(const char *path, pe_efi_info_t *info) {
         for (uint32_t i = 0; i < info->exec_size; i++) hist[buf[info->exec_ptr + i]]++;
         info->exec_entropy = entropy_bits(hist, info->exec_size);
     }
+    if (ret == BOOTO_OK) authenticode_verify(buf, (size_t)fsize, info);
     snprintf(info->file_path, sizeof(info->file_path), "%s", path);
     free(buf);
 
@@ -265,6 +266,24 @@ booto_error_t uefi_inspect_efi_file(const char *efi_path, uefi_scan_result_t *re
                         "UEFI_MISSING_AUTHENTICODE",
                         SEVERITY_HIGH,
                         "EFI executable does not contain an embedded Authenticode signature table");
+    }
+
+    if (pe.authenticode_state == AUTHENTICODE_HASH_MISMATCH) {
+        add_uefi_threat(result,
+                        "Tampered Signed EFI Image",
+                        efi_path,
+                        pe.sha256,
+                        "UEFI_AUTHENTICODE_HASH_MISMATCH",
+                        SEVERITY_CRITICAL,
+                        "Authenticode signature is intact but the image was modified after signing (patched loader)");
+    } else if (pe.authenticode_state == AUTHENTICODE_INVALID) {
+        add_uefi_threat(result,
+                        "Invalid Authenticode Signature",
+                        efi_path,
+                        pe.sha256,
+                        "UEFI_AUTHENTICODE_INVALID",
+                        SEVERITY_HIGH,
+                        "Certificate table is malformed or its PKCS#7 signature does not verify");
     }
 
     // 3. Heuristic: compressed or encrypted code (packer / loader stub). Normal x86-64 code is about 6 bits/byte.

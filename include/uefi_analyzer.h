@@ -16,6 +16,14 @@ extern "C" {
 
 #define MAX_UEFI_THREATS 64
 
+typedef enum {
+    AUTHENTICODE_NONE = 0,     // no certificate table
+    AUTHENTICODE_VALID,        // PKCS#7 signature verifies and the signed digest matches the image
+    AUTHENTICODE_INVALID,      // certificate table present but malformed, or the signature does not verify
+    AUTHENTICODE_HASH_MISMATCH,// signature verifies but the image changed after signing
+    AUTHENTICODE_UNSUPPORTED   // signed with a digest other than SHA-256: not checked
+} authenticode_state_t;
+
 typedef struct {
     char file_path[256];
     char sha256[65];              // whole-file SHA-256 (reporting)
@@ -27,6 +35,7 @@ typedef struct {
     uint32_t cert_table_rva;  // Security Directory RVA
     uint32_t cert_table_size; // Security Directory Size
     bool has_authenticode;
+    authenticode_state_t authenticode_state; // set by uefi_parse_pe_file / authenticode_verify
     bool is_revoked_dbx;
     char matched_threat[96];
     booto_severity_t matched_severity;
@@ -66,6 +75,15 @@ booto_error_t uefi_parse_pe_file(const char *path, pe_efi_info_t *info);
  * @return BOOTO_OK on success, negative error code on failure.
  */
 booto_error_t uefi_parse_pe_buffer(const uint8_t *buf, size_t len, pe_efi_info_t *info);
+
+/**
+ * @brief Verify the embedded Authenticode signature of an image uefi_parse_pe_buffer already parsed.
+ *        Checks signature integrity and the signed digest; it does not check the signer against db.
+ * @param buf Same bytes passed to uefi_parse_pe_buffer.
+ * @param len Buffer length.
+ * @param info Parsed info; authenticode_state is written.
+ */
+void authenticode_verify(const uint8_t *buf, size_t len, pe_efi_info_t *info);
 
 /**
  * @brief Inspect a single .efi binary for bootkits, DBX revocations, or missing signatures.

@@ -39,7 +39,8 @@ jobs:
             dosfstools \
             libncurses-dev \
             libblkid-dev \
-            libudev-dev
+            libudev-dev \
+            libssl-dev
 
       - name: Build Standalone Debian Live ISO
         run: |

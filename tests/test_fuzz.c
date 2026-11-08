@@ -320,7 +320,7 @@ static void target_elf(const uint8_t *buf, size_t len) {
 
 static void target_pe(const uint8_t *buf, size_t len) {
     pe_efi_info_t info;
-    (void)uefi_parse_pe_buffer(buf, len, &info);
+    if (uefi_parse_pe_buffer(buf, len, &info) == BOOTO_OK) authenticode_verify(buf, len, &info);
 }
 
 static void target_mbr(const uint8_t *buf, size_t len) {

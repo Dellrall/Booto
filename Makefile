@@ -1,6 +1,7 @@
 CC ?= gcc
 CFLAGS ?= -std=c11 -Wall -Wextra -Wpedantic -Werror -Wshadow -Wformat=2 -Wconversion -fstack-protector-strong -O2 -D_FORTIFY_SOURCE=2 -fPIE -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE -pthread
 LDFLAGS ?= -pie -Wl,-z,relro,-z,now -pthread
+LDLIBS = -lcrypto
 
 GIT_VERSION := $(shell git describe --tags --always 2>/dev/null | sed 's/^v//')
 VERSION ?= $(if $(GIT_VERSION),$(GIT_VERSION),0.0.0-unknown)
@@ -16,6 +17,7 @@ SOURCES = $(SRCDIR)/logger.c \
           $(SRCDIR)/elf_analyzer.c \
           $(SRCDIR)/kernel_inspector.c \
           $(SRCDIR)/uefi_analyzer.c \
+          $(SRCDIR)/authenticode.c \
           $(SRCDIR)/mbr_auditor.c \
           $(SRCDIR)/initramfs_auditor.c \
           $(SRCDIR)/preload_scanner.c \
@@ -64,7 +66,7 @@ $(BUILDDIR)/%.o: $(SRCDIR)/%.c include/version.h $(FLAGS_STAMP) | $(BUILDDIR)
 	$(CC) $(CFLAGS) $(INCLUDES) -MMD -MP -c $< -o $@
 
 $(TARGET): $(BUILDDIR)/main.o $(OBJECTS) | $(BINDIR)
-	$(CC) $(CFLAGS) $^ $(LDFLAGS) -o $@
+	$(CC) $(CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
 
 $(BUILDDIR)/main.o: $(SRCDIR)/main.c include/version.h $(FLAGS_STAMP) | $(BUILDDIR)
 	@mkdir -p $(BUILDDIR)
@@ -77,7 +79,7 @@ $(BINDIR):
 	mkdir -p $(BINDIR)
 
 $(BUILDDIR)/test_%: $(TESTDIR)/test_%.c $(OBJECTS) | $(BUILDDIR)
-	$(CC) $(CFLAGS) $(INCLUDES) -MMD -MP $< $(OBJECTS) $(LDFLAGS) -o $@
+	$(CC) $(CFLAGS) $(INCLUDES) -MMD -MP $< $(OBJECTS) $(LDFLAGS) $(LDLIBS) -o $@
 
 test: version $(TARGET) $(TEST_BINS)
 	@echo "--- Running Test Suite ---"
