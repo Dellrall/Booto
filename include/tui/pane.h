@@ -104,6 +104,8 @@ typedef struct {
     booto_error_t pending_err;
     char scan_target[128];
     bool scan_enabled[SCAN_MOD_COUNT];
+    char scan_quarantine_dir[300];      // "" = no quarantine export for this scan
+    bool quarantine;                    // F7: export flagged files to <report storage>/quarantine
 
     // Persistence state: luks_unlocked = scan target opened via F3; persist = report storage on the boot USB
     bool luks_unlocked;

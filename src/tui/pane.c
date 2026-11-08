@@ -360,6 +360,11 @@ static void render_findings_pane(wm_node_t *n, bool focused, tui_app_state_t *ap
             int w = term_puts_clip(x0, y, iw, "Engines  ", A_MUTED);
             snprintf(line, sizeof(line), "%d of %d enabled", enabled, app->module_count);
             term_puts_clip(x0 + w, y, iw - w, line, A_TEXT);
+            y++;
+        }
+        if (y < bottom) {
+            int w = term_puts_clip(x0, y, iw, "Quarantine ", A_MUTED);
+            term_puts_clip(x0 + w, y, iw - w, app->quarantine ? "on (F7)" : "off (F7)", A_TEXT);
             y += 2;
         }
         if (y < bottom) {
@@ -446,6 +451,7 @@ static void render_persistence_pane(wm_node_t *n, bool focused, tui_app_state_t 
         {" F3 ", "Unlock a LUKS target"},
         {" F4 ", "Unlock report storage on the boot USB"},
         {" F6 ", "Export case report (JSON + Markdown, SHA-256 checksum)"},
+        {" F7 ", "Toggle quarantine: flagged files to an encrypted ZIP"},
     };
     for (size_t i = 0; i < sizeof(HINTS) / sizeof(HINTS[0]) && y < bottom; i++, y++) {
         int w = term_puts_clip(x0, y, iw, HINTS[i].key, A_KEYCAP);

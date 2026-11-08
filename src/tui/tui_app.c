@@ -239,7 +239,8 @@ static scan_module_id_t pane_module_to_scan_id(const char *name) {
 /* Worker thread: touches only its own pending_* / scan_* inputs, the log (locked) and the atomics. */
 static void *scan_worker(void *arg) {
     tui_app_state_t *app = arg;
-    app->pending_err = forensic_scan_run(app->scan_target, NULL, app->scan_enabled, NULL, scan_progress_cb, app,
+    app->pending_err = forensic_scan_run(app->scan_target, NULL, app->scan_enabled,
+                                         app->scan_quarantine_dir[0] ? app->scan_quarantine_dir : NULL, scan_progress_cb, app,
                                          app->pending_scan);
     atomic_store(&app->scan_done, true);
     return NULL;
@@ -278,6 +279,20 @@ static void start_forensic_scan(tui_app_state_t *app) {
     }
 
     char log_buf[256];
+    app->scan_quarantine_dir[0] = '\0';
+    if (app->quarantine) {
+        if (!persistence_is_unlocked(&app->persist)) {
+            tui_app_append_log(app, LOG_LEVEL_WARN, NULL, "Quarantine needs report storage (F4); scanning without it");
+        } else {
+            snprintf(app->scan_quarantine_dir, sizeof(app->scan_quarantine_dir), "%s/quarantine", app->persist.mount_path);
+            if (disk_ensure_private_dir(app->scan_quarantine_dir) != BOOTO_OK) {
+                snprintf(log_buf, sizeof(log_buf), "Unsafe or unusable quarantine directory %.150s; scanning without it",
+                         app->scan_quarantine_dir);
+                tui_app_append_log(app, LOG_LEVEL_WARN, NULL, log_buf);
+                app->scan_quarantine_dir[0] = '\0';
+            }
+        }
+    }
     snprintf(log_buf, sizeof(log_buf), "Scan started on %.120s (read-only).", app->scan_target);
     tui_app_append_log(app, LOG_LEVEL_INFO, NULL, log_buf);
 
@@ -316,6 +331,13 @@ static void finish_forensic_scan(tui_app_state_t *app) {
     }
     free(app->last_scan);
     app->last_scan = r;
+    if (r->quarantine_zip[0]) {
+        snprintf(log_buf, sizeof(log_buf), "Quarantined %d file%s to %.180s (ZIP password \"infected\").", r->quarantined,
+                 r->quarantined == 1 ? "" : "s", r->quarantine_zip);
+        tui_app_append_log(app, LOG_LEVEL_WARN, NULL, log_buf);
+    } else if (r->quarantined < 0) {
+        tui_app_append_log(app, LOG_LEVEL_ERROR, NULL, "Quarantine archive could not be finished");
+    }
 
     int ok_count = 0;
     for (int m = 0; m < SCAN_MOD_COUNT; m++) {
@@ -634,6 +656,10 @@ int tui_app_run(booto_context_t *ctx) {
                 wm_adjust_split_ratio(app.wm, +0.05f);
             } else if (event.type == KEY_F5) {
                 start_forensic_scan(&app);
+            } else if (event.type == KEY_F7) {
+                app.quarantine = !app.quarantine;
+                snprintf(app.status_msg, sizeof(app.status_msg), "Quarantine %s for the next scan.",
+                         app.quarantine ? "on: flagged files go to an encrypted ZIP on report storage" : "off");
             } else if (event.type == KEY_F6) {
                 if (atomic_load(&app.scan_active)) {
                     snprintf(app.status_msg, sizeof(app.status_msg), "Export is disabled while a scan runs.");
