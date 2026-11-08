@@ -147,6 +147,9 @@ void term_putc(int x, int y, char c, uint32_t attr);
  */
 void term_put_glyph(int x, int y, uint32_t cp, uint32_t attr);
 
+/** Limits every later draw to rows [top, bottom); term_set_clip_rows(0, -1) removes the limit. */
+void term_set_clip_rows(int top, int bottom);
+
 /**
  * @brief Draw a UTF-8 string; returns columns written.
  */

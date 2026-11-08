@@ -207,8 +207,16 @@ void term_clear(void) {
     memset(g_back_attrs, 0, cells * sizeof(uint32_t));
 }
 
+static int g_clip_top = 0, g_clip_bottom = -1; /* bottom < 0 = no clip */
+
+void term_set_clip_rows(int top, int bottom) {
+    g_clip_top = top;
+    g_clip_bottom = bottom;
+}
+
 void term_put_glyph(int x, int y, uint32_t cp, uint32_t attr) {
     if (x < 0 || x >= g_cols || y < 0 || y >= g_rows) return;
+    if (y < g_clip_top || (g_clip_bottom >= 0 && y >= g_clip_bottom)) return;
     if (!g_back_chars || !g_back_attrs) return;
 
     size_t idx = (size_t)y * (size_t)g_cols + (size_t)x;
