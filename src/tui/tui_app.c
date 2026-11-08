@@ -593,8 +593,12 @@ int tui_app_run(booto_context_t *ctx) {
                             app.drive_cursor = idx;
                         }
                         app.show_luks_modal = false;
-                    } else {
+                    } else if (err == BOOTO_ERR_PERMISSION_DENIED && disk_is_running_as_root()) {
                         snprintf(app.luks_status_msg, sizeof(app.luks_status_msg), "Could not unlock: wrong passphrase.");
+                    } else if (err == BOOTO_ERR_PERMISSION_DENIED) {
+                        snprintf(app.luks_status_msg, sizeof(app.luks_status_msg), "Could not unlock: Booto must run as root.");
+                    } else {
+                        snprintf(app.luks_status_msg, sizeof(app.luks_status_msg), "Could not unlock: cryptsetup failed (see Logs).");
                     }
                 }
                 continue;
@@ -604,9 +608,14 @@ int tui_app_run(booto_context_t *ctx) {
                 app.show_exit_modal = true;
             } else if (event.type == KEY_F3 && atomic_load(&app.scan_active)) {
                 snprintf(app.status_msg, sizeof(app.status_msg), "LUKS unlock is disabled while a scan runs.");
+            } else if (event.type == KEY_F3 && app.luks_unlocked) {
+                snprintf(app.status_msg, sizeof(app.status_msg), "A LUKS volume is already unlocked at /dev/mapper/booto_target_luks.");
+            } else if (event.type == KEY_F3 && app.drive_count == 0) {
+                snprintf(app.status_msg, sizeof(app.status_msg), "No drives found to unlock.");
+            } else if (event.type == KEY_F3 && strcmp(app.drives[app.drive_cursor].fs_type, "crypto_LUKS") != 0) {
+                snprintf(app.status_msg, sizeof(app.status_msg), "%.200s is not an encrypted (LUKS) volume.", app.drives[app.drive_cursor].name);
             } else if (event.type == KEY_F3) {
-                const char *target = (app.drive_count > 0) ? app.drives[app.drive_cursor].name : "/dev/nvme0n1p3";
-                snprintf(app.luks_target_dev, sizeof(app.luks_target_dev), "%s", target);
+                snprintf(app.luks_target_dev, sizeof(app.luks_target_dev), "%s", app.drives[app.drive_cursor].name);
                 app.luks_passphrase_len = 0;
                 app.luks_passphrase_input[0] = '\0';
                 app.luks_status_msg[0] = '\0';
