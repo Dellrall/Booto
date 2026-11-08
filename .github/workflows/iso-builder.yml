@@ -40,7 +40,8 @@ jobs:
             libncurses-dev \
             libblkid-dev \
             libudev-dev \
-            libssl-dev
+            libssl-dev \
+            libsqlite3-dev
 
       - name: Build Standalone Debian Live ISO
         run: |

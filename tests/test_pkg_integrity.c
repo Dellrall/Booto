@@ -6,6 +6,8 @@
 #include "crypto_utils.h"
 #include "pkg_integrity.h"
 
+#include <sqlite3.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -152,12 +154,125 @@ static void test_pacman_mtree(void) {
     TEST_PASS("test_pacman_mtree");
 }
 
+typedef struct {
+    uint8_t index[16 * 8], data[1024];
+    uint32_t il, dl;
+} hdr_t;
+
+static void put32(uint8_t *p, uint32_t v) {
+    p[0] = (uint8_t)(v >> 24);
+    p[1] = (uint8_t)(v >> 16);
+    p[2] = (uint8_t)(v >> 8);
+    p[3] = (uint8_t)v;
+}
+
+/* Appends one tag; strings arrive as one buffer of NUL-terminated strings (count of them). */
+static void hdr_add(hdr_t *h, uint32_t tag, uint32_t type, uint32_t count, const void *data, size_t len) {
+    uint8_t *e = h->index + h->il++ * 16;
+    put32(e, tag);
+    put32(e + 4, type);
+    put32(e + 8, h->dl);
+    put32(e + 12, count);
+    memcpy(h->data + h->dl, data, len);
+    h->dl += (uint32_t)len;
+}
+
+static size_t hdr_blob(const hdr_t *h, uint8_t *out) {
+    put32(out, h->il);
+    put32(out + 4, h->dl);
+    memcpy(out + 8, h->index, h->il * 16u);
+    memcpy(out + 8 + h->il * 16u, h->data, h->dl);
+    return 8 + h->il * 16u + h->dl;
+}
+
+static void write_rpmdb(const char *rel, const uint8_t *blob, size_t len) {
+    char p[256];
+    put(rel, "");
+    snprintf(p, sizeof(p), "%s/%s", g_root, rel);
+    unlink(p);
+    sqlite3 *db = NULL;
+    sqlite3_stmt *st = NULL;
+    sqlite3_open(p, &db);
+    sqlite3_exec(db, "CREATE TABLE Packages (hnum INTEGER PRIMARY KEY AUTOINCREMENT, blob BLOB NOT NULL)", NULL, NULL,
+                 NULL);
+    sqlite3_prepare_v2(db, "INSERT INTO Packages (blob) VALUES (?)", -1, &st, NULL);
+    sqlite3_bind_blob(st, 1, blob, (int)len, SQLITE_STATIC);
+    sqlite3_step(st);
+    sqlite3_finalize(st);
+    sqlite3_close(db);
+}
+
+static size_t sudo_header(uint8_t *blob, const char *sudo_sha, const char *ls_sha) {
+    hdr_t h = {0};
+    hdr_add(&h, 1000, 6, 1, "sudo", 5);
+    char digests[200];
+    int n = snprintf(digests, sizeof(digests), "%s%c%s%c%c", sudo_sha, 0, ls_sha, 0, 0);
+    hdr_add(&h, 1035, 8, 3, digests, (size_t)n);
+    uint8_t idx[12];
+    put32(idx, 0);
+    put32(idx + 4, 0);
+    put32(idx + 8, 1);
+    hdr_add(&h, 1116, 4, 3, idx, sizeof(idx));
+    hdr_add(&h, 1117, 8, 3, "sudo\0ls\0doc", 12);
+    hdr_add(&h, 1118, 8, 2, "/usr/bin/\0/usr/share/\0", 22);
+    uint8_t algo[4];
+    put32(algo, 8);
+    hdr_add(&h, 5011, 4, 1, algo, sizeof(algo));
+    return hdr_blob(&h, blob);
+}
+
+static void test_rpm_sqlite(void) {
+    TEST_START("test_rpm_sqlite");
+    make_root();
+    char good[65], orig[65], cmd[320];
+    sha256_buffer_hex((const uint8_t *)"ls binary\n", 10, good);
+    sha256_buffer_hex((const uint8_t *)"original sudo\n", 14, orig);
+    put("usr/bin/ls", "ls binary\n");
+    put("usr/bin/sudo", "trojaned sudo\n");
+    uint8_t blob[2048];
+    size_t len = sudo_header(blob, orig, good);
+    write_rpmdb("usr/lib/sysimage/rpm/rpmdb.sqlite", blob, len);
+
+    pkg_scan_result_t *res = calloc(1, sizeof(*res));
+    ASSERT_INT_EQ(pkg_integrity_scan_rootfs(g_root, res), BOOTO_OK, "Scan succeeds");
+    ASSERT_INT_EQ(res->packages_checked, 1, "One rpm package");
+    ASSERT_INT_EQ(res->files_checked, 2, "sudo and ls hashed; digest-less doc skipped");
+    ASSERT_INT_EQ(res->threats_detected, 1, "Trojaned sudo flagged");
+    ASSERT_STR_EQ(res->findings[0].file_path, "/usr/bin/sudo", "Path from dirname + basename");
+    ASSERT_STR_EQ(res->findings[0].package, "sudo", "Package from NAME tag");
+    ASSERT_STR_EQ(res->findings[0].expected_hash, orig, "Expected SHA-256 recorded");
+
+    /* Every truncation and single-byte corruption must be rejected or parsed in bounds (ASan job checks). */
+    for (size_t cut = 0; cut < len; cut += 3) {
+        write_rpmdb("usr/lib/sysimage/rpm/rpmdb.sqlite", blob, cut ? cut : 1);
+        pkg_integrity_scan_rootfs(g_root, res);
+    }
+    for (size_t i = 0; i < len; i++) {
+        uint8_t bad[2048];
+        memcpy(bad, blob, len);
+        bad[i] ^= 0xA5;
+        write_rpmdb("usr/lib/sysimage/rpm/rpmdb.sqlite", bad, len);
+        pkg_integrity_scan_rootfs(g_root, res);
+    }
+
+    snprintf(cmd, sizeof(cmd), "rm -rf '%s/usr/lib/sysimage' && ln -s /usr/lib/sysimage '%s/usr/lib/sysimage'", g_root,
+             g_root);
+    ASSERT_INT_EQ(system(cmd), 0, "plant escaping symlink");
+    ASSERT_INT_EQ(pkg_integrity_scan_rootfs(g_root, res), BOOTO_ERR_NOT_FOUND,
+                  "Absolute symlink out of the root is not followed to the live rpmdb");
+    free(res);
+    snprintf(cmd, sizeof(cmd), "rm -rf '%s'", g_root);
+    ASSERT_INT_EQ(system(cmd), 0, "cleanup");
+    TEST_PASS("test_rpm_sqlite");
+}
+
 int main(void) {
     printf("\n--- Running Package Integrity Tests ---\n");
     test_md5_vectors();
     test_detects_modified_files();
     test_no_dpkg_database();
     test_pacman_mtree();
+    test_rpm_sqlite();
     TEST_SUMMARY();
     return 0;
 }

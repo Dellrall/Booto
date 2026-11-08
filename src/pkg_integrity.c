@@ -15,7 +15,9 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <linux/openat2.h>
+#include <sqlite3.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,6 +28,19 @@
 #define DIVERSIONS_MAX_BYTES (1024u * 1024u)
 #define MTREE_PACKED_CAP (16u * 1024u * 1024u)
 #define MTREE_RAW_CAP (128u * 1024u * 1024u)
+
+/* RPM header tags and types (rpmtag.h) used to rebuild each file's path and digest. */
+#define RPMTAG_NAME 1000u
+#define RPMTAG_FILEDIGESTS 1035u
+#define RPMTAG_DIRINDEXES 1116u
+#define RPMTAG_BASENAMES 1117u
+#define RPMTAG_DIRNAMES 1118u
+#define RPMTAG_FILEDIGESTALGO 5011u
+#define RPM_INT32_TYPE 4u
+#define RPM_STRING_TYPE 6u
+#define RPM_STRING_ARRAY_TYPE 8u
+#define RPM_ALGO_MD5 1u
+#define RPM_ALGO_SHA256 8u
 
 /* Directories whose files a rootkit replaces; docs, headers and data under usr/share are not hashed. */
 static bool is_system_path(const char *rel) {
@@ -305,6 +320,169 @@ static bool scan_pacman(int rootfd, pkg_scan_result_t *result) {
     return true;
 }
 
+static uint32_t be32(const uint8_t *p) {
+    return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | (uint32_t)p[3];
+}
+
+typedef struct {
+    const uint8_t *data; /* start of the tag's data within the store */
+    size_t avail;        /* bytes from data to the end of the store */
+    uint32_t count;
+} rpm_tag_t;
+
+/* Finds tag of the given type in an exported header blob (il, dl, il 16-byte entries, dl data bytes). */
+static bool rpm_find_tag(const uint8_t *blob, size_t len, uint32_t tag, uint32_t type, rpm_tag_t *out) {
+    if (len < 8) return false;
+    uint32_t il = be32(blob), dl = be32(blob + 4);
+    if (il > 0xFFFFu || dl > len - 8u || (size_t)il * 16u > len - 8u - dl) return false;
+    const uint8_t *store = blob + 8 + (size_t)il * 16u;
+    for (uint32_t i = 0; i < il; i++) {
+        const uint8_t *e = blob + 8 + (size_t)i * 16u;
+        if (be32(e) != tag || be32(e + 4) != type) continue;
+        uint32_t off = be32(e + 8);
+        if (off >= dl) return false;
+        out->data = store + off;
+        out->avail = dl - off;
+        out->count = be32(e + 12);
+        return out->count > 0;
+    }
+    return false;
+}
+
+/* Splits a string-array tag into count NUL-terminated pointers; false if any runs past the store. */
+static const char **rpm_strings(const rpm_tag_t *t) {
+    if (t->count > t->avail) return NULL;
+    const char **v = calloc(t->count, sizeof(*v));
+    size_t off = 0;
+    for (uint32_t i = 0; v && i < t->count; i++) {
+        const char *s = (const char *)t->data + off;
+        const char *nul = off < t->avail ? memchr(s, '\0', t->avail - off) : NULL;
+        if (!nul) {
+            free(v);
+            return NULL;
+        }
+        v[i] = s;
+        off += (size_t)(nul - s) + 1;
+    }
+    return v;
+}
+
+/* Checks every file of one package header. A malformed header is counted unreadable, never trusted. */
+static void check_rpm_header(int rootfd, const uint8_t *blob, size_t len, pkg_scan_result_t *res) {
+    rpm_tag_t name, base, dirs, idx, dig, algo;
+    if (!rpm_find_tag(blob, len, RPMTAG_NAME, RPM_STRING_TYPE, &name)) {
+        res->files_unreadable++;
+        return;
+    }
+    char pkg[96];
+    const char *nul = memchr(name.data, '\0', name.avail);
+    snprintf(pkg, sizeof(pkg), "%.*s", nul ? (int)(nul - (const char *)name.data) : 0, (const char *)name.data);
+    res->packages_checked++;
+    if (!rpm_find_tag(blob, len, RPMTAG_BASENAMES, RPM_STRING_ARRAY_TYPE, &base)) return; /* no files */
+
+    uint32_t algo_id = RPM_ALGO_MD5; /* rpm's default when the tag is absent */
+    if (rpm_find_tag(blob, len, RPMTAG_FILEDIGESTALGO, RPM_INT32_TYPE, &algo) && algo.avail >= 4)
+        algo_id = be32(algo.data);
+    if (algo_id != RPM_ALGO_MD5 && algo_id != RPM_ALGO_SHA256) {
+        LOG_WARN("rpm package %s uses digest algorithm %u; not verified", pkg, algo_id);
+        return;
+    }
+    size_t hex_len = algo_id == RPM_ALGO_SHA256 ? 64 : 32;
+
+    const char **bases = NULL, **dirnames = NULL, **digests = NULL;
+    bool ok = rpm_find_tag(blob, len, RPMTAG_DIRNAMES, RPM_STRING_ARRAY_TYPE, &dirs) &&
+              rpm_find_tag(blob, len, RPMTAG_DIRINDEXES, RPM_INT32_TYPE, &idx) &&
+              rpm_find_tag(blob, len, RPMTAG_FILEDIGESTS, RPM_STRING_ARRAY_TYPE, &dig) &&
+              idx.count == base.count && dig.count == base.count && idx.avail / 4 >= idx.count &&
+              (bases = rpm_strings(&base)) && (dirnames = rpm_strings(&dirs)) && (digests = rpm_strings(&dig));
+    for (uint32_t i = 0; ok && i < base.count; i++) {
+        uint32_t d = be32(idx.data + (size_t)i * 4u);
+        if (d >= dirs.count) {
+            ok = false;
+            break;
+        }
+        if (strlen(digests[i]) != hex_len) continue; /* directories, symlinks and %ghost files carry no digest */
+        char path[PATH_MAX], hex[65];
+        if (snprintf(path, sizeof(path), "%s%s", dirnames[d], bases[i]) >= (int)sizeof(path)) continue;
+        snprintf(hex, sizeof(hex), "%s", digests[i]);
+        for (char *c = hex; *c; c++) *c = (char)tolower((unsigned char)*c);
+        const char *rel = path;
+        while (*rel == '/') rel++;
+        if (is_system_path(rel)) check_file(rootfd, rel, hex, pkg, res);
+    }
+    if (!ok) {
+        res->files_unreadable++;
+        LOG_WARN("Malformed rpm header for package %s", pkg);
+    }
+    free(bases);
+    free(dirnames);
+    free(digests);
+}
+
+/* sqlite URIs give '?', '#' and '%' meaning; escape them so a mount path is taken literally. */
+static void uri_path(const char *path, char *out, size_t out_len) {
+    size_t o = 0;
+    for (const char *p = path; *p && o + 4 < out_len; p++) {
+        if (*p == '?' || *p == '#' || *p == '%') o += (size_t)snprintf(out + o, out_len - o, "%%%02X", (unsigned char)*p);
+        else out[o++] = *p;
+    }
+    out[o] = '\0';
+}
+
+/* Reads every header in rpmdb.sqlite (rpm >= 4.16); false when the root has no rpm database. */
+static bool scan_rpm(int rootfd, const char *target_rootfs, pkg_scan_result_t *result) {
+    static const char *const dbs[] = {"usr/lib/sysimage/rpm/rpmdb.sqlite", "var/lib/rpm/rpmdb.sqlite"};
+    char root_real[PATH_MAX], db_real[PATH_MAX], cand[PATH_MAX];
+    if (!realpath(target_rootfs, root_real)) return false;
+    size_t root_len = strlen(root_real);
+    const char *db = NULL;
+    for (size_t i = 0; i < sizeof(dbs) / sizeof(dbs[0]) && !db; i++) {
+        int w = snprintf(cand, sizeof(cand), "%s/%s", root_real, dbs[i]);
+        if (w < 0 || (size_t)w >= sizeof(cand)) continue;
+        /* A planted absolute symlink must not point the scan at the live system's database. */
+        if (realpath(cand, db_real) && strncmp(db_real, root_real, root_len) == 0 && db_real[root_len] == '/')
+            db = db_real;
+    }
+    if (!db) {
+        if (faccessat(rootfd, "var/lib/rpm/Packages", F_OK, AT_SYMLINK_NOFOLLOW) != 0) return false;
+        LOG_ERROR("Berkeley DB rpm database (rpm < 4.16) is not supported; package integrity not verified");
+        result->files_unreadable++;
+        return true;
+    }
+
+    /* immutable: the target is mounted read-only, so take no locks and create no -wal/-shm files. */
+    char uri[PATH_MAX * 3 + 32], esc[PATH_MAX * 3];
+    uri_path(db, esc, sizeof(esc));
+    snprintf(uri, sizeof(uri), "file:%s?immutable=1", esc);
+    sqlite3 *h = NULL;
+    sqlite3_stmt *st = NULL;
+    int rc = sqlite3_open_v2(uri, &h, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI | SQLITE_OPEN_NOFOLLOW, NULL);
+    if (rc == SQLITE_OK) {
+        sqlite3_db_config(h, SQLITE_DBCONFIG_DEFENSIVE, 1, NULL);
+        sqlite3_db_config(h, SQLITE_DBCONFIG_TRUSTED_SCHEMA, 0, NULL);
+        rc = sqlite3_prepare_v2(h, "SELECT blob FROM Packages", -1, &st, NULL);
+    }
+    if (rc != SQLITE_OK) {
+        LOG_ERROR("Cannot read rpm database %s: %s", db, h ? sqlite3_errmsg(h) : "out of memory");
+        result->files_unreadable++;
+        sqlite3_close(h);
+        return true;
+    }
+    while ((rc = sqlite3_step(st)) == SQLITE_ROW) {
+        const uint8_t *blob = sqlite3_column_blob(st, 0);
+        int n = sqlite3_column_bytes(st, 0);
+        if (blob && n > 0) check_rpm_header(rootfd, blob, (size_t)n, result);
+        else result->files_unreadable++;
+    }
+    if (rc != SQLITE_DONE) {
+        LOG_ERROR("rpm database %s is corrupt: %s", db, sqlite3_errmsg(h));
+        result->files_unreadable++;
+    }
+    sqlite3_finalize(st);
+    sqlite3_close(h);
+    return true;
+}
+
 booto_error_t pkg_integrity_scan_rootfs(const char *target_rootfs, pkg_scan_result_t *result) {
     if (!target_rootfs || !result) return BOOTO_ERR_INVALID_ARG;
     memset(result, 0, sizeof(*result));
@@ -315,8 +493,9 @@ booto_error_t pkg_integrity_scan_rootfs(const char *target_rootfs, pkg_scan_resu
     LOG_INFO("Verifying packaged system files in %s against the package database", target_rootfs);
     bool dpkg = scan_dpkg(rootfd, result);
     bool pacman = scan_pacman(rootfd, result);
+    bool rpm = scan_rpm(rootfd, target_rootfs, result);
     close(rootfd);
-    if (!dpkg && !pacman) return BOOTO_ERR_NOT_FOUND;
+    if (!dpkg && !pacman && !rpm) return BOOTO_ERR_NOT_FOUND;
 
     LOG_INFO("Package integrity: %d packages, %d files hashed, %d missing, %d unreadable, %d threats",
              result->packages_checked, result->files_checked, result->files_missing, result->files_unreadable,
