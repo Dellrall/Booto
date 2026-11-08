@@ -7,6 +7,7 @@
 #include "initramfs_auditor.h"
 
 #include <string.h>
+#include <unistd.h>
 
 #define CPIO_BUF_CAP 8192
 
@@ -177,6 +178,24 @@ static void test_exec_capture_output_cap(void) {
     TEST_PASS("test_exec_capture_output_cap");
 }
 
+static void test_exec_capture_sandboxed(void) {
+    TEST_START("test_exec_capture_sandboxed");
+    if (!tool_available("sh")) return;
+
+    const char *const argv[] = {"sh", "-c", "ulimit -t; ulimit -f; grep NoNewPrivs /proc/self/status; id -u", NULL};
+    uint8_t *out = NULL;
+    size_t out_len = 0;
+    ASSERT_INT_EQ(disk_exec_capture(argv, NULL, 0, &out, &out_len, 4096), BOOTO_OK, "Sandboxed child runs");
+    char text[4097] = {0};
+    memcpy(text, out, out_len);
+    free(out);
+    ASSERT_TRUE(strstr(text, "60\n0\n") == text, "CPU limit 60 s and no file writes");
+    ASSERT_TRUE(strstr(text, "NoNewPrivs:\t1") != NULL, "no_new_privs is set");
+    if (geteuid() == 0) ASSERT_TRUE(strstr(text, "\n65534\n") != NULL, "Root drops to nobody");
+
+    TEST_PASS("test_exec_capture_sandboxed");
+}
+
 int main(void) {
     printf("\n--- Running Initramfs CPIO Auditor Tests ---\n");
     test_cpio_archive_and_script_audit();
@@ -185,6 +204,7 @@ int main(void) {
     test_truncated_and_garbage_rejected();
     test_padded_line_detected();
     test_exec_capture_output_cap();
+    test_exec_capture_sandboxed();
     TEST_SUMMARY();
     return 0;
 }
