@@ -7,6 +7,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 static input_event_t parse(const char *seq) {
     input_event_t e = {.type = KEY_NONE};
@@ -47,9 +48,36 @@ static void test_sgr_attrs(void) {
     TEST_PASS("test_sgr_attrs");
 }
 
+/* Feeds bytes through stdin to the real reader, as the Linux console would send them. */
+static input_event_t feed(const char *bytes, size_t len) {
+    int fds[2];
+    input_event_t e = {.type = KEY_NONE};
+    if (pipe(fds) != 0) return e;
+    dup2(fds[0], STDIN_FILENO);
+    close(fds[0]);
+    if (write(fds[1], bytes, len) != (ssize_t)len) e.type = KEY_NONE;
+    close(fds[1]);
+    term_poll_event(&e, 100);
+    return e;
+}
+
+static void test_x10_mouse(void) {
+    TEST_START("test_x10_mouse");
+    input_event_t e = feed("\033[M *%", 6);
+    ASSERT_INT_EQ(e.type, KEY_MOUSE_CLICK, "Console left press is a click");
+    ASSERT_INT_EQ(e.mouse_x, 9, "Column is zero-based");
+    ASSERT_INT_EQ(e.mouse_y, 4, "Row is zero-based");
+    ASSERT_INT_EQ(feed("\033[M#*%", 6).type, KEY_NONE, "Console release is ignored");
+    ASSERT_INT_EQ(feed("\033[M`!!", 6).type, KEY_MOUSE_WHEEL_UP, "Button 64 is wheel up");
+    ASSERT_INT_EQ(feed("\033[Ma!!", 6).type, KEY_MOUSE_WHEEL_DOWN, "Button 65 is wheel down");
+    ASSERT_INT_EQ(feed("\033[M@!!", 6).type, KEY_NONE, "Drag motion is ignored");
+    TEST_PASS("test_x10_mouse");
+}
+
 int main(void) {
     test_sgr_mouse();
     test_sgr_attrs();
+    test_x10_mouse();
     TEST_SUMMARY();
     return 0;
 }
