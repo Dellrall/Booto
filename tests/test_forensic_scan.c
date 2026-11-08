@@ -150,6 +150,31 @@ static void test_all_disabled(void) {
     TEST_PASS("test_all_disabled");
 }
 
+static void test_highest_severity(void) {
+    TEST_START("test_highest_severity");
+    forensic_scan_report_t *r = calloc(1, sizeof(*r));
+    forensic_case_summary_t sum;
+    r->mbr.threats_detected = 1;
+    r->mbr.findings[0].severity = SEVERITY_MEDIUM;
+    r->total_threats = 1;
+    forensic_scan_fill_case_summary(r, "CASE-S", "tester", &sum);
+    ASSERT_STR_EQ(sum.highest_severity, "MEDIUM", "A lone MEDIUM finding is reported as MEDIUM");
+    r->kernel.threats_detected = 1;
+    r->kernel.findings[0].severity = SEVERITY_HIGH;
+    r->total_threats = 2;
+    forensic_scan_fill_case_summary(r, "CASE-S", "tester", &sum);
+    ASSERT_STR_EQ(sum.highest_severity, "HIGH", "Highest severity across engines wins");
+    r->pkg.threats_detected = 1;
+    r->total_threats = 3;
+    forensic_scan_fill_case_summary(r, "CASE-S", "tester", &sum);
+    ASSERT_STR_EQ(sum.highest_severity, "CRITICAL", "Package tampering is CRITICAL");
+    memset(r, 0, sizeof(*r));
+    forensic_scan_fill_case_summary(r, "CASE-S", "tester", &sum);
+    ASSERT_STR_EQ(sum.highest_severity, "NONE", "No threats: NONE");
+    free(r);
+    TEST_PASS("test_highest_severity");
+}
+
 static void test_invalid_args(void) {
     TEST_START("test_invalid_args");
     forensic_scan_report_t *r = calloc(1, sizeof(*r));
@@ -173,6 +198,7 @@ int main(void) {
     }
     test_rootfs_esp_used();
     test_all_disabled();
+    test_highest_severity();
     test_invalid_args();
     char cmd[128];
     snprintf(cmd, sizeof(cmd), "rm -rf '%s'", g_root);

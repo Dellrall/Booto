@@ -22,10 +22,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **Compact case reports**: the JSON report is a single line (same keys), and the Markdown report is a short header plus one engine table, with engine names taken from the scanner (new engines appear automatically). Together about 1.3 KB per case instead of 2.2 KB.
 - Report seal files name the bare report file, so `sha256sum -c case_*.sha256` works from wherever the cases directory is mounted.
+- A case report is never overwritten: a second export with the same case ID fails instead of replacing the first.
+- One severity scale (`booto_severity_t`) is shared by the MBR, UEFI and kernel engines instead of three copies.
 
 ### Fixed
 - **Builds on glibc that enforces `_FORTIFY_SOURCE`** (e.g. Fedora 44, GCC 16): the default flags now include `-O2`, without which fortify is inactive and newer glibc fails the `-Werror` build. With fortify active, the TUI frame flush retries partial `write()`s instead of dropping part of a frame, and the "Report saved" status line keeps its RAM-only warning instead of cutting it off on a long path.
-- The CMake build links again: `src/pkg_integrity.c` was missing from its source list.
+- **Case report severity is real**: `highest_severity` is the highest severity of the findings (initramfs, preload and package findings count as CRITICAL). Before, any threat made it CRITICAL, even a lone MEDIUM one.
+- **The MBR gap scan reads up to 2047 sectors** (the whole gap before a partition at LBA 2048) instead of 63, so a payload hidden past sector 63 is found.
+- **Unread MBR gap or VBR sectors make the MBR engine an ERROR** (verdict INCOMPLETE, findings kept) instead of being skipped silently and reported clean.
+- `make test` after `make asan` or `make coverage` no longer fails to link: objects rebuild when the compiler flags change.
+
+### Removed
+- `CMakeLists.txt`: CI builds only with the Makefile, and the CMake build had drifted (missing test, broken test path).
 
 ## [1.4.0] - 2026-11-05
 

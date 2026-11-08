@@ -14,4 +14,4 @@
 # docs:     Documentation changes, README, or blueprint updates
 # test:     Adding or modifying unit/mock tests
 # refactor: Code change that neither fixes a bug nor adds a feature
-# chore:    Toolchain, CMake, CI/CD, or build script updates
+# chore:    Toolchain, Makefile, CI/CD, or build script updates

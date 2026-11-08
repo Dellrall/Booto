@@ -16,14 +16,6 @@ extern "C" {
 
 #define MAX_UEFI_THREATS 64
 
-typedef enum {
-    UEFI_SEVERITY_INFO = 0,
-    UEFI_SEVERITY_LOW,
-    UEFI_SEVERITY_MEDIUM,
-    UEFI_SEVERITY_HIGH,
-    UEFI_SEVERITY_CRITICAL
-} uefi_severity_t;
-
 typedef struct {
     char file_path[256];
     char sha256[65];              // whole-file SHA-256 (reporting)
@@ -37,7 +29,7 @@ typedef struct {
     bool has_authenticode;
     bool is_revoked_dbx;
     char matched_threat[96];
-    uefi_severity_t matched_severity;
+    booto_severity_t matched_severity;
 } pe_efi_info_t;
 
 typedef struct {
@@ -45,7 +37,7 @@ typedef struct {
     char file_path[256];
     char sha256[65];
     char rule_id[64];
-    uefi_severity_t severity;
+    booto_severity_t severity;
     char description[256];
 } uefi_threat_finding_t;
 
@@ -87,11 +79,6 @@ booto_error_t uefi_inspect_efi_file(const char *efi_path, uefi_scan_result_t *re
  * @return BOOTO_OK on success, negative error code on failure.
  */
 booto_error_t uefi_inspect_esp_directory(const char *esp_dir, uefi_scan_result_t *result);
-
-/**
- * @brief Convert UEFI severity enum to string.
- */
-const char *uefi_severity_to_string(uefi_severity_t severity);
 
 #ifdef __cplusplus
 }

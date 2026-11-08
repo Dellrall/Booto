@@ -105,6 +105,11 @@ int rules_severity_level(const char *severity) {
     return 1;
 }
 
+const char *booto_severity_str(booto_severity_t severity) {
+    (void)severity;
+    return "LOW";
+}
+
 /* ---- harness -------------------------------------------------------------------------------- */
 
 void harness(void) {

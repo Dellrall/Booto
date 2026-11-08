@@ -21,16 +21,6 @@
 #include <string.h>
 #include <sys/stat.h>
 
-const char *uefi_severity_to_string(uefi_severity_t severity) {
-    switch (severity) {
-        case UEFI_SEVERITY_CRITICAL: return "CRITICAL";
-        case UEFI_SEVERITY_HIGH:     return "HIGH";
-        case UEFI_SEVERITY_MEDIUM:   return "MEDIUM";
-        case UEFI_SEVERITY_LOW:      return "LOW";
-        default:                     return "INFO";
-    }
-}
-
 static uint32_t rd32(const uint8_t *p) {
     return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
@@ -164,7 +154,7 @@ booto_error_t uefi_parse_pe_buffer(const uint8_t *buf, size_t len, pe_efi_info_t
         if (strcasecmp(info->authenticode_sha256, dbx->entries[i].sha256) == 0) {
             info->is_revoked_dbx = true;
             snprintf(info->matched_threat, sizeof(info->matched_threat), "%s", dbx->entries[i].threat);
-            info->matched_severity = (uefi_severity_t)rules_severity_level(dbx->entries[i].severity);
+            info->matched_severity = (booto_severity_t)rules_severity_level(dbx->entries[i].severity);
             break;
         }
     }
@@ -213,7 +203,7 @@ static void add_uefi_threat(uefi_scan_result_t *result,
                             const char *file_path,
                             const char *sha256,
                             const char *rule_id,
-                            uefi_severity_t severity,
+                            booto_severity_t severity,
                             const char *description) {
     if (!result || result->bootkits_detected >= MAX_UEFI_THREATS) return;
 
@@ -226,7 +216,7 @@ static void add_uefi_threat(uefi_scan_result_t *result,
     snprintf(f->description, sizeof(f->description), "%s", description ? description : "");
 
     LOG_CRITICAL("[BOOTKIT ALERT] %s in %s (Rule: %s, Severity: %s)",
-                 f->threat_name, f->file_path, f->rule_id, uefi_severity_to_string(f->severity));
+                 f->threat_name, f->file_path, f->rule_id, booto_severity_str(f->severity));
 }
 
 booto_error_t uefi_inspect_efi_file(const char *efi_path, uefi_scan_result_t *result) {
@@ -259,7 +249,7 @@ booto_error_t uefi_inspect_efi_file(const char *efi_path, uefi_scan_result_t *re
                         efi_path,
                         pe.sha256,
                         "UEFI_MISSING_AUTHENTICODE",
-                        UEFI_SEVERITY_HIGH,
+                        SEVERITY_HIGH,
                         "EFI executable does not contain an embedded Authenticode signature table");
     }
 

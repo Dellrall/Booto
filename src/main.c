@@ -90,15 +90,8 @@ static bool resolve_target(booto_context_t *ctx) {
 }
 
 static void write_reports(const forensic_scan_report_t *rep, const char *dir) {
-    char case_id[64];
-    time_t now = time(NULL);
-    struct tm tm_utc;
-    if (!gmtime_r(&now, &tm_utc) || strftime(case_id, sizeof(case_id), "CASE-%Y%m%d-%H%M%S", &tm_utc) == 0) {
-        snprintf(case_id, sizeof(case_id), "CASE-unknown");
-    }
-    const char *user = getenv("USER");
     forensic_case_summary_t sum;
-    forensic_scan_fill_case_summary(rep, case_id, (user && user[0]) ? user : "unknown", &sum);
+    forensic_scan_fill_case_summary(rep, NULL, NULL, &sum);
 
     char path[512];
     booto_error_t e = case_report_generate_json(&sum, dir, path, sizeof(path));
