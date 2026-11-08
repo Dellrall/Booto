@@ -1,6 +1,6 @@
 /**
  * @file rules_loader.h
- * @brief Sealed JSON detection rules (DBX, LKM, MBR) with built-in fallback tables.
+ * @brief Sealed JSON detection rules (DBX, LKM, MBR, rootkit files) with built-in fallback tables.
  *
  * Each rules file is searched in: $BOOTO_RULES_DIR, /persistence/rules,
  * /usr/share/booto/rules, ./rules (first directory containing the file wins;
@@ -23,6 +23,7 @@
 #define RULES_MAX_SYMBOLS 8
 #define RULES_MAX_PATTERNS 8
 #define RULES_MAX_PATTERN_BYTES 64
+#define RULES_MAX_IOC_PATHS 8
 
 typedef enum { RULES_SOURCE_BUILTIN, RULES_SOURCE_FILE } rules_source_t;
 
@@ -89,10 +90,28 @@ typedef struct {
     rules_mbr_entry_t entries[RULES_MAX_ENTRIES];
 } rules_mbr_set_t;
 
+/* rootkit_file_iocs.json: {"files":[{name,rule_id,description,paths[]}]}. A rule fires for each of its
+ * absolute paths (no "..") that exists under the target root; presence alone is the indicator. */
+typedef struct {
+    char name[64];
+    char rule_id[64];
+    char description[256];
+    int path_count;
+    char paths[RULES_MAX_IOC_PATHS][128];
+} rules_ioc_entry_t;
+
+typedef struct {
+    rules_source_t source;
+    char path[512];
+    int count;
+    rules_ioc_entry_t entries[RULES_MAX_ENTRIES];
+} rules_ioc_set_t;
+
 /* Lazily load once and cache (including a failed result). *out is never NULL on BOOTO_OK. */
 booto_error_t rules_get_dbx(const rules_dbx_set_t **out); /* uefi_dbx_revocations.json */
 booto_error_t rules_get_lkm(const rules_lkm_set_t **out); /* lkm_rootkit_signatures.json */
 booto_error_t rules_get_mbr(const rules_mbr_set_t **out); /* mbr_bootkit_signatures.json */
+booto_error_t rules_get_ioc(const rules_ioc_set_t **out); /* rootkit_file_iocs.json */
 
 /* Tests: forget cached sets so the next rules_get_* reloads. */
 void rules_reset_cache(void);

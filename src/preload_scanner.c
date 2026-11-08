@@ -12,6 +12,7 @@
 #include "preload_scanner.h"
 #include "crypto_utils.h"
 #include "logger.h"
+#include "rules_loader.h"
 
 #include <ctype.h>
 #include <dirent.h>
@@ -395,6 +396,30 @@ static void udev_vendor_line(const char *rootfs, const char *file, const char *l
     udev_line(rootfs, file, line, result, false);
 }
 
+/* Known rootkit install paths; lstat so a planted symlink is reported, never followed out of the target root. */
+static booto_error_t scan_file_iocs(const char *rootfs, preload_scan_result_t *result) {
+    const rules_ioc_set_t *iocs = NULL;
+    booto_error_t err = rules_get_ioc(&iocs);
+    if (err != BOOTO_OK) {
+        LOG_ERROR("Rootkit file indicators unavailable (err: %d); known install paths not checked", err);
+        return err;
+    }
+    for (int i = 0; i < iocs->count; i++) {
+        const rules_ioc_entry_t *e = &iocs->entries[i];
+        for (int j = 0; j < e->path_count; j++) {
+            char full[1024];
+            snprintf(full, sizeof(full), "%.700s%.200s", rootfs, e->paths[j]);
+            struct stat st;
+            if (lstat(full, &st) != 0) continue;
+            char sha256[65] = "0000000000000000000000000000000000000000000000000000000000000000";
+            if (S_ISREG(st.st_mode)) sha256_file_hex(full, sha256);
+            add_preload_threat(result, full, e->name, S_ISREG(st.st_mode) ? e->paths[j] : "", sha256, e->rule_id,
+                               e->description);
+        }
+    }
+    return BOOTO_OK;
+}
+
 booto_error_t preload_scan_rootfs(const char *target_rootfs, preload_scan_result_t *result) {
     if (!target_rootfs || !result) return BOOTO_ERR_INVALID_ARG;
     memset(result, 0, sizeof(*result));
@@ -427,7 +452,9 @@ booto_error_t preload_scan_rootfs(const char *target_rootfs, preload_scan_result
     scan_conf_dir(target_rootfs, "/root", "profile", profile_line, result);
     scan_conf_dir(target_rootfs, "/root/.ssh", "authorized_keys", ssh_key_line, result);
     scan_homes(target_rootfs, result);
+    booto_error_t ioc_err = scan_file_iocs(target_rootfs, result);
     if (err == BOOTO_OK) err = env_err;
+    if (err == BOOTO_OK) err = ioc_err;
 
     LOG_INFO("Preload scanner complete: %d config files audited, %d userland threats flagged",
              result->files_scanned, result->threats_detected);

@@ -23,6 +23,7 @@
 #define DBX_FILE "uefi_dbx_revocations.json"
 #define LKM_FILE "lkm_rootkit_signatures.json"
 #define MBR_FILE "mbr_bootkit_signatures.json"
+#define IOC_FILE "rootkit_file_iocs.json"
 
 #define JSON_MAX_DEPTH 16
 #define RULES_MAX_FILE_BYTES (1024U * 1024U)
@@ -193,6 +194,31 @@ static bool mbr_target_from_string(const char *s, rules_mbr_target_t *out) {
     return false;
 }
 
+typedef struct {
+    const char *rule_id;
+    const char *name;
+    const char *description;
+    const char *paths[RULES_MAX_IOC_PATHS + 1]; /* NULL-terminated */
+} builtin_ioc_t;
+
+/* Install paths named by each project's source or by public incident reports; presence alone is the IOC. */
+static const builtin_ioc_t G_BUILTIN_IOC[] = {
+    { "IOC_JYNX2", "Jynx2 LD_PRELOAD Rootkit", "Jynx2 installs its hooking libraries under /XxJynx",
+      { "/XxJynx/jynx2.so", "/XxJynx/reality.so", NULL } },
+    { "IOC_REPTILE", "Reptile Rootkit", "Reptile keeps its control tools in its default /reptile directory",
+      { "/reptile/reptile_cmd", "/reptile/reptile_shell", "/reptile/reptile_start", NULL } },
+    { "IOC_KINSING", "Kinsing Cryptojacker", "Kinsing drops libsystem.so (preloaded to hide its miner) and its kdevtmpfsi miner",
+      { "/etc/libsystem.so", "/var/tmp/kinsing", "/var/tmp/kdevtmpfsi", "/tmp/kinsing", "/tmp/kdevtmpfsi", NULL } },
+    { "IOC_EBURY_LIBNS2", "Ebury OpenSSH Backdoor", "Ebury (Operation Windigo) loads its backdoor from libns2.so",
+      { "/lib/libns2.so", "/lib64/libns2.so", "/lib/x86_64-linux-gnu/libns2.so", "/usr/lib64/libns2.so", NULL } },
+    { "IOC_SUCKIT", "SucKIT Rootkit", "SucKIT replaces init and hides its files under these paths",
+      { "/sbin/initsk12", "/sbin/initxrk", "/usr/share/locale/sk/.sk12", NULL } },
+    { "IOC_T0RN", "T0rn Rootkit", "T0rn keeps its tools in hidden directories under /usr",
+      { "/usr/src/.puta", "/usr/info/.t0rn", NULL } },
+    { "IOC_PHALANX2", "Phalanx2 Rootkit", "Phalanx2 stores its configuration in /etc/khubd.p2",
+      { "/etc/khubd.p2", NULL } },
+};
+
 static bool dbx_entry_valid(const rules_dbx_entry_t *e) {
     return is_lower_hex64(e->sha256) && e->threat[0] && rules_severity_level(e->severity) >= 0;
 }
@@ -201,6 +227,14 @@ static bool lkm_entry_valid(const rules_lkm_entry_t *e) {
     if (!e->name[0] || !e->rule_id[0] || e->symbol_count < 1 || rules_severity_level(e->severity) < 0) return false;
     for (int i = 0; i < e->symbol_count; i++) {
         if (!e->symbols[i][0]) return false; /* "" would match every symbol */
+    }
+    return true;
+}
+
+static bool ioc_entry_valid(const rules_ioc_entry_t *e) {
+    if (!e->name[0] || !e->rule_id[0] || e->path_count < 1) return false;
+    for (int i = 0; i < e->path_count; i++) {
+        if (e->paths[i][0] != '/' || e->paths[i][1] == '\0' || strstr(e->paths[i], "..")) return false;
     }
     return true;
 }
@@ -234,6 +268,21 @@ static bool builtin_lkm(rules_lkm_set_t *set) {
             !copy_field(e->description, sizeof(e->description), b->description) ||
             !copy_field(e->symbols[0], sizeof(e->symbols[0]), b->symbol) ||
             !lkm_entry_valid(e)) return false;
+    }
+    return true;
+}
+
+static bool builtin_ioc(rules_ioc_set_t *set) {
+    for (size_t i = 0; i < ARRAY_LEN(G_BUILTIN_IOC); i++) {
+        const builtin_ioc_t *b = &G_BUILTIN_IOC[i];
+        rules_ioc_entry_t *e = &set->entries[set->count++];
+        if (!copy_field(e->name, sizeof(e->name), b->name) ||
+            !copy_field(e->rule_id, sizeof(e->rule_id), b->rule_id) ||
+            !copy_field(e->description, sizeof(e->description), b->description)) return false;
+        for (; e->path_count < RULES_MAX_IOC_PATHS && b->paths[e->path_count]; e->path_count++) {
+            if (!copy_field(e->paths[e->path_count], sizeof(e->paths[0]), b->paths[e->path_count])) return false;
+        }
+        if (!ioc_entry_valid(e)) return false;
     }
     return true;
 }
@@ -536,6 +585,31 @@ static bool parse_lkm_entry(jp_t *p, void *vset) {
     return true;
 }
 
+static bool parse_ioc_entry(jp_t *p, void *vset) {
+    rules_ioc_set_t *set = vset;
+    if (set->count >= RULES_MAX_ENTRIES) return false;
+    rules_ioc_entry_t *e = &set->entries[set->count];
+    char key[32];
+    bool first = true;
+    unsigned seen = 0;
+    int r;
+    if (!jp_enter(p, '{')) return false;
+    while ((r = jp_member(p, &first, key, sizeof(key))) == 1) {
+        bool ok;
+        if (strcmp(key, "name") == 0)             ok = take_key(&seen, 1u) && jp_str_field(p, e->name, sizeof(e->name));
+        else if (strcmp(key, "rule_id") == 0)     ok = take_key(&seen, 2u) && jp_str_field(p, e->rule_id, sizeof(e->rule_id));
+        else if (strcmp(key, "description") == 0) ok = take_key(&seen, 4u) && jp_str_field(p, e->description, sizeof(e->description));
+        else if (strcmp(key, "paths") == 0)       ok = take_key(&seen, 8u) &&
+                                                       jp_str_array(p, &e->paths[0][0], sizeof(e->paths[0]),
+                                                                    RULES_MAX_IOC_PATHS, &e->path_count);
+        else                                      ok = jp_skip(p);
+        if (!ok) return false;
+    }
+    if (r != 0 || seen != 15u || !ioc_entry_valid(e)) return false;
+    set->count++;
+    return true;
+}
+
 static bool parse_mbr_entry(jp_t *p, void *vset) {
     rules_mbr_set_t *set = vset;
     if (set->count >= RULES_MAX_ENTRIES) return false;
@@ -700,7 +774,8 @@ typedef struct {
 static rules_dbx_set_t g_dbx;
 static rules_lkm_set_t g_lkm;
 static rules_mbr_set_t g_mbr;
-static rules_cache_t g_dbx_cache, g_lkm_cache, g_mbr_cache;
+static rules_ioc_set_t g_ioc;
+static rules_cache_t g_dbx_cache, g_lkm_cache, g_mbr_cache, g_ioc_cache;
 
 /* Expands the shared lazy-load body for one rule family. */
 #define RULES_GET(cache, set, file, key, parser, builtin, out)                                          \
@@ -731,7 +806,12 @@ booto_error_t rules_get_mbr(const rules_mbr_set_t **out) {
     RULES_GET(g_mbr_cache, g_mbr, MBR_FILE, "signatures", parse_mbr_entry, builtin_mbr, out);
 }
 
+booto_error_t rules_get_ioc(const rules_ioc_set_t **out) {
+    RULES_GET(g_ioc_cache, g_ioc, IOC_FILE, "files", parse_ioc_entry, builtin_ioc, out);
+}
+
 void rules_reset_cache(void) {
+    g_ioc_cache.loaded = false;
     g_dbx_cache.loaded = false;
     g_lkm_cache.loaded = false;
     g_mbr_cache.loaded = false;
