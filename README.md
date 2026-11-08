@@ -1,13 +1,15 @@
 # Booto
 
 [![CI](https://github.com/Dellrall/Booto/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Dellrall/Booto/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/github/v/tag/Dellrall/Booto?label=version)](CHANGELOG.md)
+[![Version](https://img.shields.io/github/v/tag/Dellrall/Booto?label=version&include_prereleases)](CHANGELOG.md)
 [![Standard](https://img.shields.io/badge/C-11-blue.svg)](https://en.wikipedia.org/wiki/C11_(C_standard_revision))
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 **Booto** is an amnesic, Tails-inspired Live Linux forensic framework designed for **out-of-band offline rootkit and bootkit detection**. 
 
 Built with **C11**, Booto runs from a trusted Debian Live USB environment so the suspect system's kernel and userland are never executed while their storage is analysed read-only.
+
+> **Status: beta.** Booto is fine for triage, but has not yet been validated against real bootkit samples or across many clean machines. Do not treat a clean report as proof a system is uncompromised. Releases are tagged `-beta` and published as pre-releases until that changes.
 
 ---
 
