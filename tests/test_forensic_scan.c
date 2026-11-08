@@ -203,6 +203,7 @@ static void test_quarantine_export(void) {
     ASSERT_INT_EQ(forensic_scan_run(NULL, g_root, NULL, NULL, NULL, NULL, r), BOOTO_OK, "Scan without quarantine");
     ASSERT_TRUE(r->preload.threats_detected > 0, "Preload entry is a threat");
     ASSERT_STR_EQ(r->quarantine_zip, "", "Quarantine off by default");
+    ASSERT_TRUE(r->inspect.len == 7 && memcmp(r->inspect.data, "payload", 7) == 0, "Flagged file captured for Inspect");
     ASSERT_INT_EQ(forensic_scan_run(NULL, g_root, NULL, qdir, NULL, NULL, r), BOOTO_OK, "Scan with quarantine");
     ASSERT_INT_EQ(r->quarantined, 1, "Flagged library exported");
     struct stat st;

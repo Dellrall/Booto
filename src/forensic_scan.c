@@ -13,6 +13,7 @@
 #include "disk_mount.h"
 #include "logger.h"
 #include "quarantine.h"
+#include "inspect.h"
 
 #include <dirent.h>
 #include <inttypes.h>
@@ -131,16 +132,23 @@ static bool find_initramfs(const char *root, char *out, size_t out_size) {
     return true;
 }
 
-/* No-op when quarantine is off; a failed export is logged and the scan goes on. */
-static void export_file(quarantine_t *q, const char *prefix, const char *root, const char *path, uint64_t max) {
-    if (!q || !path[0]) return;
+/* The first flagged file is captured for the Inspect view; the export is a no-op when quarantine is off.
+ * Failures are logged and the scan goes on. */
+static void export_file(forensic_scan_report_t *out, quarantine_t *q, const char *prefix, const char *root,
+                        const char *path, uint64_t max) {
+    if (!path[0]) return;
+    if (!out->inspect.path[0]) {
+        booto_error_t ie = inspect_capture(root, path, max, &out->inspect);
+        if (ie != BOOTO_OK) LOG_WARN("Inspect: could not read %s: %s", path, err_name(ie));
+    }
+    if (!q) return;
     booto_error_t e = quarantine_add(q, prefix, root, path, max);
     if (e != BOOTO_OK) LOG_WARN("Quarantine: could not export %s: %s", path, err_name(e));
 }
 
-static void export_uefi(quarantine_t *q, const uefi_scan_result_t *u, const char *esp_root) {
+static void export_uefi(forensic_scan_report_t *out, quarantine_t *q, const uefi_scan_result_t *u, const char *esp_root) {
     for (int i = 0; i < u->bootkits_detected && i < MAX_UEFI_THREATS; i++)
-        export_file(q, "uefi", esp_root, u->findings[i].file_path, QUARANTINE_MAX_ITEM);
+        export_file(out, q, "uefi", esp_root, u->findings[i].file_path, QUARANTINE_MAX_ITEM);
 }
 
 /* UEFI engine: <root>/boot/efi if it holds EFI files, else the ESP(s) on target_dev's disk, mounted read-only. */
@@ -151,7 +159,7 @@ static void run_uefi(forensic_scan_report_t *out, const char *target_dev, bool h
         snprintf(path, sizeof(path), "%.256s/boot/efi", out->scan_root);
         booto_error_t e = uefi_inspect_esp_directory(path, &out->uefi);
         if (e == BOOTO_OK && out->uefi.efi_files_scanned > 0) {
-            export_uefi(q, &out->uefi, path);
+            export_uefi(out, q, &out->uefi, path);
             snprintf(out->esp_dev, sizeof(out->esp_dev), "%.118s/boot/efi", out->scan_root);
             snprintf(note, sizeof(note), "ESP: %.90s", out->esp_dev);
             set_status(out, SCAN_MOD_UEFI, SCAN_STATUS_OK, e, note);
@@ -205,7 +213,7 @@ static void run_uefi(forensic_scan_report_t *out, const char *target_dev, bool h
         }
         memset(&out->uefi, 0, sizeof(out->uefi));
         e = uefi_inspect_esp_directory(ESP_MOUNT_POINT, &out->uefi);
-        if (e == BOOTO_OK) export_uefi(q, &out->uefi, ESP_MOUNT_POINT);
+        if (e == BOOTO_OK) export_uefi(out, q, &out->uefi, ESP_MOUNT_POINT);
         booto_error_t ue = disk_unmount(ESP_MOUNT_POINT);
         if (ue != BOOTO_OK) LOG_WARN("Failed to unmount %s: %s", ESP_MOUNT_POINT, err_name(ue));
         snprintf(out->esp_dev, sizeof(out->esp_dev), "%.127s", esp);
@@ -252,7 +260,7 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
     if (begin(out, SCAN_MOD_MBR, enabled, cb, user)) {
         if (!target_dev) set_status(out, SCAN_MOD_MBR, SCAN_STATUS_SKIPPED, BOOTO_OK, "no raw device");
         else set_result(out, SCAN_MOD_MBR, mbr_audit_device(target_dev, &out->mbr));
-        if (out->mbr.threats_detected > 0) export_file(q, "mbr", NULL, target_dev, MBR_EXPORT_BYTES);
+        if (out->mbr.threats_detected > 0) export_file(out, q, "mbr", NULL, target_dev, MBR_EXPORT_BYTES);
     }
 
     if (begin(out, SCAN_MOD_UEFI, enabled, cb, user)) run_uefi(out, target_dev, have_root, q);
@@ -264,7 +272,7 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
             snprintf(path, sizeof(path), "%.256s/lib/modules", root);
             set_result(out, SCAN_MOD_KERNEL, kernel_inspect_directory(path, &out->kernel));
             for (int i = 0; i < out->kernel.threats_detected && i < MAX_KERNEL_THREATS; i++)
-                export_file(q, "kernel", root, out->kernel.findings[i].file_path, QUARANTINE_MAX_ITEM);
+                export_file(out, q, "kernel", root, out->kernel.findings[i].file_path, QUARANTINE_MAX_ITEM);
         }
     }
 
@@ -275,7 +283,7 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
             set_status(out, SCAN_MOD_INITRAMFS, SCAN_STATUS_SKIPPED, BOOTO_OK, "no initramfs found");
         } else {
             set_result(out, SCAN_MOD_INITRAMFS, initramfs_audit_file(path, &out->initramfs));
-            if (out->initramfs.threats_detected > 0) export_file(q, "initramfs", root, path, QUARANTINE_MAX_ITEM);
+            if (out->initramfs.threats_detected > 0) export_file(out, q, "initramfs", root, path, QUARANTINE_MAX_ITEM);
         }
     }
 
@@ -285,7 +293,7 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
         for (int i = 0; i < out->preload.threats_detected && i < MAX_PRELOAD_THREATS; i++) {
             const char *lib = out->preload.findings[i].target_library;
             snprintf(path, sizeof(path), "%.256s%s%.250s", root, lib[0] == '/' ? "" : "/", lib);
-            export_file(q, "preload", root, lib[0] ? path : "", QUARANTINE_MAX_ITEM);
+            export_file(out, q, "preload", root, lib[0] ? path : "", QUARANTINE_MAX_ITEM);
         }
     }
 
@@ -299,7 +307,7 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
             } else if (e == BOOTO_OK) {
                 for (int i = 0; i < out->pkg.threats_detected && i < MAX_PKG_THREATS; i++) {
                     snprintf(path, sizeof(path), "%.256s%.255s", root, out->pkg.findings[i].file_path);
-                    export_file(q, "pkg", root, path, QUARANTINE_MAX_ITEM);
+                    export_file(out, q, "pkg", root, path, QUARANTINE_MAX_ITEM);
                 }
                 char note[96];
                 snprintf(note, sizeof(note), "%d files verified, %d listed files missing", out->pkg.files_checked,

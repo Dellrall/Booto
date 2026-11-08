@@ -13,6 +13,7 @@
 #include "initramfs_auditor.h"
 #include "preload_scanner.h"
 #include "pkg_integrity.h"
+#include "inspect.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -45,6 +46,7 @@ typedef struct {
     firmware_report_t firmware;
     int quarantined;            /* files exported to quarantine_zip; -1 when the archive could not be finished */
     char quarantine_zip[512];   /* "" when quarantine was off or nothing was flagged */
+    inspect_sample_t inspect;   /* first flagged file, read before unmount; path "" when none */
 } forensic_scan_report_t;
 
 /* step is 1..SCAN_MOD_COUNT, called before each module runs. */

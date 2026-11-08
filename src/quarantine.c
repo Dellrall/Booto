@@ -130,8 +130,7 @@ static booto_error_t create_zip(quarantine_t *q) {
     return BOOTO_OK;
 }
 
-/* Resolves path and checks it stays inside root; rel points into resolved. */
-static booto_error_t resolve_inside(const char *root, const char *path, char resolved[PATH_MAX], const char **rel) {
+booto_error_t quarantine_resolve_inside(const char *root, const char *path, char *resolved, const char **rel) {
     char rroot[PATH_MAX];
     if (!realpath(path, resolved)) return errno == ENOENT ? BOOTO_ERR_NOT_FOUND : BOOTO_ERR_IO;
     if (!root) {
@@ -176,7 +175,7 @@ booto_error_t quarantine_add(quarantine_t *q, const char *prefix, const char *ro
 
     char resolved[PATH_MAX];
     const char *rel = NULL;
-    booto_error_t e = resolve_inside(root, path, resolved, &rel);
+    booto_error_t e = quarantine_resolve_inside(root, path, resolved, &rel);
     if (e == BOOTO_ERR_PERMISSION_DENIED) LOG_WARN("Quarantine: %s resolves outside the target, not exported", path);
     if (e != BOOTO_OK) return e;
 
