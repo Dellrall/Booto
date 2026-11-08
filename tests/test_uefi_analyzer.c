@@ -361,6 +361,29 @@ static void test_authenticode_signature(void) {
     TEST_PASS("test_authenticode_signature");
 }
 
+static void test_esp_scan_by_magic(void) {
+    TEST_START("test_esp_scan_by_magic");
+    uint8_t b[0x400];
+    size_t len = build_pe(b, sizeof(b), true, false);
+    char dir[] = "/tmp/booto_esp_XXXXXX", pe[64], txt[64];
+    ASSERT_TRUE(mkdtemp(dir) != NULL, "mkdtemp");
+    snprintf(pe, sizeof(pe), "%s/grubx64.bak", dir);
+    snprintf(txt, sizeof(txt), "%s/grub.cfg", dir);
+    FILE *fp = fopen(pe, "wb");
+    if (fp) { fwrite(b, 1, len, fp); fclose(fp); }
+    fp = fopen(txt, "wb");
+    if (fp) { fputs("MENU\n", fp); fclose(fp); }
+    uefi_scan_result_t res;
+    memset(&res, 0, sizeof(res));
+    uefi_inspect_esp_directory(dir, &res);
+    unlink(pe);
+    unlink(txt);
+    rmdir(dir);
+    ASSERT_INT_EQ(res.efi_files_scanned, 1, "Renamed PE scanned, text file skipped");
+    ASSERT_STR_EQ(res.findings[0].rule_id, "UEFI_MISSING_AUTHENTICODE", "Renamed unsigned PE flagged");
+    TEST_PASS("test_esp_scan_by_magic");
+}
+
 int main(void) {
     printf("\n--- Running UEFI & ESP Bootkit Analyzer Tests ---\n");
     test_synthetic_pe32_plus_parser();
@@ -371,6 +394,7 @@ int main(void) {
     test_pe_wrapping_offset_rejected();
     test_packed_code_section();
     test_authenticode_signature();
+    test_esp_scan_by_magic();
     TEST_SUMMARY();
     return 0;
 }
