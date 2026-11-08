@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.1-beta] - 2026-11-08
+
+### Fixed
+- **Mouse on the Linux console**: the TUI now decodes the console's X10 mouse reports, and the ISO ships and enables `gpm`, so clicks and the wheel work on the live USB, not only in terminal emulators.
+- **`F3` unlock**: it now opens only on `crypto_LUKS` drives (a plain drive says "not an encrypted (LUKS) volume"), refuses a second unlock and an empty drive list, and tells a wrong passphrase, missing root and a cryptsetup error apart instead of reporting every failure as a wrong passphrase.
+
 ## [1.5.0-beta] - 2026-11-08
 
 ### Added
