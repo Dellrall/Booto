@@ -78,7 +78,7 @@ $(BINDIR):
 $(BUILDDIR)/test_%: $(TESTDIR)/test_%.c $(OBJECTS) | $(BUILDDIR)
 	$(CC) $(CFLAGS) $(INCLUDES) -MMD -MP $< $(OBJECTS) $(LDFLAGS) -o $@
 
-test: version $(TEST_BINS)
+test: version $(TARGET) $(TEST_BINS)
 	@echo "--- Running Test Suite ---"
 	@for t in $(TEST_BINS); do \
 		echo "Executing $$t..."; \
