@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Mouse support in the TUI**: click focuses a pane and selects the row under the pointer (clicking a checkbox toggles it); the wheel scrolls the pane under the pointer.
+- **Scrollable Findings and Reports panes** (`↑`/`↓`, `j`/`k` or the wheel).
+- **`F7` toggles quarantine export** for the next scan from the TUI.
+- **`NO_COLOR` support** (no-color.org): a monochrome TUI where bold, dim and reverse video still mark focus, the cursor row and key labels. Log and banner colors are also dropped when output is not a terminal.
 - **Quarantine export (`-q`, `--quarantine`)**, off by default, CLI with `-p <dir>`: flagged files are copied, while the target is still mounted, into a ZIP under `<dir>/quarantine` (stored, ZipCrypto, password `infected`, `.malware` names, mode 0400, archive 0400). Paths that resolve outside the target are refused; items are capped at 512 MiB and the archive at 4 GiB. Verified with `unzip`, `7z` and Python `zipfile`.
 - **BOOTO_DATA is mounted `noexec`**, so nothing stored on the report partition can run from it.
 - **Expert firmware mode (`-x`, `--expert-firmware`)**, off by default, CLI as root:
@@ -28,20 +32,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`setup_usb.sh --encrypt` / `--no-encrypt`**: the report partition can be created without a passphrase (plain ext4, GPT type 8300). Without either flag the script asks; `--yes` keeps encryption.
 
 ### Changed
+- **TUI palette**: the focused pane and key labels use a cyan accent; muted text is dim instead of bright black; bold text uses the terminal's own color, so it stays readable on light themes; the cursor row keeps its status colors.
+- **CLI banner**: solid block-letter logo in bold (`#` with `BOOTO_ASCII=1`).
 - **Compact case reports**: the JSON report is a single line (same keys), and the Markdown report is a short header plus one engine table, with engine names taken from the scanner (new engines appear automatically). Together about 1.3 KB per case instead of 2.2 KB.
 - Report seal files name the bare report file, so `sha256sum -c case_*.sha256` works from wherever the cases directory is mounted.
-- A case report is never overwritten: a second export with the same case ID fails instead of replacing the first.
 - One severity scale (`booto_severity_t`) is shared by the MBR, UEFI and kernel engines instead of three copies.
 
 ### Fixed
-- **Builds on glibc that enforces `_FORTIFY_SOURCE`** (e.g. Fedora 44, GCC 16): the default flags now include `-O2`, without which fortify is inactive and newer glibc fails the `-Werror` build. With fortify active, the TUI frame flush retries partial `write()`s instead of dropping part of a frame, and the "Report saved" status line keeps its RAM-only warning instead of cutting it off on a long path.
-- **Case report severity is real**: `highest_severity` is the highest severity of the findings (initramfs, preload and package findings count as CRITICAL). Before, any threat made it CRITICAL, even a lone MEDIUM one.
-- **The MBR gap scan reads up to 2047 sectors** (the whole gap before a partition at LBA 2048) instead of 63, so a payload hidden past sector 63 is found.
-- **Unread MBR gap or VBR sectors make the MBR engine an ERROR** (verdict INCOMPLETE, findings kept) instead of being skipped silently and reported clean.
-- `make test` after `make asan` or `make coverage` no longer fails to link: objects rebuild when the compiler flags change.
+- The terminal layer renders the dim and underline attributes it was given.
+- Objects rebuild when an included header changes, and `make test` also rebuilds `bin/booto`, so a smoke run never uses a stale binary.
 
 ### Removed
 - `CMakeLists.txt`: CI builds only with the Makefile, and the CMake build had drifted (missing test, broken test path).
+
+## [1.4.1-beta] - 2026-11-08
+
+### Fixed
+- **Builds on glibc that enforces `_FORTIFY_SOURCE`** (e.g. Fedora 44, GCC 16): the default flags now include `-O2`, without which fortify is inactive and newer glibc fails the `-Werror` build. With fortify active, the TUI frame flush retries partial `write()`s instead of dropping part of a frame, and the "Report saved" status line keeps its RAM-only warning instead of cutting it off on a long path.
+- **Case report severity is real**: `highest_severity` is the highest severity of the findings (initramfs and preload findings count as CRITICAL). Before, any threat made it CRITICAL, even a lone MEDIUM one.
+- **The MBR gap scan reads up to 2047 sectors** (the whole gap before a partition at LBA 2048) instead of 63, so a payload hidden past sector 63 is found.
+- **Unread MBR gap or VBR sectors make the MBR engine an ERROR** (verdict INCOMPLETE, findings kept) instead of being skipped silently and reported clean.
+- A case report is never overwritten: a second export with the same case ID fails instead of replacing the first.
+- `make test` after `make asan` or `make coverage` no longer fails to link: objects rebuild when the compiler flags change.
 
 ## [1.4.0] - 2026-11-05
 
