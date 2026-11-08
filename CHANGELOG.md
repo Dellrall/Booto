@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.3-beta] - 2026-11-08
+
+### Added
+- **Boot splash**: between GRUB and the TUI the live ISO shows the solid white Booto logo with a loading bar (Plymouth) instead of a black screen.
+
+### Changed
+- **Black-and-white TUI**: frames, the target marker and the not-scanned band are plain white; green, yellow and red only mean clean, suspicious and failed. Cyan key labels stay. Locked LUKS and report storage show in white, since locked is the normal start state.
+
+### Fixed
+- **Root shell showed nothing you typed**: on the live USB the `F10` shell, and the shell after quitting Booto, sent the prompt and typed text to the journal instead of the screen.
+
 ## [1.5.2-beta] - 2026-11-08
 
 ### Fixed
