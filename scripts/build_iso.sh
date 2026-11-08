@@ -168,12 +168,14 @@ fi
 # Create standalone hybrid ISO image (Universal Dual BIOS + UEFI)
 if [ -f "${CD_DIR}/boot/grub/bios.img" ]; then
     echo "[+] Building Dual BIOS + UEFI Hybrid ISO..."
+    # --grub2-mbr: MBR boot code so BIOS can boot the ISO raw-written to a USB disk (El Torito alone only boots as CD).
     xorriso -as mkisofs \
         -iso-level 3 \
         -full-iso9660-filenames \
         -volid "BOOTO_LIVE" \
         --modification-date="${ISO_DATE}" \
         -output "${OUTPUT_DIR}/${ISO_NAME}" \
+        --grub2-mbr /usr/lib/grub/i386-pc/boot_hybrid.img --grub2-boot-info \
         -b boot/grub/bios.img \
         -c boot.catalog \
         -no-emul-boot -boot-load-size 4 -boot-info-table \
