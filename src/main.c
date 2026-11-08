@@ -60,6 +60,8 @@ static void print_help(const char *prog_name) {
     printf("  -u, --update-rules         Regenerate sealed rule files (scripts/update_rules.sh)\n");
     printf("  -x, --expert-firmware      CLI, as root: also scan UEFI variables for hidden code and\n");
     printf("                             dump the SPI flash read-only with flashrom (slower; off by default)\n");
+    printf("  -q, --quarantine           CLI, with -p: copy flagged files into an encrypted ZIP (password\n");
+    printf("                             \"infected\") under <dir>/quarantine for analysis elsewhere\n");
     printf("  -V, --verbose              Enable verbose/debug logging\n\n");
     printf("CLI exit codes:\n");
     printf("  0  CLEAN       every enabled engine ran and found nothing\n");
@@ -138,6 +140,18 @@ static int run_cli(booto_context_t *ctx) {
         LOG_ERROR("No scan target: pass -t <dev> or -s <dir> (auto-discovery found no target partition)");
         return EXIT_INCOMPLETE;
     }
+    char qdir[600] = "";
+    if (ctx->quarantine) {
+        if (!ctx->persistence_dir[0]) {
+            LOG_ERROR("-q needs -p <dir>: the quarantine archive is written under <dir>/quarantine");
+            return EXIT_INCOMPLETE;
+        }
+        snprintf(qdir, sizeof(qdir), "%s/quarantine", ctx->persistence_dir);
+        if (disk_ensure_private_dir(qdir) != BOOTO_OK) {
+            LOG_ERROR("Unsafe or unusable quarantine directory %s", qdir);
+            return EXIT_INCOMPLETE;
+        }
+    }
     forensic_scan_report_t *rep = calloc(1, sizeof(*rep));
     if (!rep) {
         LOG_ERROR("Out of memory allocating scan report");
@@ -145,7 +159,7 @@ static int run_cli(booto_context_t *ctx) {
     }
     booto_error_t e = forensic_scan_run(ctx->target_dev[0] ? ctx->target_dev : NULL,
                                         ctx->target_rootfs[0] ? ctx->target_rootfs : NULL,
-                                        NULL, NULL, scan_progress, NULL, rep);
+                                        NULL, qdir[0] ? qdir : NULL, scan_progress, NULL, rep);
     if (e != BOOTO_OK) {
         LOG_ERROR("Scan could not run (error %d)", e);
         free(rep);
@@ -171,6 +185,12 @@ static int run_cli(booto_context_t *ctx) {
         if (rep->firmware.chipset_unconfirmed) printf("\n%s", FW_CHIPSET_HELP);
     }
 
+    if (rep->quarantine_zip[0])
+        printf("\nQuarantine: %d file(s) in %s\n  Password \"infected\". Unpack only on an isolated analysis machine.\n",
+               rep->quarantined, rep->quarantine_zip);
+    else if (rep->quarantined < 0)
+        printf("\nQuarantine: the archive could not be finished; see the log\n");
+
     if (ctx->expert_firmware) run_expert_firmware(ctx->persistence_dir);
     if (ctx->persistence_dir[0]) write_reports(rep, ctx->persistence_dir);
 
@@ -193,6 +213,7 @@ static void print_dry_run(const booto_context_t *ctx) {
     for (int i = 0; i < SCAN_MOD_COUNT; i++) printf(" %s%s", forensic_scan_module_name((scan_module_id_t)i), i + 1 < SCAN_MOD_COUNT ? "," : "\n");
     printf("  Firmware      : Secure Boot keys, dbx and DMA protection of this machine (device mode only)\n");
     printf("  Expert fw     : %s\n", ctx->expert_firmware ? "NVRAM scan and read-only SPI flash dump (CLI, root)" : "off");
+    printf("  Quarantine    : %s\n", ctx->quarantine ? "flagged files to <report dir>/quarantine, encrypted ZIP" : "off");
     printf("  Report dir    : %s\n", ctx->persistence_dir[0] ? ctx->persistence_dir : "(none)");
 }
 
@@ -212,12 +233,13 @@ int main(int argc, char *argv[]) {
         {"update-rules",    no_argument,       0, 'u'},
         {"verbose",         no_argument,       0, 'V'},
         {"expert-firmware", no_argument,       0, 'x'},
+        {"quarantine",      no_argument,       0, 'q'},
         {0, 0, 0, 0}
     };
 
     int opt;
     int option_index = 0;
-    while ((opt = getopt_long(argc, argv, "hvcdmt:s:p:uVx", long_options, &option_index)) != -1) {
+    while ((opt = getopt_long(argc, argv, "hvcdmt:s:p:uVxq", long_options, &option_index)) != -1) {
         switch (opt) {
             case 'h':
                 print_help(argv[0]);
@@ -256,6 +278,9 @@ int main(int argc, char *argv[]) {
                 break;
             case 'x':
                 ctx.expert_firmware = true;
+                break;
+            case 'q':
+                ctx.quarantine = true;
                 break;
             default:
                 print_help(argv[0]);
