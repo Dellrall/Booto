@@ -478,6 +478,8 @@ static bool run_shell(void) {
         signal(SIGINT, SIG_DFL);
         signal(SIGQUIT, SIG_DFL);
         signal(SIGTTOU, SIG_DFL);
+        /* getty sends Booto's stderr to the journal; bash -i draws its prompt and echo on stderr. */
+        dup2(STDOUT_FILENO, STDERR_FILENO);
         execl("/bin/bash", "bash", "-i", (char *)NULL);
         execl("/bin/sh", "sh", "-i", (char *)NULL);
         _exit(127);
