@@ -1086,14 +1086,20 @@ booto_error_t firmware_nvram_scan(const char *efivars_dir, fw_nvram_report_t *ou
     return BOOTO_OK;
 }
 
-booto_error_t firmware_spi_dump(const char *out_path, char sha256_hex[65]) {
-    if (!out_path || !sha256_hex) return BOOTO_ERR_INVALID_ARG;
+booto_error_t firmware_spi_dump(const char *out_path, char sha256_hex[65], bool *bios_only) {
+    if (!out_path || !sha256_hex || !bios_only) return BOOTO_ERR_INVALID_ARG;
     sha256_hex[0] = '\0';
+    *bios_only = false;
     const char *const argv[] = { "flashrom", "-p", "internal", "-r", out_path, NULL };
     int status = 0;
     booto_error_t e = disk_exec_argv(argv, NULL, 0, &status);
     if (e == BOOTO_ERR_NOT_FOUND) return e;
-    if (e != BOOTO_OK) return BOOTO_ERR_IO;
+    if (e != BOOTO_OK) {
+        /* Intel boards lock the ME region; the BIOS region (where UEFI lives) usually still reads. */
+        const char *const bios[] = { "flashrom", "-p", "internal", "--ifd", "-i", "bios", "-r", out_path, NULL };
+        if (disk_exec_argv(bios, NULL, 0, &status) != BOOTO_OK) return BOOTO_ERR_IO;
+        *bios_only = true;
+    }
     return sha256_file_hex(out_path, sha256_hex) ? BOOTO_OK : BOOTO_ERR_IO;
 }
 

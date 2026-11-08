@@ -100,10 +100,11 @@ booto_error_t firmware_nvram_scan(const char *efivars_dir, fw_nvram_report_t *ou
 
 /**
  * @brief Read the SPI flash with `flashrom -p internal -r out_path` (never writes the chip) and hash the image.
+ *        If the full read fails (locked ME region), retries with `--ifd -i bios` and sets *bios_only.
  * @return BOOTO_OK with sha256_hex set; BOOTO_ERR_NOT_FOUND if flashrom is not installed;
  *         BOOTO_ERR_IO if flashrom failed (not root, or chipset locked) or the image cannot be hashed.
  */
-booto_error_t firmware_spi_dump(const char *out_path, char sha256_hex[65]);
+booto_error_t firmware_spi_dump(const char *out_path, char sha256_hex[65], bool *bios_only);
 
 const char *firmware_check_name(fw_check_id_t id);
 const char *firmware_result_str(fw_result_t r);   /* "pass" "fail" "unknown" "n/a" */

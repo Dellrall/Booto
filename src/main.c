@@ -135,13 +135,15 @@ static void run_expert_firmware(const char *dir) {
 
     char image[600], hex[65];
     snprintf(image, sizeof(image), "%s/spi_flash.bin", dir[0] ? dir : "/tmp");
-    booto_error_t e = firmware_spi_dump(image, hex);
+    bool bios_only = false;
+    booto_error_t e = firmware_spi_dump(image, hex, &bios_only);
     if (e == BOOTO_OK)
-        printf("SPI flash: saved %s\n  SHA-256 %s\n  Compare it with the vendor's firmware image for this model.\n", image, hex);
+        printf("SPI flash: saved %s%s\n  SHA-256 %s\n  Compare it with the vendor's firmware image for this model.\n", image,
+               bios_only ? " (BIOS region only: the chipset locks the rest)" : "", hex);
     else if (e == BOOTO_ERR_NOT_FOUND)
         printf("SPI flash: flashrom is not installed\n");
     else
-        printf("SPI flash: flashrom could not read the chip (needs root; some chipsets block reads)\n");
+        printf("SPI flash: flashrom could not read the chip (needs root and iomem=relaxed; some chipsets block reads)\n");
 }
 
 static int run_cli(booto_context_t *ctx) {

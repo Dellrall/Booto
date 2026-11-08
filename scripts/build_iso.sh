@@ -123,20 +123,20 @@ search --no-floppy --set=root --file ${BOOT_MARKER}
 
 menuentry "Booto - Live Rootkit & Bootkit Forensic System (Amnesic RAM Mode)" {
     search --no-floppy --set=root --file ${BOOT_MARKER}
-    linux  /live/vmlinuz boot=live components live-media=removable systemd.swap=no quiet splash systemd.show_status=0 loglevel=3
+    linux  /live/vmlinuz boot=live components live-media=removable systemd.swap=no iomem=relaxed quiet splash systemd.show_status=0 loglevel=3
     initrd /live/initrd.img
 }
 
 # Fallback for USB SSDs/enclosures that do not report removable: find this build's ISO by UUID (same trust as the GRUB search above).
 menuentry "Booto - USB not detected (non-removable USB drive)" {
     search --no-floppy --set=root --file ${BOOT_MARKER}
-    linux  /live/vmlinuz boot=live components live-media=/dev/disk/by-uuid/${ISO_UUID} systemd.swap=no quiet splash systemd.show_status=0 loglevel=3
+    linux  /live/vmlinuz boot=live components live-media=/dev/disk/by-uuid/${ISO_UUID} systemd.swap=no iomem=relaxed quiet splash systemd.show_status=0 loglevel=3
     initrd /live/initrd.img
 }
 
 menuentry "Booto - Live Rootkit & Bootkit Forensic System (Debug Verbose)" {
     search --no-floppy --set=root --file ${BOOT_MARKER}
-    linux  /live/vmlinuz boot=live components live-media=removable systemd.swap=no verbose
+    linux  /live/vmlinuz boot=live components live-media=removable systemd.swap=no iomem=relaxed verbose
     initrd /live/initrd.img
 }
 EOF_GRUB
