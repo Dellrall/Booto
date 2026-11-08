@@ -840,19 +840,27 @@ static void test_spi_dump(void) {
     setenv("PATH", newpath, 1);
 
     char hex[65], want[65];
-    booto_error_t e = firmware_spi_dump(image, hex);
+    bool bios_only = true;
+    booto_error_t e = firmware_spi_dump(image, hex, &bios_only);
     sha256_buffer_hex((const uint8_t *)"flash", 5, want);
     ASSERT_INT_EQ(e, BOOTO_OK, "Dump succeeds with read-only flags");
     ASSERT_STR_EQ(hex, want, "Image is hashed");
+    ASSERT_TRUE(!bios_only, "Full read is not marked BIOS-only");
+
+    static const char locked[] = "#!/bin/sh\n[ \"$3 $4 $5 $6\" = \"--ifd -i bios -r\" ] || exit 1\nprintf flash > \"$7\"\n";
+    write_file(tool, locked, strlen(locked));
+    ASSERT_INT_EQ(firmware_spi_dump(image, hex, &bios_only), BOOTO_OK, "Locked chipset falls back to the BIOS region");
+    ASSERT_TRUE(bios_only, "Fallback read is marked BIOS-only");
+    ASSERT_STR_EQ(hex, want, "BIOS region is hashed");
 
     static const char failing[] = "#!/bin/sh\nexit 1\n";
     write_file(tool, failing, strlen(failing));
-    ASSERT_INT_EQ(firmware_spi_dump(image, hex), BOOTO_ERR_IO, "flashrom failure is IO error");
+    ASSERT_INT_EQ(firmware_spi_dump(image, hex, &bios_only), BOOTO_ERR_IO, "flashrom failure is IO error");
     ASSERT_TRUE(hex[0] == '\0', "No hash on failure");
 
     setenv("PATH", g_root, 1);
     unlink(tool);
-    ASSERT_INT_EQ(firmware_spi_dump(image, hex), BOOTO_ERR_NOT_FOUND, "Missing flashrom reported");
+    ASSERT_INT_EQ(firmware_spi_dump(image, hex, &bios_only), BOOTO_ERR_NOT_FOUND, "Missing flashrom reported");
     setenv("PATH", oldpath, 1);
     remove_tree(g_root);
     TEST_PASS("test_spi_dump");
