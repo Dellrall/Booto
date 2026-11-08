@@ -16,12 +16,19 @@ track = Sprite(pixel.Scale(bar_w, bar_h));
 track.SetPosition(x, y + logo.GetHeight() + 40, 1);
 track.SetOpacity(0.25);
 
-fill = Sprite(pixel.Scale(1, bar_h));
-fill.SetPosition(x, y + logo.GetHeight() + 40, 2);
+# Live boots have no saved boot-duration, so Plymouth's progress estimate stalls; slide a segment instead.
+seg_w = Math.Int(bar_w / 4);
+fill = Sprite(pixel.Scale(seg_w, bar_h));
+fill.SetZ(2);
+t = 0;
 
-fun progress_callback(duration, progress) {
-    w = Math.Int(bar_w * progress);
+fun refresh_callback() {
+    global.t = (global.t + 1) % 100;
+    pos = Math.Int((bar_w + seg_w) * global.t / 100) - seg_w;
+    left = Math.Max(pos, 0);
+    w = Math.Min(pos + seg_w, bar_w) - left;
     if (w < 1) w = 1;
     fill.SetImage(pixel.Scale(w, bar_h));
+    fill.SetPosition(x + left, y + logo.GetHeight() + 40, 2);
 }
-Plymouth.SetBootProgressFunction(progress_callback);
+Plymouth.SetRefreshFunction(refresh_callback);
