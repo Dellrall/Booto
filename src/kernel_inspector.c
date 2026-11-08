@@ -48,6 +48,7 @@ static void add_threat_finding(kernel_scan_result_t *result,
 }
 
 #define LKM_DECOMP_CAP ((size_t)256 * 1024 * 1024)
+#define LKM_PACKED_CAP ((size_t)64 * 1024 * 1024)
 
 typedef struct {
     const char *suffix;
@@ -131,10 +132,27 @@ static booto_error_t inspect_compressed_lkm(const char *ko_path, const lkm_codec
 
     result->modules_scanned++;
 
-    const char *const argv[] = {codec->tool, "-dc", "--", ko_path, NULL};
+    /* Read here and pipe it in: the sandboxed decompressor runs as nobody and could not open a 0600 module. */
+    FILE *fp = fopen(ko_path, "rb");
+    if (!fp) {
+        LOG_WARN("Could not open kernel module '%s'", ko_path);
+        return BOOTO_ERR_IO;
+    }
+    uint8_t *packed = malloc(LKM_PACKED_CAP + 1);
+    size_t packed_len = packed ? fread(packed, 1, LKM_PACKED_CAP + 1, fp) : 0;
+    bool read_failed = !packed || ferror(fp) || packed_len > LKM_PACKED_CAP;
+    fclose(fp);
+    if (read_failed) {
+        free(packed);
+        LOG_WARN("Could not read kernel module '%s' (missing, unreadable or over %zu bytes)", ko_path, LKM_PACKED_CAP);
+        return packed ? BOOTO_ERR_IO : BOOTO_ERR_OUT_OF_MEMORY;
+    }
+
+    const char *const argv[] = {codec->tool, "-dc", NULL};
     uint8_t *raw = NULL;
     size_t raw_len = 0;
-    err = disk_exec_capture(argv, NULL, 0, &raw, &raw_len, LKM_DECOMP_CAP);
+    err = disk_exec_capture(argv, packed, packed_len, &raw, &raw_len, LKM_DECOMP_CAP);
+    free(packed);
     if (err != BOOTO_OK) {
         if (err == BOOTO_ERR_NOT_FOUND) {
             LOG_ERROR("Decompressor '%s' not available; cannot inspect compressed module '%s'", codec->tool, ko_path);
