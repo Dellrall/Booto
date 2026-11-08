@@ -92,6 +92,8 @@ typedef enum {
     KEY_ALT_LEFT,
     KEY_ALT_RIGHT,
     KEY_MOUSE_CLICK,
+    KEY_MOUSE_WHEEL_UP,
+    KEY_MOUSE_WHEEL_DOWN,
     KEY_RESIZE
 } key_type_t;
 
@@ -111,6 +113,9 @@ typedef struct {
  * previous signal dispositions.
  */
 int term_init(void);
+
+/** Decodes one complete CSI sequence s[0..len) (ESC '[' ... final) into event; leaves KEY_NONE if unknown. */
+void term_parse_csi(const unsigned char *s, size_t len, input_event_t *event);
 
 /**
  * @brief Restore original terminal settings.
