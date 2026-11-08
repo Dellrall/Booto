@@ -1,6 +1,6 @@
 /**
  * @file pkg_integrity.c
- * @brief debsums-style offline check of packaged system files against dpkg's md5sums lists.
+ * @brief debsums/pacman -Qkk-style offline check of packaged system files against the package database.
  */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
@@ -8,6 +8,7 @@
 
 #include "pkg_integrity.h"
 #include "crypto_utils.h"
+#include "disk_mount.h"
 #include "logger.h"
 
 #include <ctype.h>
@@ -23,6 +24,8 @@
 #include <unistd.h>
 
 #define DIVERSIONS_MAX_BYTES (1024u * 1024u)
+#define MTREE_PACKED_CAP (16u * 1024u * 1024u)
+#define MTREE_RAW_CAP (128u * 1024u * 1024u)
 
 /* Directories whose files a rootkit replaces; docs, headers and data under usr/share are not hashed. */
 static bool is_system_path(const char *rel) {
@@ -66,8 +69,8 @@ static void add_finding(pkg_scan_result_t *res, const char *rel, const char *pkg
     pkg_finding_t *f = &res->findings[res->threats_detected++];
     snprintf(f->file_path, sizeof(f->file_path), "/%.254s", rel);
     snprintf(f->package, sizeof(f->package), "%.95s", pkg);
-    snprintf(f->expected_md5, sizeof(f->expected_md5), "%.32s", expected);
-    snprintf(f->actual_md5, sizeof(f->actual_md5), "%.32s", actual);
+    snprintf(f->expected_hash, sizeof(f->expected_hash), "%.64s", expected);
+    snprintf(f->actual_hash, sizeof(f->actual_hash), "%.64s", actual);
     snprintf(f->reason, sizeof(f->reason), "%.47s", reason);
     LOG_CRITICAL("[PKG ALERT] %s: %s (package %s)", f->file_path, f->reason, f->package);
 }
@@ -96,21 +99,29 @@ static void check_file(int rootfd, const char *rel, const char *expected, const 
         add_finding(res, rel, pkg, expected, "", "no longer a regular file");
         return;
     }
-    md5_ctx_t ctx;
-    md5_init(&ctx);
+    bool sha = strlen(expected) == 64;
+    md5_ctx_t md5;
+    sha256_ctx_t sha256;
+    if (sha) sha256_init(&sha256);
+    else md5_init(&md5);
     uint8_t buf[16384];
     ssize_t n;
-    while ((n = read(fd, buf, sizeof(buf))) > 0) md5_update(&ctx, buf, (size_t)n);
+    while ((n = read(fd, buf, sizeof(buf))) > 0) {
+        if (sha) sha256_update(&sha256, buf, (size_t)n);
+        else md5_update(&md5, buf, (size_t)n);
+    }
     close(fd);
     if (n < 0) {
         res->files_unreadable++;
         LOG_WARN("Read error on /%s", rel);
         return;
     }
-    uint8_t digest[16];
-    md5_final(&ctx, digest);
-    char hex[33];
-    for (int i = 0; i < 16; i++) snprintf(hex + i * 2, 3, "%02x", digest[i]);
+    uint8_t digest[32];
+    size_t dlen = sha ? 32 : 16;
+    if (sha) sha256_final(&sha256, digest);
+    else md5_final(&md5, digest);
+    char hex[65];
+    for (size_t i = 0; i < dlen; i++) snprintf(hex + i * 2, 3, "%02x", digest[i]);
     res->files_checked++;
     if (strcmp(hex, expected) != 0) add_finding(res, rel, pkg, expected, hex, "content differs from package");
 }
@@ -150,26 +161,19 @@ static void check_list(int rootfd, int infofd, const char *name, const char *div
     fclose(fp);
 }
 
-booto_error_t pkg_integrity_scan_rootfs(const char *target_rootfs, pkg_scan_result_t *result) {
-    if (!target_rootfs || !result) return BOOTO_ERR_INVALID_ARG;
-    memset(result, 0, sizeof(*result));
-
-    int rootfd = open(target_rootfs, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-    if (rootfd < 0) return errno == ENOENT ? BOOTO_ERR_NOT_FOUND : BOOTO_ERR_IO;
+/* Scans every md5sums list in <root>/var/lib/dpkg/info; false when the root has no dpkg database. */
+static bool scan_dpkg(int rootfd, pkg_scan_result_t *result) {
     int infofd = openat(rootfd, "var/lib/dpkg/info", O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
     if (infofd < 0) {
-        booto_error_t e = errno == ENOENT ? BOOTO_ERR_NOT_FOUND : BOOTO_ERR_IO;
-        close(rootfd);
-        return e;
+        if (errno != ENOENT) result->files_unreadable++;
+        return errno != ENOENT;
     }
     DIR *dir = fdopendir(infofd);
     if (!dir) {
         close(infofd);
-        close(rootfd);
-        return BOOTO_ERR_IO;
+        result->files_unreadable++;
+        return true;
     }
-
-    LOG_INFO("Verifying packaged system files in %s against dpkg md5sums", target_rootfs);
     char *diversions = read_diversions(rootfd);
     struct dirent *de;
     while ((de = readdir(dir)) != NULL) {
@@ -179,7 +183,140 @@ booto_error_t pkg_integrity_scan_rootfs(const char *target_rootfs, pkg_scan_resu
     }
     free(diversions);
     closedir(dir);
+    return true;
+}
+
+/* mtree escapes bytes outside the safe set as \ooo octal (a space is \040). Decodes in place. */
+static void mtree_unescape(char *s) {
+    char *w = s;
+    for (char *r = s; *r; r++) {
+        if (r[0] == '\\' && r[1] >= '0' && r[1] <= '3' && r[2] >= '0' && r[2] <= '7' && r[3] >= '0' && r[3] <= '7') {
+            *w++ = (char)(((r[1] - '0') << 6) | ((r[2] - '0') << 3) | (r[3] - '0'));
+            r += 3;
+        } else {
+            *w++ = *r;
+        }
+    }
+    *w = '\0';
+}
+
+/* Value of " key=" within the space-separated keyword list kw, copied into out; false when absent. */
+static bool mtree_keyword(const char *kw, const char *key, char *out, size_t out_len) {
+    size_t klen = strlen(key);
+    for (const char *p = kw; (p = strstr(p, key)) != NULL; p += klen) {
+        if ((p != kw && p[-1] != ' ') || p[klen] != '=') continue;
+        const char *v = p + klen + 1;
+        size_t n = strcspn(v, " ");
+        snprintf(out, out_len, "%.*s", (int)(n < out_len ? n : out_len - 1), v);
+        return true;
+    }
+    return false;
+}
+
+/* Lines are "./path key=value ..."; "/set key=value ..." sets defaults (type) for later lines. */
+static void check_mtree(int rootfd, char *text, const char *pkg, pkg_scan_result_t *res) {
+    char set_type[16] = "file";
+    for (char *line = text, *next; line; line = next) {
+        next = strchr(line, '\n');
+        if (next) *next++ = '\0';
+        if (strncmp(line, "/set ", 5) == 0) {
+            mtree_keyword(line + 5, "type", set_type, sizeof(set_type));
+            continue;
+        }
+        if (strncmp(line, "./", 2) != 0) continue;
+        char *kw = strchr(line, ' ');
+        if (!kw) continue;
+        *kw++ = '\0';
+        char type[16], digest[65];
+        if (!mtree_keyword(kw, "type", type, sizeof(type))) snprintf(type, sizeof(type), "%s", set_type);
+        if (strcmp(type, "file") != 0 || !mtree_keyword(kw, "sha256digest", digest, sizeof(digest))) continue;
+        if (strlen(digest) != 64) continue;
+        for (char *d = digest; *d; d++) *d = (char)tolower((unsigned char)*d);
+        char *rel = line + 2;
+        mtree_unescape(rel);
+        if (!is_system_path(rel)) continue;
+        check_file(rootfd, rel, digest, pkg, res);
+    }
+}
+
+/* Reads at most cap bytes of an untrusted file inside the root without following a final symlink. */
+static uint8_t *read_in_root(int dirfd, const char *rel, size_t cap, size_t *len) {
+    int fd = openat(dirfd, rel, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    if (fd < 0) return NULL;
+    uint8_t *buf = malloc(cap + 1);
+    size_t n = 0;
+    ssize_t r = 0;
+    while (buf && n <= cap && (r = read(fd, buf + n, cap + 1 - n)) > 0) n += (size_t)r;
+    close(fd);
+    if (!buf || r < 0 || n > cap) {
+        free(buf);
+        if (n > cap) errno = EFBIG;
+        return NULL;
+    }
+    *len = n;
+    return buf;
+}
+
+/* Scans every <root>/var/lib/pacman/local/<pkg>/mtree; false when the root has no pacman database. */
+static bool scan_pacman(int rootfd, pkg_scan_result_t *result) {
+    int localfd = openat(rootfd, "var/lib/pacman/local", O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if (localfd < 0) {
+        if (errno != ENOENT) result->files_unreadable++;
+        return errno != ENOENT;
+    }
+    DIR *dir = fdopendir(localfd);
+    if (!dir) {
+        close(localfd);
+        result->files_unreadable++;
+        return true;
+    }
+    struct dirent *de;
+    while ((de = readdir(dir)) != NULL) {
+        if (de->d_name[0] == '.' || strcmp(de->d_name, "ALPM_DB_VERSION") == 0) continue;
+        char rel[300];
+        snprintf(rel, sizeof(rel), "%.255s/mtree", de->d_name);
+        size_t packed_len = 0;
+        uint8_t *packed = read_in_root(dirfd(dir), rel, MTREE_PACKED_CAP, &packed_len);
+        if (!packed) {
+            if (errno != ENOENT) {
+                result->files_unreadable++;
+                LOG_WARN("Cannot read pacman mtree for %s", de->d_name);
+            }
+            continue;
+        }
+        const char *const argv[] = {"gzip", "-dc", NULL};
+        uint8_t *raw = NULL;
+        size_t raw_len = 0;
+        booto_error_t e = disk_exec_capture(argv, packed, packed_len, &raw, &raw_len, MTREE_RAW_CAP);
+        free(packed);
+        char *text = raw ? realloc(raw, raw_len + 1) : NULL;
+        if (e != BOOTO_OK || !text) {
+            free(text ? text : (char *)raw);
+            result->files_unreadable++;
+            LOG_WARN("Cannot inflate pacman mtree for %s (err: %d)", de->d_name, e);
+            continue;
+        }
+        text[raw_len] = '\0';
+        result->packages_checked++;
+        check_mtree(rootfd, text, de->d_name, result);
+        free(text);
+    }
+    closedir(dir);
+    return true;
+}
+
+booto_error_t pkg_integrity_scan_rootfs(const char *target_rootfs, pkg_scan_result_t *result) {
+    if (!target_rootfs || !result) return BOOTO_ERR_INVALID_ARG;
+    memset(result, 0, sizeof(*result));
+
+    int rootfd = open(target_rootfs, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (rootfd < 0) return errno == ENOENT ? BOOTO_ERR_NOT_FOUND : BOOTO_ERR_IO;
+
+    LOG_INFO("Verifying packaged system files in %s against the package database", target_rootfs);
+    bool dpkg = scan_dpkg(rootfd, result);
+    bool pacman = scan_pacman(rootfd, result);
     close(rootfd);
+    if (!dpkg && !pacman) return BOOTO_ERR_NOT_FOUND;
 
     LOG_INFO("Package integrity: %d packages, %d files hashed, %d missing, %d unreadable, %d threats",
              result->packages_checked, result->files_checked, result->files_missing, result->files_unreadable,

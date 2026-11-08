@@ -28,7 +28,7 @@ static const struct {
     {"Kernel modules", "/lib/modules"},
     {"Initramfs scripts", "/boot/initrd.img*"},
     {"LD_PRELOAD & load hooks", "ld.so.preload, modprobe.d, udev"},
-    {"Package integrity", "/var/lib/dpkg/info/*.md5sums"},
+    {"Package integrity", "dpkg md5sums, pacman mtree"},
 };
 
 void tui_app_state_init(tui_app_state_t *app, booto_context_t *ctx) {

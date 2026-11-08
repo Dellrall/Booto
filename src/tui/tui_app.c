@@ -387,7 +387,9 @@ static void finish_forensic_scan(tui_app_state_t *app) {
             snprintf(app->threat.infected_file, sizeof(app->threat.infected_file), "%.120s", r->pkg.findings[0].file_path);
             snprintf(app->threat.hook_type, sizeof(app->threat.hook_type), "%.30s (%.25s)", r->pkg.findings[0].reason,
                      r->pkg.findings[0].package);
-            snprintf(app->threat.sha256, sizeof(app->threat.sha256), "MD5 %.32s", r->pkg.findings[0].actual_md5);
+            const char *h = r->pkg.findings[0].actual_hash;
+            if (strlen(h) == 32) snprintf(app->threat.sha256, sizeof(app->threat.sha256), "MD5 %.32s", h);
+            else snprintf(app->threat.sha256, sizeof(app->threat.sha256), "%.64s", h);
         }
         snprintf(app->status_msg, sizeof(app->status_msg), "Scan finished: %d threat%s found. See Findings.",
                  r->total_threats, r->total_threats == 1 ? "" : "s");

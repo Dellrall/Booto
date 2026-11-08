@@ -295,7 +295,7 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
         } else {
             booto_error_t e = pkg_integrity_scan_rootfs(root, &out->pkg);
             if (e == BOOTO_ERR_NOT_FOUND) {
-                set_status(out, SCAN_MOD_PKG, SCAN_STATUS_SKIPPED, BOOTO_OK, "no dpkg database (not Debian-based)");
+                set_status(out, SCAN_MOD_PKG, SCAN_STATUS_SKIPPED, BOOTO_OK, "no dpkg or pacman database");
             } else if (e == BOOTO_OK) {
                 for (int i = 0; i < out->pkg.threats_detected && i < MAX_PKG_THREATS; i++) {
                     snprintf(path, sizeof(path), "%.256s%.255s", root, out->pkg.findings[i].file_path);
