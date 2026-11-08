@@ -162,16 +162,33 @@ static booto_error_t scan_environment(const char *rootfs, preload_scan_result_t 
     return BOOTO_OK;
 }
 
-static void scan_ld_conf_dir(const char *rootfs, preload_scan_result_t *result) {
+static bool is_suspicious_path(const char *s) {
+    return strstr(s, "/tmp") || strstr(s, "/dev/shm") || strstr(s, "/var/tmp") || strstr(s, "/.");
+}
+
+typedef void (*conf_line_fn)(const char *rootfs, const char *file, const char *line, preload_scan_result_t *result);
+
+// Feeds every non-comment line (leading space trimmed, newline cut) of each <rootfs><rel_dir>/*<suffix> file to fn.
+static void scan_conf_dir(const char *rootfs, const char *rel_dir, const char *suffix, conf_line_fn fn,
+                          preload_scan_result_t *result) {
     char conf_dir[512];
-    snprintf(conf_dir, sizeof(conf_dir), "%.400s/etc/ld.so.conf.d", rootfs);
+    snprintf(conf_dir, sizeof(conf_dir), "%.400s%s", rootfs, rel_dir);
+
+    // Merged-/usr roots symlink /lib to usr/lib; walking both would report every hook twice.
+    char lib[512];
+    struct stat st;
+    snprintf(lib, sizeof(lib), "%.400s/lib", rootfs);
+    if (strncmp(rel_dir, "/lib/", 5) == 0 && lstat(lib, &st) == 0 && S_ISLNK(st.st_mode)) return;
 
     DIR *dir = opendir(conf_dir);
     if (!dir) return;
 
+    size_t suffix_len = strlen(suffix);
     struct dirent *entry;
     while ((entry = readdir(dir)) != NULL) {
-        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
+        size_t name_len = strlen(entry->d_name);
+        if (entry->d_name[0] == '.' && (name_len == 1 || strcmp(entry->d_name, "..") == 0)) continue;
+        if (name_len < suffix_len || strcmp(entry->d_name + name_len - suffix_len, suffix) != 0) continue;
 
         char full_file[1024];
         snprintf(full_file, sizeof(full_file), "%.500s/%.255s", conf_dir, entry->d_name);
@@ -180,25 +197,99 @@ static void scan_ld_conf_dir(const char *rootfs, preload_scan_result_t *result) 
         if (!fp) continue;
 
         result->files_scanned++;
-        char line[512];
+        char line[1024];
+        // shortcut: a line over 1023 bytes is read as two lines and backslash continuations are not joined; fine for hand-written hooks.
         while (fgets(line, sizeof(line), fp)) {
             char *ptr = line;
             while (*ptr && isspace((unsigned char)*ptr)) ptr++;
+            ptr[strcspn(ptr, "\r\n")] = '\0';
             if (*ptr == '#' || *ptr == '\0') continue;
-
-            if (strstr(ptr, "/tmp") || strstr(ptr, "/dev/shm") || strstr(ptr, "/var/tmp") || strstr(ptr, "/.")) {
-                add_preload_threat(result,
-                                   full_file,
-                                   "Suspicious Dynamic Linker Path",
-                                   ptr,
-                                   "",
-                                   "PRELOAD_SUSPICIOUS_CONF_PATH",
-                                   "ld.so.conf references temporary or hidden directory for library resolution");
-            }
+            fn(rootfs, full_file, ptr, result);
         }
         fclose(fp);
     }
     closedir(dir);
+}
+
+static void ld_conf_line(const char *rootfs, const char *file, const char *line, preload_scan_result_t *result) {
+    (void)rootfs;
+    if (is_suspicious_path(line)) {
+        add_preload_threat(result, file, "Suspicious Dynamic Linker Path", line, "", "PRELOAD_SUSPICIOUS_CONF_PATH",
+                           "ld.so.conf references temporary or hidden directory for library resolution");
+    }
+}
+
+// Copies the first whitespace-delimited token of s into out and returns its basename.
+static const char *first_program(const char *s, char *out, size_t out_len) {
+    while (*s && isspace((unsigned char)*s)) s++;
+    size_t n = strcspn(s, " \t;&|");
+    if (n >= out_len) n = out_len - 1;
+    memcpy(out, s, n);
+    out[n] = '\0';
+    const char *slash = strrchr(out, '/');
+    return slash ? slash + 1 : out;
+}
+
+static void report_program(const char *rootfs, const char *file, const char *program, const char *threat_name,
+                           const char *rule_id, const char *description, preload_scan_result_t *result) {
+    char full[1024];
+    snprintf(full, sizeof(full), "%.700s%s%.300s", rootfs, program[0] == '/' ? "" : "/", program);
+    char sha256[65] = "0000000000000000000000000000000000000000000000000000000000000000";
+    if (program[0]) sha256_file_hex(full, sha256);
+    add_preload_threat(result, file, threat_name, program, sha256, rule_id, description);
+}
+
+// "install <module> <command>" runs <command> as root whenever the module is requested. Distros only use it to
+// blacklist (true/false) or chain modprobe calls; anything else, or a temp/hidden path anywhere, is a hook.
+static void modprobe_line(const char *rootfs, const char *file, const char *line, preload_scan_result_t *result) {
+    if (strncmp(line, "install", 7) != 0 || !isspace((unsigned char)line[7])) return;
+    const char *p = line + 7;
+    while (*p && isspace((unsigned char)*p)) p++;
+    while (*p && !isspace((unsigned char)*p)) p++; // module name
+    char program[256];
+    const char *base = first_program(p, program, sizeof(program));
+    if (!program[0]) return;
+    bool benign = strcmp(base, "true") == 0 || strcmp(base, "false") == 0 || strcmp(base, "modprobe") == 0;
+    if (benign && !is_suspicious_path(p)) return;
+    report_program(rootfs, file, program, "Kernel Module Load Hook", "PERSIST_MODPROBE_INSTALL",
+                   "modprobe.d install directive runs a non-modprobe command as root on every module load", result);
+}
+
+// RUN+="..." / RUN{program}+="..." executes as root on every matching device event.
+static void udev_line(const char *rootfs, const char *file, const char *line, preload_scan_result_t *result,
+                      bool admin_dir) {
+    for (const char *p = strstr(line, "RUN"); p; p = strstr(p + 3, "RUN")) {
+        const char *q = p + 3;
+        if (*q == '{') q = strchr(q, '}') ? strchr(q, '}') + 1 : q;
+        while (*q == ' ') q++;
+        if (*q == '+') q++;
+        if (*q != '=' || q[1] == '=') continue;
+        q++;
+        while (*q == ' ') q++;
+        if (*q != '"') continue;
+        q++;
+        const char *end = strchr(q, '"');
+        size_t len = end ? (size_t)(end - q) : strlen(q);
+        char value[512];
+        snprintf(value, sizeof(value), "%.*s", (int)(len < sizeof(value) - 1 ? len : sizeof(value) - 1), q);
+
+        char program[256];
+        const char *base = first_program(value, program, sizeof(program));
+        bool shell = strcmp(base, "sh") == 0 || strcmp(base, "bash") == 0 || strcmp(base, "dash") == 0;
+        // Shipped rules (/usr/lib) do use "sh -c"; an admin-dir rule doing so is how sedexp-style droppers persist.
+        if (is_suspicious_path(value) || (admin_dir && shell && strstr(value, " -c"))) {
+            report_program(rootfs, file, program, "udev Event Execution Hook", "PERSIST_UDEV_RUN",
+                           "udev rule runs a shell or a temp/hidden-path program as root on device events", result);
+        }
+    }
+}
+
+static void udev_admin_line(const char *rootfs, const char *file, const char *line, preload_scan_result_t *result) {
+    udev_line(rootfs, file, line, result, true);
+}
+
+static void udev_vendor_line(const char *rootfs, const char *file, const char *line, preload_scan_result_t *result) {
+    udev_line(rootfs, file, line, result, false);
 }
 
 booto_error_t preload_scan_rootfs(const char *target_rootfs, preload_scan_result_t *result) {
@@ -209,7 +300,14 @@ booto_error_t preload_scan_rootfs(const char *target_rootfs, preload_scan_result
 
     booto_error_t err = scan_ld_so_preload(target_rootfs, result);
     booto_error_t env_err = scan_environment(target_rootfs, result);
-    scan_ld_conf_dir(target_rootfs, result);
+    scan_conf_dir(target_rootfs, "/etc/ld.so.conf.d", "", ld_conf_line, result);
+    static const char *const modprobe_dirs[] = { "/etc/modprobe.d", "/usr/lib/modprobe.d", "/lib/modprobe.d",
+                                                 "/run/modprobe.d" };
+    for (size_t i = 0; i < sizeof(modprobe_dirs) / sizeof(modprobe_dirs[0]); i++)
+        scan_conf_dir(target_rootfs, modprobe_dirs[i], ".conf", modprobe_line, result);
+    scan_conf_dir(target_rootfs, "/etc/udev/rules.d", ".rules", udev_admin_line, result);
+    scan_conf_dir(target_rootfs, "/usr/lib/udev/rules.d", ".rules", udev_vendor_line, result);
+    scan_conf_dir(target_rootfs, "/lib/udev/rules.d", ".rules", udev_vendor_line, result);
     if (err == BOOTO_OK) err = env_err;
 
     LOG_INFO("Preload scanner complete: %d config files audited, %d userland threats flagged",

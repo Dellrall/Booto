@@ -34,6 +34,24 @@ static void write_etc_file(const char *name, const char *content) {
     }
 }
 
+static void write_file(const char *rel, const char *content) {
+    char p[256], cmd[512];
+    snprintf(p, sizeof(p), "%s%s", g_root, rel);
+    snprintf(cmd, sizeof(cmd), "mkdir -p \"$(dirname '%s')\"", p);
+    if (system(cmd) != 0) return;
+    FILE *fp = fopen(p, "w");
+    if (fp) {
+        fputs(content, fp);
+        fclose(fp);
+    }
+}
+
+static void remove_tree(void) {
+    char cmd[128];
+    snprintf(cmd, sizeof(cmd), "rm -rf '%s'", g_root);
+    if (system(cmd) != 0) perror("rm");
+}
+
 static void remove_root(void) {
     static const char *names[] = { "ld.so.preload", "environment" };
     char p[160];
@@ -130,6 +148,75 @@ static void test_unreadable_preload_is_error(void) {
     TEST_PASS("test_unreadable_preload_is_error");
 }
 
+static void test_modprobe_install_hook(void) {
+    TEST_START("test_modprobe_install_hook");
+    make_root();
+    write_file("/etc/modprobe.d/blacklist.conf",
+               "install usb-storage /bin/true\n"
+               "install snd-pcm /sbin/modprobe --ignore-install snd-pcm && /sbin/modprobe snd-pcm-oss\n"
+               "# install x /tmp/commented\n"
+               "options snd-hda-intel model=auto\n");
+    write_file("/usr/lib/modprobe.d/evil.conf", "install e1000e /usr/bin/kworkerd --ignore-install\n");
+    write_file("/etc/modprobe.d/chain.conf", "install loop /sbin/modprobe --ignore-install loop; /dev/shm/.x\n");
+    write_file("/etc/modprobe.d/notconf.txt", "install foo /usr/bin/evil\n");
+
+    preload_scan_result_t res;
+    booto_error_t err = preload_scan_rootfs(g_root, &res);
+    remove_tree();
+
+    ASSERT_INT_EQ(err, BOOTO_OK, "Scan must return BOOTO_OK");
+    ASSERT_INT_EQ(res.threats_detected, 2, "Only the foreign command and the temp-path chain are hooks");
+    for (int i = 0; i < res.threats_detected; i++) {
+        ASSERT_STR_EQ(res.findings[i].rule_id, "PERSIST_MODPROBE_INSTALL", "Rule ID");
+        bool known = strcmp(res.findings[i].target_library, "/usr/bin/kworkerd") == 0 ||
+                     strcmp(res.findings[i].target_library, "/sbin/modprobe") == 0;
+        ASSERT_TRUE(known, "Target is the program the hook runs");
+    }
+    TEST_PASS("test_modprobe_install_hook");
+}
+
+static void test_udev_run_hook(void) {
+    TEST_START("test_udev_run_hook");
+    make_root();
+    write_file("/etc/udev/rules.d/10-tty.rules",
+               "ACTION==\"add\", ENV{MAJOR}==\"1\", RUN+=\"/bin/sh -c '/lib/sedexp/asedexpb'\"\n");
+    write_file("/etc/udev/rules.d/99-tmp.rules", "SUBSYSTEM==\"net\", RUN{program}+=\"/var/tmp/.d/x\"\n");
+    write_file("/usr/lib/udev/rules.d/60-vendor.rules",
+               "ATTR{RUNTIME}==\"1\", RUN+=\"/bin/sh -c 'echo 1 > /sys/x'\"\n");
+    write_file("/etc/udev/rules.d/70-ok.rules", "SUBSYSTEM==\"usb\", RUN+=\"/usr/bin/logger plugged\"\n");
+
+    preload_scan_result_t res;
+    booto_error_t err = preload_scan_rootfs(g_root, &res);
+    remove_tree();
+
+    ASSERT_INT_EQ(err, BOOTO_OK, "Scan must return BOOTO_OK");
+    ASSERT_INT_EQ(res.threats_detected, 2, "Admin shell rule and temp-path rule; vendor sh -c and logger are fine");
+    for (int i = 0; i < res.threats_detected; i++) {
+        ASSERT_STR_EQ(res.findings[i].rule_id, "PERSIST_UDEV_RUN", "Rule ID");
+        bool known = strcmp(res.findings[i].target_library, "/bin/sh") == 0 ||
+                     strcmp(res.findings[i].target_library, "/var/tmp/.d/x") == 0;
+        ASSERT_TRUE(known, "Target is the program the rule runs");
+    }
+    TEST_PASS("test_udev_run_hook");
+}
+
+static void test_merged_usr_not_doubled(void) {
+    TEST_START("test_merged_usr_not_doubled");
+    make_root();
+    write_file("/usr/lib/modprobe.d/evil.conf", "install e1000e /usr/bin/kworkerd\n");
+    char lib[96];
+    snprintf(lib, sizeof(lib), "%s/lib", g_root);
+    ASSERT_INT_EQ(symlink("usr/lib", lib), 0, "Create merged-usr symlink");
+
+    preload_scan_result_t res;
+    booto_error_t err = preload_scan_rootfs(g_root, &res);
+    remove_tree();
+
+    ASSERT_INT_EQ(err, BOOTO_OK, "Scan must return BOOTO_OK");
+    ASSERT_INT_EQ(res.threats_detected, 1, "/lib -> usr/lib must not double-report");
+    TEST_PASS("test_merged_usr_not_doubled");
+}
+
 int main(void) {
     printf("\n--- Running LD_PRELOAD & PAM Interceptor Tests ---\n");
     test_ld_preload_detection();
@@ -137,6 +224,9 @@ int main(void) {
     test_ld_preload_long_line();
     test_environment_ld_preload();
     test_unreadable_preload_is_error();
+    test_modprobe_install_hook();
+    test_udev_run_hook();
+    test_merged_usr_not_doubled();
     TEST_SUMMARY();
     return 0;
 }

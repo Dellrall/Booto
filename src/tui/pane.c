@@ -27,7 +27,7 @@ static const struct {
     {"UEFI boot files", "/boot/efi"},
     {"Kernel modules", "/lib/modules"},
     {"Initramfs scripts", "/boot/initrd.img*"},
-    {"LD_PRELOAD hooks", "/etc/ld.so.preload, /etc/environment"},
+    {"LD_PRELOAD & load hooks", "ld.so.preload, modprobe.d, udev"},
     {"Package integrity", "/var/lib/dpkg/info/*.md5sums"},
 };
 
