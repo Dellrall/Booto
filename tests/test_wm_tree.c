@@ -118,7 +118,37 @@ static void test_wm_swap_directions(void) {
     TEST_PASS("test_wm_swap_directions");
 }
 
+static void test_wm_resize(void) {
+    TEST_START("test_wm_resize");
+    wm_tree_t *tree = wm_tree_create_default(100, 40);
+    wm_recalculate_layout(tree, 0, 1, 100, 38);
+    wm_node_t *storage = tree->focused_leaf;
+    int border = storage->x + storage->w - 1;
+    wm_node_t *root_split = wm_find_divider_at(tree->root, border, 10);
+    ASSERT_TRUE(root_split == tree->root, "Column border belongs to the root split");
+    ASSERT_TRUE(wm_find_divider_at(tree->root, border - 3, 10) == NULL, "Inside a pane is not a border");
+    wm_node_t *row_split = wm_find_divider_at(tree->root, 5, storage->y + storage->h - 1);
+    ASSERT_TRUE(row_split == storage->parent, "Row border belongs to the left column split");
+
+    wm_move_divider(tree, root_split, 30, 10);
+    ASSERT_INT_EQ(storage->x + storage->w - 1, 30, "Border lands on the dragged column");
+    wm_move_divider(tree, root_split, 0, 10);
+    ASSERT_INT_EQ(storage->w, 10, "Dragging past the edge keeps the minimum width");
+
+    wm_move_divider(tree, root_split, 40, 10);
+    ASSERT_TRUE(wm_resize_focused(tree, KEY_RIGHT, 2), "Focused pane has a column border");
+    ASSERT_INT_EQ(storage->x + storage->w - 1, 42, "l moves the border right");
+    int h = storage->h;
+    ASSERT_TRUE(wm_resize_focused(tree, KEY_UP, 3), "Focused pane has a row border");
+    ASSERT_INT_EQ(storage->h, h - 3, "k moves the border up");
+    wm_toggle_zoom(tree);
+    ASSERT_TRUE(!wm_resize_focused(tree, KEY_RIGHT, 2), "No resizing while zoomed");
+    wm_tree_destroy(tree);
+    TEST_PASS("test_wm_resize");
+}
+
 int main(void) {
+    test_wm_resize();
     printf("\n--- Running BSP Window Manager Tests ---\n");
     test_wm_tree_creation();
     test_wm_splits_and_zoom();

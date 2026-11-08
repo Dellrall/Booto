@@ -289,6 +289,41 @@ bool wm_close_focused(wm_tree_t *tree) {
     return true;
 }
 
+wm_node_t *wm_find_divider_at(wm_node_t *node, int x, int y) {
+    if (!node || node->type != NODE_SPLIT || !node->left) return NULL;
+    const wm_node_t *a = node->left;
+    bool hit = node->split_dir == SPLIT_VERTICAL
+                   ? x == a->x + a->w - 1 && y >= node->y && y < node->y + node->h
+                   : y == a->y + a->h - 1 && x >= node->x && x < node->x + node->w;
+    if (hit) return node;
+    wm_node_t *d = wm_find_divider_at(node->left, x, y);
+    return d ? d : wm_find_divider_at(node->right, x, y);
+}
+
+void wm_move_divider(wm_tree_t *tree, wm_node_t *split, int x, int y) {
+    if (!tree || !tree->root || !split || split->type != NODE_SPLIT || tree->zoomed_leaf) return;
+    bool vert = split->split_dir == SPLIT_VERTICAL;
+    int size = vert ? split->w : split->h;
+    if (size <= 0) return;
+    /* The border is the last cell of the first child; +0.5 so the layout's truncation lands on that cell. */
+    float first = (float)((vert ? x - split->x : y - split->y) + 1);
+    float ratio = (first + 0.5f) / (float)size;
+    split->split_ratio = ratio < 0.0f ? 0.0f : ratio > 1.0f ? 1.0f : ratio; /* layout clamps to minimum pane sizes */
+    compute_node_layout(tree->root, tree->root->x, tree->root->y, tree->root->w, tree->root->h);
+}
+
+bool wm_resize_focused(wm_tree_t *tree, key_type_t dir, int cells) {
+    if (!tree || !tree->focused_leaf || tree->zoomed_leaf) return false;
+    split_direction_t axis = dir == KEY_LEFT || dir == KEY_RIGHT ? SPLIT_VERTICAL : SPLIT_HORIZONTAL;
+    wm_node_t *s = tree->focused_leaf->parent;
+    while (s && s->split_dir != axis) s = s->parent;
+    if (!s) return false;
+    int step = dir == KEY_LEFT || dir == KEY_UP ? -cells : cells;
+    if (axis == SPLIT_VERTICAL) wm_move_divider(tree, s, s->left->x + s->left->w - 1 + step, 0);
+    else wm_move_divider(tree, s, 0, s->left->y + s->left->h - 1 + step);
+    return true;
+}
+
 wm_node_t *wm_find_leaf_at(wm_node_t *node, int x, int y) {
     if (!node) return NULL;
     if (node->type == NODE_LEAF) {
