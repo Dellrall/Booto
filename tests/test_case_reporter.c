@@ -24,7 +24,7 @@ static void fill_summary(forensic_case_summary_t *sum, const char *case_id) {
     snprintf(sum->highest_severity, sizeof(sum->highest_severity), "CRITICAL");
     snprintf(sum->verdict, sizeof(sum->verdict), "THREATS");
     for (int i = 0; i < SCAN_MOD_COUNT; i++) snprintf(sum->module_status[i], sizeof(sum->module_status[i]), "OK");
-    snprintf(sum->module_status[5], sizeof(sum->module_status[5]), "SKIPPED");
+    snprintf(sum->module_status[SCAN_MOD_PKG], sizeof(sum->module_status[SCAN_MOD_PKG]), "SKIPPED");
 }
 
 static void slurp(const char *path, char *buf, size_t size) {
@@ -47,12 +47,12 @@ static void test_report_generation(void) {
     char buf[4096];
     slurp(json_path, buf, sizeof(buf));
     ASSERT_TRUE(strstr(buf, "\"verdict\":\"THREATS\"") != NULL, "JSON must carry the verdict");
-    ASSERT_TRUE(strstr(buf, "\"Ext4 stats\":\"SKIPPED\"") != NULL, "JSON must carry per-module status");
+    ASSERT_TRUE(strstr(buf, "\"Packages\":\"SKIPPED\"") != NULL, "JSON must carry per-module status");
 
     char md_path[512];
     ASSERT_INT_EQ(case_report_generate_markdown(&sum, g_dir, md_path, sizeof(md_path)), BOOTO_OK, "Markdown generation must return BOOTO_OK");
     slurp(md_path, buf, sizeof(buf));
-    ASSERT_TRUE(strstr(buf, "| Ext4 stats | 0 | `SKIPPED` |") != NULL, "Markdown must show module status");
+    ASSERT_TRUE(strstr(buf, "| Packages | 0 | `SKIPPED` |") != NULL, "Markdown must show module status");
     ASSERT_TRUE(strstr(buf, "| MBR/VBR | 1 | `OK` |") != NULL, "Markdown must show per-engine threat counts");
     ASSERT_TRUE(strstr(buf, "**Verdict:** `THREATS`") != NULL, "Markdown must show the verdict");
     char seal_path[600];

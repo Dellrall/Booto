@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **MOK list audit**: the firmware audit reads shim's `MokListRT`. A key not shipped by a known distro, or a bare binary hash (trusted without any signature), fails the new "Shim MOK keys known" check: that is how a bootkit gets shim to run unsigned code.
 - **BootNext check**: the firmware audit reads `BootNext` and `BootOrder`. A pending `BootNext` (a one-shot override that runs a loader once, then disappears) fails the new "No pending BootNext" check; otherwise the entry that boots first is shown with its description and loader path.
 
+### Removed
+- **Ext4 superblock engine**: it only printed superblock statistics and never found a threat, yet showed as a scan engine. Scans now run six engines.
+
 ## [1.5.4-beta] - 2026-11-08
 
 ### Changed

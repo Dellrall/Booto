@@ -12,14 +12,13 @@
 #include "kernel_inspector.h"
 #include "initramfs_auditor.h"
 #include "preload_scanner.h"
-#include "ext4_diff.h"
 #include "pkg_integrity.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-typedef enum { SCAN_MOD_MBR, SCAN_MOD_UEFI, SCAN_MOD_KERNEL, SCAN_MOD_INITRAMFS, SCAN_MOD_PRELOAD, SCAN_MOD_EXT4, SCAN_MOD_PKG, SCAN_MOD_COUNT } scan_module_id_t;
+typedef enum { SCAN_MOD_MBR, SCAN_MOD_UEFI, SCAN_MOD_KERNEL, SCAN_MOD_INITRAMFS, SCAN_MOD_PRELOAD, SCAN_MOD_PKG, SCAN_MOD_COUNT } scan_module_id_t;
 _Static_assert(sizeof(((forensic_case_summary_t *)0)->module_status) / sizeof(((forensic_case_summary_t *)0)->module_status[0]) == SCAN_MOD_COUNT,
                "forensic_case_summary_t.module_status must hold one entry per scan module");
 typedef enum { SCAN_STATUS_NOT_RUN, SCAN_STATUS_OK, SCAN_STATUS_ERROR, SCAN_STATUS_SKIPPED } scan_status_t;
@@ -39,7 +38,6 @@ typedef struct {
     kernel_scan_result_t kernel;
     initramfs_scan_result_t initramfs;
     preload_scan_result_t preload;
-    ext4_diff_result_t ext4;
     pkg_scan_result_t pkg;
     int total_threats;
     scan_verdict_t verdict;
@@ -68,7 +66,7 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
 const char *forensic_scan_module_name(scan_module_id_t id);
 const char *forensic_scan_status_str(scan_status_t s);
 const char *forensic_scan_verdict_str(scan_verdict_t v);
-/* Threats found by one module (ext4 reports statistics only, so always 0). */
+/* Threats found by one module. */
 int forensic_scan_module_threats(const forensic_scan_report_t *r, scan_module_id_t id);
 /* Fill a case summary from a finished report (timestamp = now UTC).
  * case_id NULL: CASE-<UTC time>; examiner NULL: $USER, else "unknown". */
