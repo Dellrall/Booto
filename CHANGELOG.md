@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.1-beta] - 2026-11-08
+
 ### Fixed
 - **Builds on glibc that enforces `_FORTIFY_SOURCE`** (e.g. Fedora 44, GCC 16): the default flags now include `-O2`, without which fortify is inactive and newer glibc fails the `-Werror` build. With fortify active, the TUI frame flush retries partial `write()`s instead of dropping part of a frame, and the "Report saved" status line keeps its RAM-only warning instead of cutting it off on a long path.
 - **Case report severity is real**: `highest_severity` is the highest severity of the findings (initramfs and preload findings count as CRITICAL). Before, any threat made it CRITICAL, even a lone MEDIUM one.
