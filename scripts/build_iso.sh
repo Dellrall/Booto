@@ -70,7 +70,7 @@ mkdir -p "${ROOTFS_DIR}/etc/systemd/system/getty@tty1.service.d"
 cat << 'SYSCONFIG' > "${ROOTFS_DIR}/etc/systemd/system/getty@tty1.service.d/override.conf"
 [Service]
 ExecStart=
-ExecStart=-/bin/bash -c "/usr/local/bin/booto; exec /bin/bash"
+ExecStart=-/bin/bash -c "/usr/local/bin/booto; exec /bin/bash 2>&1"
 StandardInput=tty
 StandardOutput=tty
 StandardError=journal
