@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0-beta] - 2026-11-09
+
 ### Fixed
 - **SPI dump on locked Intel boards**: when the full `flashrom` read fails (the ME region is locked), the dump retries with `--ifd -i bios` and saves the BIOS region, where UEFI code lives. The live ISO boots with `iomem=relaxed`, which `flashrom` needs to map the chip.
 
