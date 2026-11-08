@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.4-beta] - 2026-11-08
+
+### Changed
+- **Terminus console font**: the live USB's TUI and shells use Terminus instead of the VGA ROM font. Same 8x16 cell, so layout and mouse mapping are unchanged; it has every glyph the TUI draws.
+
 ## [1.5.3-beta] - 2026-11-08
 
 ### Added
