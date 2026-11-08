@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0-beta] - 2026-11-08
+
 ### Added
 - **Mouse support in the TUI**: click focuses a pane and selects the row under the pointer (clicking a checkbox toggles it); the wheel scrolls the pane under the pointer.
 - **Scrollable Findings and Reports panes** (`↑`/`↓`, `j`/`k` or the wheel).
