@@ -462,7 +462,7 @@ static void render_persistence_pane(wm_node_t *n, bool focused, tui_app_state_t 
         }
         int w = term_puts_clip(x0, y, iw, "Storage", A_TEXT);
         term_puts_clip(x0 + w + 1, y, right - (x0 + w + 1), state,
-                       p->state == PERSISTENCE_STATE_UNLOCKED ? A_OK : A_BAD);
+                       p->state == PERSISTENCE_STATE_UNLOCKED ? A_OK : A_STRONG);
     }
     y += 2;
 

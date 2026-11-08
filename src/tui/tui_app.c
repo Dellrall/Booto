@@ -66,7 +66,7 @@ static void render_top_bar(tui_app_state_t *app, int cols) {
     int x = cols - 1 - rw;
     if (scan_w) x += term_puts(x, 0, scan, A_WARN) + 2;
     if (ram_w) x += term_puts(x, 0, ram, A_MUTED) + 2;
-    if (luks_w) term_puts(x, 0, luks, app->luks_unlocked ? A_OK : A_BAD);
+    if (luks_w) term_puts(x, 0, luks, app->luks_unlocked ? A_OK : A_STRONG); /* locked is the normal start state, not a failure */
 
     int end = cols - 1 - rw - (rw ? 2 : 0);
     x = 1;
