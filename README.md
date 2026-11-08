@@ -106,6 +106,7 @@ sudo ./bin/booto -c -s /mnt/evidence                      # scan an already-moun
 | `-u`, `--update-rules` | Regenerate sealed rule files (`scripts/update_rules.sh`) |
 | `-V`, `--verbose` | Verbose/debug logging |
 | `-x`, `--expert-firmware` | Off by default. After a CLI scan, as root: flag UEFI variables that hide a PE/ELF image or a large packed blob, and dump the SPI flash read-only with `flashrom` (saved as `spi_flash.bin` in `-p <dir>`, else `/tmp`, with its SHA-256). Slower; reported like the host firmware audit, never part of the verdict |
+| `-q`, `--quarantine` | Off by default; CLI with `-p <dir>`. Copies every flagged file (kernel module, EFI binary, initrd image, preloaded library, modified package file; first 1 MiB of the raw device for MBR findings) into `<dir>/quarantine/booto-quarantine-<time>.zip`: stored entries, ZipCrypto, password `infected`, names ending in `.malware`, mode 0400. Nothing in it can run when the USB is plugged in elsewhere; unpack only on an isolated analysis machine. The report partition is also mounted `noexec` |
 | `-v`, `--version` / `-h`, `--help` | Version / help |
 
 Exit codes: `0` CLEAN (every enabled engine ran, nothing found), `1` THREATS, `2` INCOMPLETE (an engine failed, nothing ran, or the scan could not start). Mounting a target needs root; non-root runs cannot mount and report INCOMPLETE.

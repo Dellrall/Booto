@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Quarantine export (`-q`, `--quarantine`)**, off by default, CLI with `-p <dir>`: flagged files are copied, while the target is still mounted, into a ZIP under `<dir>/quarantine` (stored, ZipCrypto, password `infected`, `.malware` names, mode 0400, archive 0400). Paths that resolve outside the target are refused; items are capped at 512 MiB and the archive at 4 GiB. Verified with `unzip`, `7z` and Python `zipfile`.
+- **BOOTO_DATA is mounted `noexec`**, so nothing stored on the report partition can run from it.
 - **Expert firmware mode (`-x`, `--expert-firmware`)**, off by default, CLI as root:
   - NVRAM scan: every UEFI variable is read; one holding a PE or ELF image, or a blob of 4 KiB or more with entropy above 7.5 bits/byte that is not a signature list (PK/KEK/db/dbx/MokList), is flagged. On a real host: 158 variables, no false positives.
   - SPI flash dump: `flashrom -p internal -r` (read-only; the chip is never written) saves `spi_flash.bin` and prints its SHA-256 to compare with the vendor image. `flashrom` now ships on the ISO.
