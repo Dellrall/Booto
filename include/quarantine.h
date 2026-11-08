@@ -33,6 +33,10 @@ quarantine_t *quarantine_open(const char *dir);
  * Returns BOOTO_ERR_PERMISSION_DENIED when path escapes root, BOOTO_ERR_IO on read/write failure. */
 booto_error_t quarantine_add(quarantine_t *q, const char *prefix, const char *root, const char *path, uint64_t max_bytes);
 
+/* Resolves path (symlinks followed) into resolved[PATH_MAX] and checks it stays inside root (root NULL: no check);
+ * rel points into resolved: the part below root, or the basename. BOOTO_ERR_PERMISSION_DENIED when path escapes. */
+booto_error_t quarantine_resolve_inside(const char *root, const char *path, char *resolved, const char **rel);
+
 /* Writes the ZIP directory, makes the file 0400 and frees q. zip_path receives the ZIP's path, or "" when nothing
  * was added. Returns the number of files exported, or -1 when the ZIP could not be finished. */
 int quarantine_close(quarantine_t *q, char *zip_path, size_t zip_path_len);
