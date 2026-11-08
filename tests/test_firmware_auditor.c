@@ -5,6 +5,7 @@
 #include "test_framework.h"
 #include "firmware_auditor.h"
 #include "crypto_utils.h"
+#include "disk_mount.h"
 
 #include <dirent.h>
 #include <fcntl.h>
@@ -866,6 +867,63 @@ static void test_spi_dump(void) {
     TEST_PASS("test_spi_dump");
 }
 
+static void put_pe(uint8_t *at, uint16_t subsystem) {
+    at[0] = 'M'; at[1] = 'Z'; at[0x3c] = 0x40;
+    memcpy(at + 0x40, "PE\0\0", 4);
+    at[0x40 + 24 + 68] = (uint8_t)subsystem;
+}
+
+static void test_spi_analyze(void) {
+    TEST_START("test_spi_analyze");
+    make_root(false, false, false);
+    static uint8_t img[8192];
+    memset(img, 0xff, sizeof(img));
+    memcpy(img + 40, "_FVH", 4);
+    memset(img + 512, 0, 256);
+    put_pe(img + 512, 10);   /* EFI application: normal */
+
+    uint8_t win[256] = { 0 };
+    put_pe(win, 3);          /* Windows console binary hidden in an LZMA section */
+    const char *const xz[] = { "xz", "--format=lzma", "-c", NULL };
+    uint8_t *packed = NULL;
+    size_t packed_len = 0;
+    ASSERT_INT_EQ(disk_exec_capture(xz, win, sizeof(win), &packed, &packed_len, 4096), BOOTO_OK, "xz compresses test PE");
+    static const uint8_t guid[16] = { 0x98, 0x58, 0x4e, 0xee, 0x14, 0x39, 0x59, 0x42,
+                                      0x9d, 0x6e, 0xdc, 0x7b, 0xd7, 0x94, 0x03, 0xcf };
+    uint8_t *sec = img + 2048;
+    size_t sec_len = 24 + packed_len;
+    sec[0] = (uint8_t)sec_len; sec[1] = (uint8_t)(sec_len >> 8); sec[2] = 0; sec[3] = 0x02;
+    memcpy(sec + 4, guid, 16);
+    sec[20] = 24; sec[21] = 0; sec[22] = 1; sec[23] = 0;
+    memcpy(sec + 24, packed, packed_len);
+    free(packed);
+
+    char path[128];
+    snprintf(path, sizeof(path), "%s/spi.bin", g_root);
+    write_file(path, img, sizeof(img));
+    fw_spi_report_t r;
+    ASSERT_INT_EQ(firmware_spi_analyze(path, &r), BOOTO_OK, "Image analyzed");
+    ASSERT_INT_EQ(r.volumes, 1, "Firmware volume counted");
+    ASSERT_INT_EQ(r.lzma_sections, 1, "LZMA section found");
+    ASSERT_INT_EQ(r.lzma_inflated, 1, "LZMA section inflated");
+    ASSERT_INT_EQ(r.pe_images, 2, "Raw and inflated PE counted");
+    ASSERT_INT_EQ(r.windows_pe, 1, "Only the Windows PE is flagged");
+
+    /* A section whose size runs past the image, or a corrupt stream, is skipped in bounds (ASan checks). */
+    sec[1] = 0x7f;
+    write_file(path, img, sizeof(img));
+    ASSERT_INT_EQ(firmware_spi_analyze(path, &r), BOOTO_OK, "Oversized section tolerated");
+    ASSERT_INT_EQ(r.lzma_sections, 0, "Oversized section not inflated");
+    sec[1] = (uint8_t)(sec_len >> 8);
+    sec[30] ^= 0xff;
+    write_file(path, img, sizeof(img));
+    ASSERT_INT_EQ(firmware_spi_analyze(path, &r), BOOTO_OK, "Corrupt stream tolerated");
+
+    ASSERT_INT_EQ(firmware_spi_analyze("/nonexistent/spi.bin", &r), BOOTO_ERR_IO, "Missing image reported");
+    remove_tree(g_root);
+    TEST_PASS("test_spi_analyze");
+}
+
 int main(void) {
     printf("\n--- Running Firmware Auditor Tests ---\n");
     test_good_machine();
@@ -885,6 +943,7 @@ int main(void) {
     test_real_host();
     test_nvram_scan();
     test_spi_dump();
+    test_spi_analyze();
     TEST_SUMMARY();
     return 0;
 }

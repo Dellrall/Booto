@@ -106,6 +106,22 @@ booto_error_t firmware_nvram_scan(const char *efivars_dir, fw_nvram_report_t *ou
  */
 booto_error_t firmware_spi_dump(const char *out_path, char sha256_hex[65], bool *bios_only);
 
+typedef struct {
+    int volumes;          /* UEFI firmware volumes (_FVH) */
+    int lzma_sections;    /* LZMA-compressed sections found */
+    int lzma_inflated;    /* of those, inflated by the sandboxed xz */
+    int pe_images;        /* PE images, raw or inside inflated sections */
+    int windows_pe;       /* PE images built for Windows (GUI/console subsystem): firmware never runs these */
+} fw_spi_report_t;
+
+/**
+ * @brief Walk a dumped SPI image: count firmware volumes, inflate LZMA sections with the sandboxed
+ *        `xz --format=lzma` and count PE images. A Windows PE inside firmware is how WPBT-style and
+ *        MosaicRegressor-style implants drop a payload into the OS (some vendor tools do this too).
+ * @return BOOTO_OK; BOOTO_ERR_IO if the image cannot be read; BOOTO_ERR_INVALID_ARG on NULL.
+ */
+booto_error_t firmware_spi_analyze(const char *image_path, fw_spi_report_t *out);
+
 const char *firmware_check_name(fw_check_id_t id);
 const char *firmware_result_str(fw_result_t r);   /* "pass" "fail" "unknown" "n/a" */
 
