@@ -108,6 +108,8 @@ booto_error_t disk_exec_argv(const char *const argv[], const char *stdin_data, s
 /**
  * @brief Run argv[0] via fork+execvp (no shell), feeding stdin_data (may be NULL) to its stdin while
  *        concurrently capturing its stdout (poll-driven, no pipe deadlock). Child stderr goes to /dev/null.
+ *        The child is sandboxed for suspect input: 60 s CPU, 1 GiB address space, no file writes,
+ *        no_new_privs, and uid/gid nobody when run as root.
  * @param out Receives a malloc'd buffer with the child's stdout (caller frees); NULL on error.
  * @param max_out Output cap; exceeding it kills the child (decompression-bomb guard).
  * @return BOOTO_OK on exit 0, BOOTO_ERR_NOT_FOUND if exec failed (exit 127), BOOTO_ERR_CORRUPT_DATA on
