@@ -22,7 +22,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
+#include <signal.h>
+#include <sys/wait.h>
 #include <time.h>
+#include <unistd.h>
 
 static tui_app_state_t *g_current_app = NULL;
 
@@ -454,6 +458,42 @@ static void report_persist_result(tui_app_state_t *app, booto_error_t err) {
     }
 }
 
+/* Runs an interactive shell on a clean screen and returns to the TUI when it exits; scans keep running. */
+static bool run_shell(void) {
+    term_shutdown();
+    static const char banner[] = "\033[2J\033[HBooto root shell. Type 'exit' to return to Booto.\n\n";
+    ssize_t w = write(STDOUT_FILENO, banner, sizeof(banner) - 1);
+    (void)w;
+
+    /* Like system(): the shell owns Ctrl-C while it runs, so Booto must not die from it. */
+    struct sigaction ign, old_int, old_quit, old_ttou;
+    memset(&ign, 0, sizeof(ign));
+    ign.sa_handler = SIG_IGN;
+    sigemptyset(&ign.sa_mask);
+    sigaction(SIGINT, &ign, &old_int);
+    sigaction(SIGQUIT, &ign, &old_quit);
+
+    pid_t pid = fork();
+    if (pid == 0) {
+        signal(SIGINT, SIG_DFL);
+        signal(SIGQUIT, SIG_DFL);
+        signal(SIGTTOU, SIG_DFL);
+        execl("/bin/bash", "bash", "-i", (char *)NULL);
+        execl("/bin/sh", "sh", "-i", (char *)NULL);
+        _exit(127);
+    }
+    if (pid > 0) {
+        while (waitpid(pid, NULL, 0) < 0 && errno == EINTR) {}
+    }
+    /* bash -i makes itself the terminal's foreground group; take it back or the next tty read stops Booto. */
+    sigaction(SIGTTOU, &ign, &old_ttou);
+    tcsetpgrp(STDIN_FILENO, getpgrp());
+    sigaction(SIGTTOU, &old_ttou, NULL);
+    sigaction(SIGINT, &old_int, NULL);
+    sigaction(SIGQUIT, &old_quit, NULL);
+    return term_init() == 0; /* re-entering resets the front buffer, so the next frame repaints fully */
+}
+
 /* Quit/power paths: never exit (or free last_scan) under a running worker; block until it finishes,
  * then unmount report storage so no report is lost when the USB is pulled. */
 static void prepare_exit(tui_app_state_t *app, int rows, int cols) {
@@ -535,7 +575,10 @@ int tui_app_run(booto_context_t *ctx) {
                     int res = system("systemctl reboot -i 2>/dev/null || reboot -f 2>/dev/null");
                     (void)res;
                     exit(0);
-                } else if (event.type == KEY_CHAR && (event.ch == 's' || event.ch == 'S' || event.ch == '3' || event.ch == 'q' || event.ch == 'Q')) {
+                } else if (event.type == KEY_CHAR && (event.ch == 's' || event.ch == 'S' || event.ch == '3')) {
+                    app.show_exit_modal = false;
+                    if (!run_shell()) app.running = false;
+                } else if (event.type == KEY_CHAR && (event.ch == 'q' || event.ch == 'Q')) {
                     app.running = false;
                 } else if (event.type == KEY_ESC || event.type == KEY_F10 || (event.type == KEY_CHAR && (event.ch == 'c' || event.ch == 'C'))) {
                     app.show_exit_modal = false;
