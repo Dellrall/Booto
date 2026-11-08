@@ -42,6 +42,9 @@ typedef struct {
     uint32_t exec_ptr;        // largest executable section: file offset (0 = none)
     uint32_t exec_size;       // and raw size
     double exec_entropy;      // its entropy in bits/byte (set by uefi_parse_pe_file only)
+    uint32_t sbat_ptr;        // .sbat section (shim/GRUB revocation metadata): file offset (0 = none)
+    uint32_t sbat_size;       // and raw size
+    char sbat_revoked[64];    // "<component>,<generation>" below the current SbatLevel, or "" (uefi_parse_pe_file)
 } pe_efi_info_t;
 
 typedef struct {

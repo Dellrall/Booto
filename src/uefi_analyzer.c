@@ -126,6 +126,10 @@ booto_error_t uefi_parse_pe_buffer(const uint8_t *buf, size_t len, pe_efi_info_t
             info->exec_ptr = ptr;
             info->exec_size = size;
         }
+        if (memcmp(e, ".sbat\0", 6) == 0) {
+            info->sbat_ptr = ptr;
+            info->sbat_size = size;
+        }
         secs[n].ptr = ptr;
         secs[n].size = size;
         n++;
@@ -168,6 +172,35 @@ booto_error_t uefi_parse_pe_buffer(const uint8_t *buf, size_t len, pe_efi_info_t
     return BOOTO_OK;
 }
 
+// shim 15.8's SBAT_VAR_LATEST (2024010900): firmware with this SbatLevel refuses older generations, so a loader
+// below it is a known-vulnerable build (the downgrade BlackLotus-style bootkits rely on) or a stale leftover.
+// shortcut: table is fixed at 2024010900, update when shim ships a newer SbatLevel.
+static const struct { const char *component; int generation; } SBAT_LEVEL[] = {
+    { "shim", 4 }, { "grub", 3 }, { "grub.debian", 4 },
+};
+
+// Writes the first "<component>,<generation>" row of a .sbat CSV that is below SBAT_LEVEL into out.
+static void sbat_check(const uint8_t *sbat, uint32_t size, char *out, size_t out_len) {
+    char csv[4096];
+    size_t n = size < sizeof(csv) - 1 ? size : sizeof(csv) - 1;
+    memcpy(csv, sbat, n);
+    csv[n] = '\0';
+    out[0] = '\0';
+    char *save = NULL;
+    for (char *line = strtok_r(csv, "\n", &save); line; line = strtok_r(NULL, "\n", &save)) {
+        char *comma = strchr(line, ',');
+        if (!comma) continue;
+        *comma = '\0';
+        int gen = atoi(comma + 1);
+        for (size_t i = 0; i < sizeof(SBAT_LEVEL) / sizeof(SBAT_LEVEL[0]); i++) {
+            if (strcmp(line, SBAT_LEVEL[i].component) == 0 && gen < SBAT_LEVEL[i].generation) {
+                snprintf(out, out_len, "%.40s,%d", line, gen);
+                return;
+            }
+        }
+    }
+}
+
 booto_error_t uefi_parse_pe_file(const char *path, pe_efi_info_t *info) {
     if (!path || !info) return BOOTO_ERR_INVALID_ARG;
 
@@ -203,6 +236,8 @@ booto_error_t uefi_parse_pe_file(const char *path, pe_efi_info_t *info) {
         for (uint32_t i = 0; i < info->exec_size; i++) hist[buf[info->exec_ptr + i]]++;
         info->exec_entropy = entropy_bits(hist, info->exec_size);
     }
+    if (ret == BOOTO_OK && info->sbat_size) sbat_check(buf + info->sbat_ptr, info->sbat_size, info->sbat_revoked,
+                                                       sizeof(info->sbat_revoked));
     if (ret == BOOTO_OK) authenticode_verify(buf, (size_t)fsize, info);
     snprintf(info->file_path, sizeof(info->file_path), "%s", path);
     free(buf);
@@ -297,10 +332,50 @@ booto_error_t uefi_inspect_efi_file(const char *efi_path, uefi_scan_result_t *re
                         "Executable section is high-entropy (compressed or encrypted code), typical of packed bootkit loaders");
     }
 
+    if (pe.sbat_revoked[0]) {
+        char desc[256];
+        snprintf(desc, sizeof(desc), "SBAT entry %s is below the current SbatLevel: a revoked, known-vulnerable loader",
+                 pe.sbat_revoked);
+        add_uefi_threat(result, "SBAT-Revoked Boot Loader", efi_path, pe.sha256, "UEFI_SBAT_REVOKED", SEVERITY_MEDIUM,
+                        desc);
+    }
+
     return BOOTO_OK;
 }
 
-static void scan_esp_dir_recursive(const char *base_path, uefi_scan_result_t *result, int depth) {
+static bool path_has(const char *path, const char *needle) {
+    for (size_t n = strlen(needle); *path; path++)
+        if (strncasecmp(path, needle, n) == 0) return true;
+    return false;
+}
+
+// Where a file sits on the ESP, not what it contains: layouts used by known bootkits. rel is relative to the ESP root.
+static void check_esp_layout(const char *full_path, const char *rel, uefi_scan_result_t *result) {
+    const char *base = strrchr(rel, '/');
+    base = base ? base + 1 : rel;
+    // BlackLotus: a vulnerable Windows boot manager chain in ESP:/system32, and its payload as
+    // EFI/Microsoft/Boot/grubx64.efi so the shim it installs as bootmgfw.efi runs it.
+    if (strncasecmp(rel, "system32/", 9) == 0)
+        add_uefi_threat(result, "Windows Boot Files Outside EFI/Microsoft", full_path, "", "UEFI_ESP_SYSTEM32",
+                        SEVERITY_HIGH, "Executable in ESP:/system32, where BlackLotus stages its vulnerable boot chain");
+    if (path_has(rel, "EFI/Microsoft/") && (strncasecmp(base, "grub", 4) == 0 || strncasecmp(base, "shim", 4) == 0))
+        add_uefi_threat(result, "Linux Loader In Windows Boot Directory", full_path, "", "UEFI_ESP_FOREIGN_LOADER",
+                        SEVERITY_HIGH, "GRUB or shim inside EFI/Microsoft, the BlackLotus payload layout");
+    // A loader renamed aside so a replacement can chainload it (bootmgfw.efi.bak, grubx64-real.efi).
+    static const char *const loaders[] = { "bootmgfw", "bootx64", "grubx64", "shimx64" };
+    static const char *const aside[] = { "real", ".bak", ".old", "orig" };
+    for (size_t i = 0; i < sizeof(loaders) / sizeof(loaders[0]); i++) {
+        if (!path_has(base, loaders[i])) continue;
+        for (size_t j = 0; j < sizeof(aside) / sizeof(aside[0]); j++) {
+            if (!path_has(base, aside[j])) continue;
+            add_uefi_threat(result, "Shadowed Boot Loader", full_path, "", "UEFI_ESP_SHADOW_LOADER", SEVERITY_MEDIUM,
+                            "Copy of a boot loader renamed aside, how a replacement loader chainloads the original");
+            return;
+        }
+    }
+}
+
+static void scan_esp_dir_recursive(const char *base_path, size_t root_len, uefi_scan_result_t *result, int depth) {
     if (depth > 6) return;
 
     DIR *dir = opendir(base_path);
@@ -318,7 +393,7 @@ static void scan_esp_dir_recursive(const char *base_path, uefi_scan_result_t *re
         struct stat st;
         if (stat(full_path, &st) == 0) {
             if (S_ISDIR(st.st_mode)) {
-                scan_esp_dir_recursive(full_path, result, depth + 1);
+                scan_esp_dir_recursive(full_path, root_len, result, depth + 1);
             } else if (S_ISREG(st.st_mode)) {
                 // By content, not name: a renamed payload (grubx64.bak) or a systemd-boot kernel is still a PE.
                 char magic[2] = { 0 };
@@ -326,7 +401,10 @@ static void scan_esp_dir_recursive(const char *base_path, uefi_scan_result_t *re
                 if (fp) {
                     size_t got = fread(magic, 1, sizeof(magic), fp);
                     fclose(fp);
-                    if (got == 2 && magic[0] == 'M' && magic[1] == 'Z') uefi_inspect_efi_file(full_path, result);
+                    if (got == 2 && magic[0] == 'M' && magic[1] == 'Z') {
+                        uefi_inspect_efi_file(full_path, result);
+                        check_esp_layout(full_path, full_path + root_len + 1, result);
+                    }
                 }
             }
         }
@@ -338,7 +416,7 @@ booto_error_t uefi_inspect_esp_directory(const char *esp_dir, uefi_scan_result_t
     if (!esp_dir || !result) return BOOTO_ERR_INVALID_ARG;
 
     LOG_INFO("Scanning EFI System Partition (ESP) at: %s", esp_dir);
-    scan_esp_dir_recursive(esp_dir, result, 0);
+    scan_esp_dir_recursive(esp_dir, strlen(esp_dir), result, 0);
 
     LOG_INFO("ESP scan complete: %d EFI files inspected, %d bootkits/anomalies flagged",
              result->efi_files_scanned, result->bootkits_detected);
