@@ -404,6 +404,19 @@ static void apply_attr(uint32_t attr, uint32_t prev_attr, char **buf, size_t *re
     if (written > 0 && (size_t)written < *rem) { *buf += written; *rem -= (size_t)written; }
 }
 
+/* Writes all of buf: a terminal can accept a frame in parts, and a dropped part leaves the screen out of sync with g_front_*. */
+static void write_all(const char *buf, size_t len) {
+    while (len > 0) {
+        ssize_t w = write(STDOUT_FILENO, buf, len);
+        if (w < 0) {
+            if (errno == EINTR) continue;
+            return;
+        }
+        buf += w;
+        len -= (size_t)w;
+    }
+}
+
 void term_present(void) {
     if (!g_front_chars || !g_back_chars) return;
 
@@ -440,7 +453,7 @@ void term_present(void) {
                 g_front_attrs[idx] = g_back_attrs[idx];
 
                 if (rem < 256) {
-                    write(STDOUT_FILENO, out_buf, (size_t)(ptr - out_buf));
+                    write_all(out_buf, (size_t)(ptr - out_buf));
                     ptr = out_buf;
                     rem = sizeof(out_buf) - 64;
                 }
@@ -449,7 +462,7 @@ void term_present(void) {
     }
 
     if (ptr > out_buf) {
-        write(STDOUT_FILENO, out_buf, (size_t)(ptr - out_buf));
+        write_all(out_buf, (size_t)(ptr - out_buf));
     }
 }
 

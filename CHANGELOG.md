@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Builds on glibc that enforces `_FORTIFY_SOURCE`** (e.g. Fedora 44, GCC 16): the default flags now include `-O2`, without which fortify is inactive and newer glibc fails the `-Werror` build. With fortify active, the TUI frame flush retries partial `write()`s instead of dropping part of a frame, and the "Report saved" status line keeps its RAM-only warning instead of cutting it off on a long path.
+- **Case report severity is real**: `highest_severity` is the highest severity of the findings (initramfs and preload findings count as CRITICAL). Before, any threat made it CRITICAL, even a lone MEDIUM one.
+- **The MBR gap scan reads up to 2047 sectors** (the whole gap before a partition at LBA 2048) instead of 63, so a payload hidden past sector 63 is found.
+- **Unread MBR gap or VBR sectors make the MBR engine an ERROR** (verdict INCOMPLETE, findings kept) instead of being skipped silently and reported clean.
+- A case report is never overwritten: a second export with the same case ID fails instead of replacing the first.
+- `make test` after `make asan` or `make coverage` no longer fails to link: objects rebuild when the compiler flags change.
+
 ## [1.4.0] - 2026-11-05
 
 ### Added

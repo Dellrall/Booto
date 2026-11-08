@@ -27,7 +27,7 @@ static void test_sha256_known_vector(void) {
 static void test_elf_parser_on_binary(void) {
     TEST_START("test_elf_parser_on_binary");
     elf_binary_info_t info;
-    booto_error_t err = elf_parse_file("./build/test_logger", &info);
+    booto_error_t err = elf_parse_file("/proc/self/exe", &info);
     ASSERT_INT_EQ(err, BOOTO_OK, "Parsing valid ELF binary must succeed");
     ASSERT_TRUE(info.is_64bit, "Target ELF binary must be 64-bit");
     ASSERT_TRUE(info.is_little_endian, "Target ELF binary must be Little Endian");
@@ -46,7 +46,7 @@ static void test_rootkit_lkm_detection(void) {
     TEST_START("test_rootkit_lkm_detection");
 
     // Create a mock directory with a mock .ko file
-    system("mkdir -p /tmp/mock_lkm_test");
+    ASSERT_TRUE(system("mkdir -p /tmp/mock_lkm_test") == 0, "mkdir failed");
     FILE *fp = fopen("/tmp/mock_lkm_test/fake_diamorphine.ko", "w");
     if (fp) {
         fprintf(fp, "fake payload");
@@ -62,10 +62,10 @@ static void test_rootkit_lkm_detection(void) {
     kernel_inspect_directory("/tmp/mock_lkm_test", &res);
     kernel_inspect_vmlinuz("/tmp/mock_lkm_test/vmlinuz", &res);
 
-    const char *sev_str = kernel_severity_to_string(SEVERITY_CRITICAL);
+    const char *sev_str = booto_severity_str(SEVERITY_CRITICAL);
     ASSERT_TRUE(sev_str != NULL, "Severity string must not be null");
 
-    system("rm -rf /tmp/mock_lkm_test");
+    ASSERT_TRUE(system("rm -rf /tmp/mock_lkm_test") == 0, "cleanup failed");
     TEST_PASS("test_rootkit_lkm_detection");
 }
 

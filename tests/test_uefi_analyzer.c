@@ -63,7 +63,7 @@ static void test_synthetic_pe32_plus_parser(void) {
     ASSERT_TRUE(info.has_authenticode, "Authenticode certificate directory must be detected");
 
     // Write buffer to temp file to test file parsing
-    system("mkdir -p /tmp/mock_esp_test/EFI/BOOT");
+    ASSERT_TRUE(system("mkdir -p /tmp/mock_esp_test/EFI/BOOT") == 0, "mkdir failed");
     FILE *fp = fopen("/tmp/mock_esp_test/EFI/BOOT/BOOTX64.EFI", "wb");
     if (fp) {
         fwrite(pe_buf, 1, sizeof(pe_buf), fp);
@@ -79,10 +79,10 @@ static void test_synthetic_pe32_plus_parser(void) {
     uefi_inspect_efi_file("/tmp/mock_esp_test/EFI/BOOT/BOOTX64.EFI", &s_res);
     uefi_inspect_esp_directory("/tmp/mock_esp_test", &s_res);
 
-    const char *sev = uefi_severity_to_string(UEFI_SEVERITY_CRITICAL);
+    const char *sev = booto_severity_str(SEVERITY_CRITICAL);
     ASSERT_TRUE(sev != NULL, "Severity string must not be NULL");
 
-    system("rm -rf /tmp/mock_esp_test");
+    ASSERT_TRUE(system("rm -rf /tmp/mock_esp_test") == 0, "cleanup failed");
     TEST_PASS("test_synthetic_pe32_plus_parser");
 }
 
@@ -198,7 +198,7 @@ static void test_dbx_revocation_matching(void) {
     ASSERT_INT_EQ(uefi_parse_pe_buffer(b, len, &info), BOOTO_OK, "Image parses with custom rules");
     ASSERT_TRUE(info.is_revoked_dbx, "Authenticode hash matches DBX entry");
     ASSERT_STR_EQ(info.matched_threat, "Test Bootkit", "Matched threat name");
-    ASSERT_INT_EQ(info.matched_severity, UEFI_SEVERITY_HIGH, "Severity mapped");
+    ASSERT_INT_EQ(info.matched_severity, SEVERITY_HIGH, "Severity mapped");
 
     unlink(json_path);
     unlink(seal_path);

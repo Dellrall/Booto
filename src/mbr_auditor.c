@@ -21,16 +21,6 @@
 #include <string.h>
 #include <unistd.h>
 
-const char *mbr_severity_to_string(mbr_severity_t severity) {
-    switch (severity) {
-        case MBR_SEVERITY_CRITICAL: return "CRITICAL";
-        case MBR_SEVERITY_HIGH:     return "HIGH";
-        case MBR_SEVERITY_MEDIUM:   return "MEDIUM";
-        case MBR_SEVERITY_LOW:      return "LOW";
-        default:                    return "INFO";
-    }
-}
-
 const char *mbr_bootloader_to_string(bootloader_type_t type) {
     switch (type) {
         case BOOTLOADER_GRUB2:          return "GRUB 2 (GNU GRUB)";
@@ -50,7 +40,7 @@ static void add_mbr_threat(mbr_scan_result_t *result,
                            const char *sha256,
                            const char *rule_id,
                            uint64_t sector_lba,
-                           mbr_severity_t severity,
+                           booto_severity_t severity,
                            const char *description) {
     if (!result || result->threats_detected >= MAX_MBR_THREATS) return;
 
@@ -92,7 +82,7 @@ static void apply_pattern_rules(const rules_mbr_set_t *rules, rules_mbr_target_t
         for (int p = 0; p < rule->pattern_count; p++) {
             if (!mem_search(buf, len, rule->patterns[p], rule->pattern_len[p])) continue;
             add_mbr_threat(result, rule->name, dev_path, sha256, rule->rule_id, sector_lba,
-                           (mbr_severity_t)rules_severity_level(rule->severity), rule->description);
+                           (booto_severity_t)rules_severity_level(rule->severity), rule->description);
             break;
         }
     }
@@ -218,20 +208,20 @@ booto_error_t mbr_audit_buffer(const uint8_t *buffer, size_t len, const char *de
     // A. Check for Missing / Invalid Boot Signature
     if (!info->has_valid_signature && info->valid_partition_count > 0) {
         add_mbr_threat(result, "Invalid MBR Boot Signature", info->device_path, info->mbr_sha256,
-                       "MBR_INVALID_BOOT_SIGNATURE", 0, MBR_SEVERITY_HIGH,
+                       "MBR_INVALID_BOOT_SIGNATURE", 0, SEVERITY_HIGH,
                        "Partitioned storage sector 0 lacks standard 0x55AA boot signature (possible corrupt or wiped MBR)");
     }
 
     // B. Check Partition Table Corruptions
     if (has_partition_corruption) {
         add_mbr_threat(result, "Corrupted Partition Table Status Bytes", info->device_path, info->mbr_sha256,
-                       "MBR_CORRUPT_PARTITION_TABLE", 0, MBR_SEVERITY_HIGH,
+                       "MBR_CORRUPT_PARTITION_TABLE", 0, SEVERITY_HIGH,
                        "MBR partition table status byte contains invalid active/boot flags (not 0x00 or 0x80)");
     }
 
     if (info->active_partition_count > 1) {
         add_mbr_threat(result, "Multiple Active MBR Partitions", info->device_path, info->mbr_sha256,
-                       "MBR_MULTIPLE_ACTIVE_PARTITIONS", 0, MBR_SEVERITY_MEDIUM,
+                       "MBR_MULTIPLE_ACTIVE_PARTITIONS", 0, SEVERITY_MEDIUM,
                        "More than one partition flagged as active/bootable (0x80) in MBR table");
     }
 
@@ -357,7 +347,7 @@ booto_error_t mbr_audit_gap_buffer(const uint8_t *gap_data, size_t gap_len, uint
         result->mbr_info.has_mbr_gap_payload = true;
 
         add_mbr_threat(result, "Hidden Executable Payload in MBR Gap", dev_str, gap_sha256,
-                       "MBR_GAP_ANOMALOUS_PAYLOAD", start_lba, MBR_SEVERITY_HIGH,
+                       "MBR_GAP_ANOMALOUS_PAYLOAD", start_lba, SEVERITY_HIGH,
                        code_like
                            ? "Unpartitioned Track 0 slack space contains unrecognized real-mode code with INT 13h / IVT hook patterns"
                            : "Unpartitioned Track 0 slack space contains unrecognized high-entropy (packed/encrypted) payload");
@@ -391,7 +381,7 @@ booto_error_t mbr_audit_vbr_buffer(const uint8_t *buffer, size_t len, uint64_t v
             memcmp(&buffer[3], "MSDOS5.0", 8) == 0 ||
             memcmp(&buffer[3], "FAT32   ", 8) == 0) {
             add_mbr_threat(result, "Invalid VBR Boot Signature", dev_str, vbr_sha256,
-                           "VBR_INVALID_SIGNATURE", vbr_lba, MBR_SEVERITY_HIGH,
+                           "VBR_INVALID_SIGNATURE", vbr_lba, SEVERITY_HIGH,
                            "Partition Volume Boot Record contains Microsoft OEM ID but lacks 0x55AA signature");
         }
         return BOOTO_OK;
@@ -402,7 +392,7 @@ booto_error_t mbr_audit_vbr_buffer(const uint8_t *buffer, size_t len, uint64_t v
     if (bytes_per_sector != 0 && bytes_per_sector != 512 && bytes_per_sector != 1024 &&
         bytes_per_sector != 2048 && bytes_per_sector != 4096) {
         add_mbr_threat(result, "Corrupted BPB Sector Geometry", dev_str, vbr_sha256,
-                       "VBR_CORRUPTED_BPB", vbr_lba, MBR_SEVERITY_HIGH,
+                       "VBR_CORRUPTED_BPB", vbr_lba, SEVERITY_HIGH,
                        "Volume Boot Record BPB contains invalid sector geometry (possible bootkit hook or tamper)");
     }
 
@@ -442,18 +432,24 @@ booto_error_t mbr_audit_device(const char *block_dev, mbr_scan_result_t *result)
         return err;
     }
 
-    // 2. Audit Track 0 Slack Gap (if first partition starts after sector 1)
+    // A sector we could not read is reported as an error: an unread region must never count as clean.
+    booto_error_t read_err = BOOTO_OK;
+
+    // 2. Audit the gap before the first partition (2047 sectors when it starts at the usual LBA 2048)
     if (result->mbr_info.first_partition_lba > 1 && result->mbr_info.mbr_gap_sectors > 0) {
         uint32_t gap_sectors_to_read = result->mbr_info.mbr_gap_sectors;
-        if (gap_sectors_to_read > 63) {
-            gap_sectors_to_read = 63; // Limit check to standard Track 0 slack size (31.5 KB)
-        }
+        if (gap_sectors_to_read > 2047) gap_sectors_to_read = 2047;
 
         size_t gap_bytes = (size_t)gap_sectors_to_read * MBR_SECTOR_SIZE;
         uint8_t *gap_buf = malloc(gap_bytes);
-        if (gap_buf) {
-            if (read(fd, gap_buf, gap_bytes) == (ssize_t)gap_bytes) {
+        if (!gap_buf) {
+            read_err = BOOTO_ERR_OUT_OF_MEMORY;
+        } else {
+            if (pread(fd, gap_buf, gap_bytes, MBR_SECTOR_SIZE) == (ssize_t)gap_bytes) {
                 mbr_audit_gap_buffer(gap_buf, gap_bytes, 1, block_dev, result);
+            } else {
+                LOG_ERROR("Failed to read MBR gap (%u sectors) from '%s'", gap_sectors_to_read, block_dev);
+                read_err = BOOTO_ERR_IO;
             }
             free(gap_buf);
         }
@@ -463,14 +459,15 @@ booto_error_t mbr_audit_device(const char *block_dev, mbr_scan_result_t *result)
     const mbr_partition_record_t *ptable = (const mbr_partition_record_t *)(const void *)&mbr_buf[MBR_PARTITION_TABLE_OFFSET];
     for (int i = 0; i < MBR_PARTITION_COUNT; i++) {
         if (ptable[i].partition_type != 0x00 && ptable[i].lba_start > 0) {
+            uint8_t vbr_buf[MBR_SECTOR_SIZE];
             off_t offset = (off_t)ptable[i].lba_start * MBR_SECTOR_SIZE;
-            if (lseek(fd, offset, SEEK_SET) == offset) {
-                uint8_t vbr_buf[MBR_SECTOR_SIZE];
-                if (read(fd, vbr_buf, sizeof(vbr_buf)) == (ssize_t)sizeof(vbr_buf)) {
-                    char part_name[300];
-                    snprintf(part_name, sizeof(part_name), "%s#part%d", block_dev, i + 1);
-                    mbr_audit_vbr_buffer(vbr_buf, sizeof(vbr_buf), ptable[i].lba_start, part_name, result);
-                }
+            if (pread(fd, vbr_buf, sizeof(vbr_buf), offset) == (ssize_t)sizeof(vbr_buf)) {
+                char part_name[300];
+                snprintf(part_name, sizeof(part_name), "%s#part%d", block_dev, i + 1);
+                mbr_audit_vbr_buffer(vbr_buf, sizeof(vbr_buf), ptable[i].lba_start, part_name, result);
+            } else {
+                LOG_ERROR("Failed to read VBR of partition %d (LBA %u) on '%s'", i + 1, ptable[i].lba_start, block_dev);
+                read_err = BOOTO_ERR_IO;
             }
         }
     }
@@ -478,5 +475,5 @@ booto_error_t mbr_audit_device(const char *block_dev, mbr_scan_result_t *result)
     close(fd);
     LOG_INFO("MBR/VBR audit complete for %s: %d sectors scanned, %d threats detected",
              block_dev, result->sectors_scanned, result->threats_detected);
-    return BOOTO_OK;
+    return read_err;
 }

@@ -138,8 +138,13 @@ static const builtin_mbr_t G_BUILTIN_MBR[] = {
 /* Field helpers shared by built-in and file loading                          */
 /* ========================================================================== */
 
+static const char *const LEVELS[] = { "INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL" };
+
+const char *booto_severity_str(booto_severity_t severity) {
+    return (unsigned)severity < ARRAY_LEN(LEVELS) ? LEVELS[severity] : "INFO";
+}
+
 int rules_severity_level(const char *severity) {
-    static const char *const LEVELS[] = { "INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL" };
     if (!severity) return -1;
     for (size_t i = 0; i < ARRAY_LEN(LEVELS); i++) {
         if (strcmp(severity, LEVELS[i]) == 0) return (int)i;

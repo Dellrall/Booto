@@ -22,14 +22,6 @@ extern "C" {
 #define MBR_BOOT_SIGNATURE 0xAA55 // Little-endian 0x55, 0xAA
 
 typedef enum {
-    MBR_SEVERITY_INFO = 0,
-    MBR_SEVERITY_LOW,
-    MBR_SEVERITY_MEDIUM,
-    MBR_SEVERITY_HIGH,
-    MBR_SEVERITY_CRITICAL
-} mbr_severity_t;
-
-typedef enum {
     BOOTLOADER_UNKNOWN = 0,
     BOOTLOADER_GRUB2,
     BOOTLOADER_GRUB_LEGACY,
@@ -78,7 +70,7 @@ typedef struct {
     char sha256[65];
     char rule_id[64];
     uint64_t sector_lba;
-    mbr_severity_t severity;
+    booto_severity_t severity;
     char description[256];
 } mbr_threat_finding_t;
 
@@ -130,13 +122,6 @@ booto_error_t mbr_audit_vbr_buffer(const uint8_t *buffer, size_t len, uint64_t v
  * @return BOOTO_OK on success, negative error code on failure.
  */
 booto_error_t mbr_audit_gap_buffer(const uint8_t *gap_data, size_t gap_len, uint64_t start_lba, const char *device_path, mbr_scan_result_t *result);
-
-/**
- * @brief Convert MBR severity enum to string.
- * @param severity Severity level.
- * @return Human-readable severity string.
- */
-const char *mbr_severity_to_string(mbr_severity_t severity);
 
 /**
  * @brief Convert bootloader type enum to string.

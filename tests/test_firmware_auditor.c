@@ -288,7 +288,7 @@ static void build_tpm(bool with_sha256) {
         write_file(g_tpmlog, log, off);
         return;
     }
-    static const char locality[17] = "StartupLocality\0\x03";
+    static const char locality[] = "StartupLocality\0\x03";
     off = put_event2(log, off, 0, 3, 0x00, locality, 17);
     off = put_event2(log, off, 0, 0x80000008, 0xA1, "fw", 2);
     off = put_event2(log, off, 7, 0x800000E0, 0xB2, NULL, 0);
