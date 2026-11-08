@@ -38,7 +38,6 @@ static void test_rootfs_dir_scan(void) {
     ASSERT_INT_EQ(r->mount_err, BOOTO_OK, "rootfs_dir needs no mount");
     ASSERT_TRUE(!r->mounted, "rootfs_dir must not be mounted");
     ASSERT_INT_EQ(r->status[SCAN_MOD_MBR], SCAN_STATUS_SKIPPED, "MBR skipped without raw device");
-    ASSERT_INT_EQ(r->status[SCAN_MOD_EXT4], SCAN_STATUS_SKIPPED, "EXT4 skipped without raw device");
     ASSERT_INT_EQ(r->status[SCAN_MOD_INITRAMFS], SCAN_STATUS_SKIPPED, "Initramfs skipped when absent");
     ASSERT_INT_EQ(r->status[SCAN_MOD_PRELOAD], SCAN_STATUS_OK, "Preload must run");
     ASSERT_INT_EQ(r->status[SCAN_MOD_KERNEL], SCAN_STATUS_OK, "Kernel must run");

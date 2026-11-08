@@ -43,7 +43,7 @@ static const char *err_name(booto_error_t e) {
 }
 
 const char *forensic_scan_module_name(scan_module_id_t id) {
-    static const char *names[SCAN_MOD_COUNT] = {"MBR/VBR", "UEFI ESP", "Kernel LKM", "Initramfs", "LD_PRELOAD", "Ext4 stats", "Packages"};
+    static const char *names[SCAN_MOD_COUNT] = {"MBR/VBR", "UEFI ESP", "Kernel LKM", "Initramfs", "LD_PRELOAD", "Packages"};
     return ((unsigned)id < SCAN_MOD_COUNT) ? names[id] : "unknown";
 }
 
@@ -286,17 +286,6 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
             const char *lib = out->preload.findings[i].target_library;
             snprintf(path, sizeof(path), "%.256s%s%.250s", root, lib[0] == '/' ? "" : "/", lib);
             export_file(q, "preload", root, lib[0] ? path : "", QUARANTINE_MAX_ITEM);
-        }
-    }
-
-    if (begin(out, SCAN_MOD_EXT4, enabled, cb, user)) {
-        if (!target_dev) {
-            set_status(out, SCAN_MOD_EXT4, SCAN_STATUS_SKIPPED, BOOTO_OK, "no raw device");
-        } else {
-            booto_error_t e = ext4_diff_scan(target_dev, have_root ? root : NULL, &out->ext4);
-            if (e == BOOTO_ERR_CORRUPT_DATA) set_status(out, SCAN_MOD_EXT4, SCAN_STATUS_SKIPPED, e, "not ext4");
-            else if (e == BOOTO_OK) set_status(out, SCAN_MOD_EXT4, SCAN_STATUS_OK, e, "stats only: hidden-inode cross-view not implemented");
-            else set_result(out, SCAN_MOD_EXT4, e);
         }
     }
 

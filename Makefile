@@ -22,7 +22,6 @@ SOURCES = $(SRCDIR)/logger.c \
           $(SRCDIR)/initramfs_auditor.c \
           $(SRCDIR)/preload_scanner.c \
           $(SRCDIR)/pkg_integrity.c \
-          $(SRCDIR)/ext4_diff.c \
           $(SRCDIR)/persistence_mgr.c \
           $(SRCDIR)/case_reporter.c \
           $(SRCDIR)/forensic_scan.c \

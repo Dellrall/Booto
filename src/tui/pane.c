@@ -28,7 +28,6 @@ static const struct {
     {"Kernel modules", "/lib/modules"},
     {"Initramfs scripts", "/boot/initrd.img*"},
     {"LD_PRELOAD hooks", "/etc/ld.so.preload, /etc/environment"},
-    {"Ext4 superblock", "superblock"},
     {"Package integrity", "/var/lib/dpkg/info/*.md5sums"},
 };
 

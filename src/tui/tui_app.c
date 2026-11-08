@@ -235,7 +235,6 @@ static scan_module_id_t pane_module_to_scan_id(const char *name) {
     if (strncmp(name, "Kernel", 6) == 0) return SCAN_MOD_KERNEL;
     if (strstr(name, "Initramfs")) return SCAN_MOD_INITRAMFS;
     if (strncmp(name, "LD_PRELOAD", 10) == 0) return SCAN_MOD_PRELOAD;
-    if (strstr(name, "Ext4")) return SCAN_MOD_EXT4;
     if (strncmp(name, "Package", 7) == 0) return SCAN_MOD_PKG;
     return SCAN_MOD_COUNT;
 }
