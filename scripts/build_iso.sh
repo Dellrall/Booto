@@ -14,6 +14,8 @@ if [ -z "${SOURCE_DATE_EPOCH:-}" ]; then
 fi
 export SOURCE_DATE_EPOCH
 ISO_DATE="$(date -u -d "@${SOURCE_DATE_EPOCH}" +%Y%m%d%H%M%S)00"
+# ISO9660 UUID that xorriso derives from --modification-date; blkid shows it as /dev/disk/by-uuid/<this>.
+ISO_UUID="$(date -u -d "@${SOURCE_DATE_EPOCH}" +%Y-%m-%d-%H-%M-%S)-00"
 
 WORK_DIR="/tmp/booto_iso_workspace"
 ROOTFS_DIR="${WORK_DIR}/chroot"
@@ -122,6 +124,13 @@ search --no-floppy --set=root --file ${BOOT_MARKER}
 menuentry "Booto - Live Rootkit & Bootkit Forensic System (Amnesic RAM Mode)" {
     search --no-floppy --set=root --file ${BOOT_MARKER}
     linux  /live/vmlinuz boot=live components live-media=removable systemd.swap=no quiet splash systemd.show_status=0 loglevel=3
+    initrd /live/initrd.img
+}
+
+# Fallback for USB SSDs/enclosures that do not report removable: find this build's ISO by UUID (same trust as the GRUB search above).
+menuentry "Booto - USB not detected (non-removable USB drive)" {
+    search --no-floppy --set=root --file ${BOOT_MARKER}
+    linux  /live/vmlinuz boot=live components live-media=/dev/disk/by-uuid/${ISO_UUID} systemd.swap=no quiet splash systemd.show_status=0 loglevel=3
     initrd /live/initrd.img
 }
 
