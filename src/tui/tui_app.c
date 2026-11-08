@@ -333,7 +333,7 @@ static void finish_forensic_scan(tui_app_state_t *app) {
                      r->mbr.findings[0].target_device, (unsigned long long)r->mbr.findings[0].sector_lba);
             snprintf(app->threat.hook_type, sizeof(app->threat.hook_type), "Rule: %.50s", r->mbr.findings[0].rule_id);
             snprintf(app->threat.sha256, sizeof(app->threat.sha256), "%.64s", r->mbr.findings[0].sha256);
-            snprintf(app->threat.severity, sizeof(app->threat.severity), "%.15s", mbr_severity_to_string(r->mbr.findings[0].severity));
+            snprintf(app->threat.severity, sizeof(app->threat.severity), "%.15s", booto_severity_str(r->mbr.findings[0].severity));
         } else if (r->uefi.bootkits_detected > 0) {
             snprintf(app->threat.threat_name, sizeof(app->threat.threat_name), "%.60s", r->uefi.findings[0].threat_name);
             snprintf(app->threat.infected_file, sizeof(app->threat.infected_file), "%.120s", r->uefi.findings[0].file_path);
@@ -345,7 +345,7 @@ static void finish_forensic_scan(tui_app_state_t *app) {
             snprintf(app->threat.hook_type, sizeof(app->threat.hook_type), "%.30s: %.25s",
                      r->kernel.findings[0].detection_rule, r->kernel.findings[0].matched_symbol);
             snprintf(app->threat.sha256, sizeof(app->threat.sha256), "%.64s", r->kernel.findings[0].sha256);
-            snprintf(app->threat.severity, sizeof(app->threat.severity), "%.15s", kernel_severity_to_string(r->kernel.findings[0].severity));
+            snprintf(app->threat.severity, sizeof(app->threat.severity), "%.15s", booto_severity_str(r->kernel.findings[0].severity));
         } else if (r->initramfs.threats_detected > 0) {
             snprintf(app->threat.threat_name, sizeof(app->threat.threat_name), "%.60s", r->initramfs.findings[0].threat_name);
             snprintf(app->threat.infected_file, sizeof(app->threat.infected_file), "%.120s", r->initramfs.findings[0].file_path);
@@ -382,17 +382,8 @@ static void export_case_report(tui_app_state_t *app) {
         snprintf(app->status_msg, sizeof(app->status_msg), "Nothing to export yet. Run a scan first.");
         return;
     }
-    char case_id[32];
-    time_t now = time(NULL);
-    struct tm tm_utc;
-    gmtime_r(&now, &tm_utc);
-    strftime(case_id, sizeof(case_id), "CASE-%Y%m%d-%H%M%S", &tm_utc);
-    const char *examiner = getenv("USER");
-    if (!examiner || !examiner[0]) examiner = "unknown";
-
     forensic_case_summary_t sum;
-    memset(&sum, 0, sizeof(sum));
-    forensic_scan_fill_case_summary(app->last_scan, case_id, examiner, &sum);
+    forensic_scan_fill_case_summary(app->last_scan, NULL, NULL, &sum);
 
     bool on_usb = persistence_is_unlocked(&app->persist);
     const char *out_dir = app->persist.cases_dir;
@@ -413,7 +404,7 @@ static void export_case_report(tui_app_state_t *app) {
         return;
     }
     char log_buf[512];
-    snprintf(log_buf, sizeof(log_buf), "Exported case report %.31s to %.200s", case_id, saved_md);
+    snprintf(log_buf, sizeof(log_buf), "Exported case report %.63s to %.200s", sum.case_id, saved_md);
     tui_app_append_log(app, LOG_LEVEL_INFO, NULL, log_buf);
     snprintf(app->status_msg, sizeof(app->status_msg), "Report saved to %.180s%s", saved_md,
              on_usb ? "." : " (RAM only: lost at power-off, press F4 to unlock storage).");

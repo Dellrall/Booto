@@ -64,7 +64,7 @@ graph LR
 4. **Standalone Unit Test Suite (`tests/test_<module>.c`)**:
    - Test clean baseline scenarios (e.g., standard GRUB, clean kernel modules).
    - Test synthetic threat samples (e.g., specific bootkits, malicious hooks).
-   - Wire target into `Makefile` and `CMakeLists.txt`.
+   - Wire target into `Makefile`.
 
 5. **Mutation Fuzzing Harness (`tests/test_fuzz.c`)**:
    - Integrate the parser into `test_fuzz.c` and subject it to 1,500 iterations of randomized, corrupted payloads to prove crash resilience.

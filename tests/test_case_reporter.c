@@ -97,6 +97,7 @@ static void test_host_firmware_section(void) {
     slurp(path, buf, sizeof(buf));
     ASSERT_TRUE(strstr(buf, "Not run (no raw target device).") != NULL, "Markdown must say firmware not run");
 
+    snprintf(sum.case_id, sizeof(sum.case_id), "FW-2"); // reports are never overwritten
     sum.firmware_ran = true;
     sum.firmware.uefi_boot = true;
     for (int i = 0; i < FW_CHECK_COUNT; i++) sum.firmware.checks[i].result = FW_RESULT_PASS;
@@ -140,6 +141,23 @@ static void test_unwritable_dir_fails(void) {
     TEST_PASS("test_unwritable_dir_fails");
 }
 
+static void test_existing_report_kept(void) {
+    TEST_START("test_existing_report_kept");
+    forensic_case_summary_t sum;
+    fill_summary(&sum, "KEEP-1");
+    char path[512], before[8192], after[8192];
+    ASSERT_INT_EQ(case_report_generate_json(&sum, g_dir, path, sizeof(path)), BOOTO_OK, "First report is written");
+    slurp(path, before, sizeof(before));
+    snprintf(sum.verdict, sizeof(sum.verdict), "CLEAN");
+    ASSERT_INT_EQ(case_report_generate_json(&sum, g_dir, path, sizeof(path)), BOOTO_ERR_IO, "Same case ID must not overwrite");
+    ASSERT_INT_EQ(case_report_generate_markdown(&sum, g_dir, path, sizeof(path)), BOOTO_OK, "Markdown is a separate file");
+    ASSERT_INT_EQ(case_report_generate_markdown(&sum, g_dir, path, sizeof(path)), BOOTO_ERR_IO, "Markdown must not overwrite");
+    snprintf(path, sizeof(path), "%s/case_KEEP-1.json", g_dir);
+    slurp(path, after, sizeof(after));
+    ASSERT_STR_EQ(after, before, "Existing report is unchanged");
+    TEST_PASS("test_existing_report_kept");
+}
+
 int main(void) {
     printf("\n--- Running Forensic Case Reporter Tests ---\n");
     if (!mkdtemp(g_dir)) {
@@ -151,6 +169,7 @@ int main(void) {
     test_host_firmware_section();
     test_unsafe_case_id_rejected();
     test_unwritable_dir_fails();
+    test_existing_report_kept();
     char cmd[128];
     snprintf(cmd, sizeof(cmd), "rm -rf '%s'", g_dir);
     if (system(cmd) != 0) fprintf(stderr, "warning: cleanup of %s failed\n", g_dir);

@@ -15,6 +15,7 @@
 #include "logger.h"
 #include "version.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -113,9 +114,10 @@ booto_error_t case_report_generate_json(const forensic_case_summary_t *summary,
     char filename[512];
     snprintf(filename, sizeof(filename), "%.400s/case_%.50s.json", output_dir, summary->case_id);
 
-    FILE *fp = fopen(filename, "w");
+    // "x": an existing report is evidence and is never replaced.
+    FILE *fp = fopen(filename, "wx");
     if (!fp) {
-        LOG_ERROR("Failed to create JSON case report '%s'", filename);
+        LOG_ERROR("Failed to create JSON case report '%s': %s", filename, strerror(errno));
         return BOOTO_ERR_IO;
     }
 
@@ -192,9 +194,9 @@ booto_error_t case_report_generate_markdown(const forensic_case_summary_t *summa
     char filename[512];
     snprintf(filename, sizeof(filename), "%.400s/case_%.50s.md", output_dir, summary->case_id);
 
-    FILE *fp = fopen(filename, "w");
+    FILE *fp = fopen(filename, "wx");
     if (!fp) {
-        LOG_ERROR("Failed to create Markdown case report '%s'", filename);
+        LOG_ERROR("Failed to create Markdown case report '%s': %s", filename, strerror(errno));
         return BOOTO_ERR_IO;
     }
 
