@@ -133,7 +133,7 @@ The shipped DBX, LKM and MBR signatures are illustrative samples, not an authori
 | `Space` | **Toggle Target** | Toggle target disk flag / toggle scanner module |
 | `Enter` | **Mount / Unmount** | Mount target storage strictly READ-ONLY |
 | `Mouse Click` | **Click to Focus** | Focus a pane and select the row under the pointer; clicking a row's checkbox toggles it |
-| `Mouse Wheel` | **Scroll** | Scroll the pane under the pointer (drives, engines, log) |
+| `Mouse Wheel` | **Scroll** | Scroll the pane under the pointer; `↑`/`↓` or `j`/`k` scroll the focused Findings and Reports panes |
 | `F3` | **Unlock LUKS** | Unlock an encrypted target partition read-only |
 | `F4` | **Unlock Storage** | Mount the report partition on the boot USB (asks for its passphrase if encrypted) |
 | `F5` | **Start Scan** | Trigger forensic scanning sequence |
