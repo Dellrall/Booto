@@ -1,6 +1,6 @@
 /**
  * @file test_pkg_integrity.c
- * @brief MD5 vectors and the offline dpkg md5sums integrity check.
+ * @brief MD5 vectors and the offline dpkg md5sums / pacman mtree integrity check.
  */
 #include "test_framework.h"
 #include "crypto_utils.h"
@@ -90,7 +90,7 @@ static void test_detects_modified_files(void) {
         if (strcmp(res->findings[i].file_path, "/usr/bin/ps") == 0) {
             saw_ps = true;
             ASSERT_STR_EQ(res->findings[i].package, "coreutils:amd64", "Package from list name");
-            ASSERT_STR_EQ(res->findings[i].expected_md5, orig_ps, "Expected hash recorded");
+            ASSERT_STR_EQ(res->findings[i].expected_hash, orig_ps, "Expected hash recorded");
         }
         if (strcmp(res->findings[i].file_path, "/usr/bin/login") == 0) saw_login = true;
     }
@@ -103,9 +103,53 @@ static void test_no_dpkg_database(void) {
     TEST_START("test_no_dpkg_database");
     make_root();
     pkg_scan_result_t *res = calloc(1, sizeof(*res));
-    ASSERT_INT_EQ(pkg_integrity_scan_rootfs(g_root, res), BOOTO_ERR_NOT_FOUND, "Non-Debian root -> NOT_FOUND");
+    ASSERT_INT_EQ(pkg_integrity_scan_rootfs(g_root, res), BOOTO_ERR_NOT_FOUND, "No dpkg or pacman database -> NOT_FOUND");
     free(res);
     TEST_PASS("test_no_dpkg_database");
+}
+
+static void test_pacman_mtree(void) {
+    TEST_START("test_pacman_mtree");
+    make_root();
+    char good[65], orig[65], mtree[2048], cmd[256];
+    sha256_buffer_hex((const uint8_t *)"bash binary\n", 12, good);
+    sha256_buffer_hex((const uint8_t *)"original sudo\n", 14, orig);
+    put("usr/bin/bash", "bash binary\n");
+    put("usr/bin/sudo", "trojaned sudo\n");
+    put("usr/lib/my lib.so", "trojaned lib\n");
+    put("usr/share/doc/x", "edited doc\n");
+    snprintf(mtree, sizeof(mtree),
+             "#mtree\n/set type=file uid=0 gid=0 mode=644\n"
+             "./.BUILDINFO time=1.0 size=1 sha256digest=%s\n"
+             "./usr time=1.0 mode=755 type=dir\n"
+             "./usr/bin/bash time=1.0 mode=755 size=12 md5digest=0 sha256digest=%s\n"
+             "./usr/bin/sudo time=1.0 mode=4755 sha256digest=%s\n"
+             "./usr/lib/my\\040lib.so time=1.0 sha256digest=%s\n"
+             "./usr/lib/libx.so time=1.0 type=link link=libx.so.1\n"
+             "./usr/share/doc/x time=1.0 sha256digest=%s\n"
+             "./usr/bin/gone time=1.0 sha256digest=%s\n",
+             orig, good, orig, orig, orig, orig);
+    put("var/lib/pacman/local/sudo-1.9-1/mtree.txt", mtree);
+    put("var/lib/pacman/local/ALPM_DB_VERSION", "9\n");
+    snprintf(cmd, sizeof(cmd), "gzip -nc '%s/var/lib/pacman/local/sudo-1.9-1/mtree.txt' > '%s/var/lib/pacman/local/sudo-1.9-1/mtree'",
+             g_root, g_root);
+    ASSERT_INT_EQ(system(cmd), 0, "gzip mtree");
+
+    pkg_scan_result_t *res = calloc(1, sizeof(*res));
+    booto_error_t err = pkg_integrity_scan_rootfs(g_root, res);
+    ASSERT_INT_EQ(err, BOOTO_OK, "Scan succeeds");
+    ASSERT_INT_EQ(res->packages_checked, 1, "One pacman package");
+    ASSERT_INT_EQ(res->files_checked, 3, "bash, sudo and the escaped-name lib hashed");
+    ASSERT_INT_EQ(res->files_missing, 1, "Removed file counted as missing");
+    ASSERT_INT_EQ(res->threats_detected, 2, "Trojaned sudo and lib flagged");
+    ASSERT_STR_EQ(res->findings[0].file_path, "/usr/bin/sudo", "sudo first in mtree order");
+    ASSERT_STR_EQ(res->findings[0].package, "sudo-1.9-1", "Package from directory name");
+    ASSERT_STR_EQ(res->findings[0].expected_hash, orig, "Expected SHA-256 recorded");
+    ASSERT_STR_EQ(res->findings[1].file_path, "/usr/lib/my lib.so", "Octal escape decoded");
+    free(res);
+    snprintf(cmd, sizeof(cmd), "rm -rf '%s'", g_root);
+    ASSERT_INT_EQ(system(cmd), 0, "cleanup");
+    TEST_PASS("test_pacman_mtree");
 }
 
 int main(void) {
@@ -113,6 +157,7 @@ int main(void) {
     test_md5_vectors();
     test_detects_modified_files();
     test_no_dpkg_database();
+    test_pacman_mtree();
     TEST_SUMMARY();
     return 0;
 }
