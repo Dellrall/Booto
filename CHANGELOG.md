@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Authenticode signature check**: each ESP binary's PKCS#7 signature is now verified (OpenSSL), not just detected. A signed image changed after signing raises `UEFI_AUTHENTICODE_HASH_MISMATCH` (critical); a malformed or broken signature raises `UEFI_AUTHENTICODE_INVALID` (high). Whether the signer is trusted is not checked yet.
 - **MOK list audit**: the firmware audit reads shim's `MokListRT`. A key not shipped by a known distro, or a bare binary hash (trusted without any signature), fails the new "Shim MOK keys known" check: that is how a bootkit gets shim to run unsigned code.
+- **BootNext check**: the firmware audit reads `BootNext` and `BootOrder`. A pending `BootNext` (a one-shot override that runs a loader once, then disappears) fails the new "No pending BootNext" check; otherwise the entry that boots first is shown with its description and loader path.
 
 ## [1.5.4-beta] - 2026-11-08
 
