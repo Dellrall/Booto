@@ -12,6 +12,7 @@
 #include "forensic_scan.h"
 #include "disk_mount.h"
 #include "logger.h"
+#include "quarantine.h"
 
 #include <dirent.h>
 #include <inttypes.h>
@@ -23,6 +24,7 @@
 
 #define SCAN_MOUNT_POINT "/tmp/booto_scan_target"
 #define ESP_MOUNT_POINT "/tmp/booto_esp_target"
+#define MBR_EXPORT_BYTES (1024 * 1024)  /* MBR plus the post-MBR gap where bootkits hide their stage 2 */
 
 static const char *err_name(booto_error_t e) {
     switch (e) {
@@ -129,14 +131,27 @@ static bool find_initramfs(const char *root, char *out, size_t out_size) {
     return true;
 }
 
+/* No-op when quarantine is off; a failed export is logged and the scan goes on. */
+static void export_file(quarantine_t *q, const char *prefix, const char *root, const char *path, uint64_t max) {
+    if (!q || !path[0]) return;
+    booto_error_t e = quarantine_add(q, prefix, root, path, max);
+    if (e != BOOTO_OK) LOG_WARN("Quarantine: could not export %s: %s", path, err_name(e));
+}
+
+static void export_uefi(quarantine_t *q, const uefi_scan_result_t *u, const char *esp_root) {
+    for (int i = 0; i < u->bootkits_detected && i < MAX_UEFI_THREATS; i++)
+        export_file(q, "uefi", esp_root, u->findings[i].file_path, QUARANTINE_MAX_ITEM);
+}
+
 /* UEFI engine: <root>/boot/efi if it holds EFI files, else the ESP(s) on target_dev's disk, mounted read-only. */
-static void run_uefi(forensic_scan_report_t *out, const char *target_dev, bool have_root) {
+static void run_uefi(forensic_scan_report_t *out, const char *target_dev, bool have_root, quarantine_t *q) {
     char note[96];
     if (have_root) {
         char path[512];
         snprintf(path, sizeof(path), "%.256s/boot/efi", out->scan_root);
         booto_error_t e = uefi_inspect_esp_directory(path, &out->uefi);
         if (e == BOOTO_OK && out->uefi.efi_files_scanned > 0) {
+            export_uefi(q, &out->uefi, path);
             snprintf(out->esp_dev, sizeof(out->esp_dev), "%.118s/boot/efi", out->scan_root);
             snprintf(note, sizeof(note), "ESP: %.90s", out->esp_dev);
             set_status(out, SCAN_MOD_UEFI, SCAN_STATUS_OK, e, note);
@@ -190,6 +205,7 @@ static void run_uefi(forensic_scan_report_t *out, const char *target_dev, bool h
         }
         memset(&out->uefi, 0, sizeof(out->uefi));
         e = uefi_inspect_esp_directory(ESP_MOUNT_POINT, &out->uefi);
+        if (e == BOOTO_OK) export_uefi(q, &out->uefi, ESP_MOUNT_POINT);
         booto_error_t ue = disk_unmount(ESP_MOUNT_POINT);
         if (ue != BOOTO_OK) LOG_WARN("Failed to unmount %s: %s", ESP_MOUNT_POINT, err_name(ue));
         snprintf(out->esp_dev, sizeof(out->esp_dev), "%.127s", esp);
@@ -210,7 +226,8 @@ static void run_uefi(forensic_scan_report_t *out, const char *target_dev, bool h
 }
 
 booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, const bool *enabled,
-                                forensic_scan_progress_cb cb, void *user, forensic_scan_report_t *out) {
+                                const char *quarantine_dir, forensic_scan_progress_cb cb, void *user,
+                                forensic_scan_report_t *out) {
     if (!out || (!target_dev && !rootfs_dir)) return BOOTO_ERR_INVALID_ARG;
     memset(out, 0, sizeof(*out));
     if (target_dev) snprintf(out->target_dev, sizeof(out->target_dev), "%.127s", target_dev);
@@ -229,13 +246,16 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
     bool have_root = (out->mount_err == BOOTO_OK);
     const char *root = out->scan_root;
     char path[512];
+    quarantine_t *q = quarantine_dir ? quarantine_open(quarantine_dir) : NULL;
+    if (quarantine_dir && !q) LOG_ERROR("Out of memory: quarantine export disabled");
 
     if (begin(out, SCAN_MOD_MBR, enabled, cb, user)) {
         if (!target_dev) set_status(out, SCAN_MOD_MBR, SCAN_STATUS_SKIPPED, BOOTO_OK, "no raw device");
         else set_result(out, SCAN_MOD_MBR, mbr_audit_device(target_dev, &out->mbr));
+        if (out->mbr.threats_detected > 0) export_file(q, "mbr", NULL, target_dev, MBR_EXPORT_BYTES);
     }
 
-    if (begin(out, SCAN_MOD_UEFI, enabled, cb, user)) run_uefi(out, target_dev, have_root);
+    if (begin(out, SCAN_MOD_UEFI, enabled, cb, user)) run_uefi(out, target_dev, have_root, q);
 
     if (begin(out, SCAN_MOD_KERNEL, enabled, cb, user)) {
         if (!have_root) {
@@ -243,6 +263,8 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
         } else {
             snprintf(path, sizeof(path), "%.256s/lib/modules", root);
             set_result(out, SCAN_MOD_KERNEL, kernel_inspect_directory(path, &out->kernel));
+            for (int i = 0; i < out->kernel.threats_detected && i < MAX_KERNEL_THREATS; i++)
+                export_file(q, "kernel", root, out->kernel.findings[i].file_path, QUARANTINE_MAX_ITEM);
         }
     }
 
@@ -253,12 +275,18 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
             set_status(out, SCAN_MOD_INITRAMFS, SCAN_STATUS_SKIPPED, BOOTO_OK, "no initramfs found");
         } else {
             set_result(out, SCAN_MOD_INITRAMFS, initramfs_audit_file(path, &out->initramfs));
+            if (out->initramfs.threats_detected > 0) export_file(q, "initramfs", root, path, QUARANTINE_MAX_ITEM);
         }
     }
 
     if (begin(out, SCAN_MOD_PRELOAD, enabled, cb, user)) {
         if (!have_root) set_status(out, SCAN_MOD_PRELOAD, SCAN_STATUS_ERROR, out->mount_err, rootfs_note);
         else set_result(out, SCAN_MOD_PRELOAD, preload_scan_rootfs(root, &out->preload));
+        for (int i = 0; i < out->preload.threats_detected && i < MAX_PRELOAD_THREATS; i++) {
+            const char *lib = out->preload.findings[i].target_library;
+            snprintf(path, sizeof(path), "%.256s%s%.250s", root, lib[0] == '/' ? "" : "/", lib);
+            export_file(q, "preload", root, lib[0] ? path : "", QUARANTINE_MAX_ITEM);
+        }
     }
 
     if (begin(out, SCAN_MOD_EXT4, enabled, cb, user)) {
@@ -280,6 +308,10 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
             if (e == BOOTO_ERR_NOT_FOUND) {
                 set_status(out, SCAN_MOD_PKG, SCAN_STATUS_SKIPPED, BOOTO_OK, "no dpkg database (not Debian-based)");
             } else if (e == BOOTO_OK) {
+                for (int i = 0; i < out->pkg.threats_detected && i < MAX_PKG_THREATS; i++) {
+                    snprintf(path, sizeof(path), "%.256s%.255s", root, out->pkg.findings[i].file_path);
+                    export_file(q, "pkg", root, path, QUARANTINE_MAX_ITEM);
+                }
                 char note[96];
                 snprintf(note, sizeof(note), "%d files verified, %d listed files missing", out->pkg.files_checked,
                          out->pkg.files_missing);
@@ -289,6 +321,8 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
             }
         }
     }
+
+    if (q) out->quarantined = quarantine_close(q, out->quarantine_zip, sizeof(out->quarantine_zip));
 
     if (out->mounted) {
         booto_error_t ue = disk_unmount(SCAN_MOUNT_POINT);

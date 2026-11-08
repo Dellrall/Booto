@@ -145,7 +145,7 @@ static int run_cli(booto_context_t *ctx) {
     }
     booto_error_t e = forensic_scan_run(ctx->target_dev[0] ? ctx->target_dev : NULL,
                                         ctx->target_rootfs[0] ? ctx->target_rootfs : NULL,
-                                        NULL, scan_progress, NULL, rep);
+                                        NULL, NULL, scan_progress, NULL, rep);
     if (e != BOOTO_OK) {
         LOG_ERROR("Scan could not run (error %d)", e);
         free(rep);
