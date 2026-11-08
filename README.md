@@ -81,8 +81,9 @@ sudo ./scripts/setup_usb.sh /dev/sdb
 # Cap the reports/persistence partition (default: rest of the drive); --no-encrypt skips the passphrase:
 sudo ./scripts/setup_usb.sh --data-size=512M --no-encrypt /dev/sdb
 # The live system loads only from removable media (USB stick, CD/DVD); a USB SSD that
-# reports itself as non-removable will not boot it. This keeps a /live tree planted on the
-# suspect disk from replacing the forensic system.
+# reports itself as non-removable needs the "USB not detected" GRUB entry, which finds this
+# build's ISO by UUID. The default keeps a /live tree planted on the suspect disk from
+# replacing the forensic system.
 ```
 
 ---

@@ -12,7 +12,7 @@ How to put Booto on a USB stick, boot a suspect machine from it, scan the machin
 | Firmware | UEFI or legacy BIOS; the ISO boots in both modes. |
 | Secure Boot | **Must be turned off** in the firmware setup. Booto's bootloader is not signed. The firmware audit then reports Secure Boot as off; that is expected for this boot. |
 | RAM | 2 GiB minimum (the QEMU test VM uses 2048 MiB). The live system runs from RAM and never writes to the internal disks. |
-| Boot source | Must allow booting from USB. The live system only loads from removable media (USB stick, CD/DVD). A USB SSD that reports itself as non-removable will not boot it. |
+| Boot source | Must allow booting from USB. The live system only loads from removable media (USB stick, CD/DVD). A USB SSD that reports itself as non-removable boots only via the "USB not detected" GRUB entry (finds this build's ISO by UUID). |
 | Disk being scanned | Any disk Linux can mount read-only. The package check needs a Debian-based system (Debian, Ubuntu, Mint, Kali); other systems show it as `SKIPPED`. Encrypted (LUKS) disks can be unlocked read-only from the TUI (`F3`). |
 
 ### USB stick
