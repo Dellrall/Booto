@@ -375,6 +375,11 @@ static size_t encode_cell(uint32_t cp, char *out) {
 
 size_t term_sgr(uint32_t attr, char *out, size_t len) {
     int fg = (int)((attr >> 4) & 0x1F), bg = (int)((attr >> 9) & 0x1F);
+    const char *nc = getenv("NO_COLOR"); // https://no-color.org: drop colors; a colored band (keycap, verdict) turns reverse
+    if (nc && *nc) {
+        if (bg >= 1 && bg <= 16) attr |= ATTR_REVERSE;
+        fg = bg = 0;
+    }
     char fgs[8] = "", bgs[8] = "";
     if (fg >= 1 && fg <= 16) snprintf(fgs, sizeof(fgs), ";%d", fg <= 8 ? 29 + fg : 81 + fg);
     if (bg >= 1 && bg <= 16) snprintf(bgs, sizeof(bgs), ";%d", bg <= 8 ? 39 + bg : 91 + bg);
