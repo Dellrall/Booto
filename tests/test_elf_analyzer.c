@@ -46,7 +46,7 @@ static void test_rootkit_lkm_detection(void) {
     TEST_START("test_rootkit_lkm_detection");
 
     // Create a mock directory with a mock .ko file
-    system("mkdir -p /tmp/mock_lkm_test");
+    ASSERT_TRUE(system("mkdir -p /tmp/mock_lkm_test") == 0, "mkdir failed");
     FILE *fp = fopen("/tmp/mock_lkm_test/fake_diamorphine.ko", "w");
     if (fp) {
         fprintf(fp, "fake payload");
@@ -65,7 +65,7 @@ static void test_rootkit_lkm_detection(void) {
     const char *sev_str = kernel_severity_to_string(SEVERITY_CRITICAL);
     ASSERT_TRUE(sev_str != NULL, "Severity string must not be null");
 
-    system("rm -rf /tmp/mock_lkm_test");
+    ASSERT_TRUE(system("rm -rf /tmp/mock_lkm_test") == 0, "cleanup failed");
     TEST_PASS("test_rootkit_lkm_detection");
 }
 

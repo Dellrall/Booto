@@ -63,7 +63,7 @@ static void test_synthetic_pe32_plus_parser(void) {
     ASSERT_TRUE(info.has_authenticode, "Authenticode certificate directory must be detected");
 
     // Write buffer to temp file to test file parsing
-    system("mkdir -p /tmp/mock_esp_test/EFI/BOOT");
+    ASSERT_TRUE(system("mkdir -p /tmp/mock_esp_test/EFI/BOOT") == 0, "mkdir failed");
     FILE *fp = fopen("/tmp/mock_esp_test/EFI/BOOT/BOOTX64.EFI", "wb");
     if (fp) {
         fwrite(pe_buf, 1, sizeof(pe_buf), fp);
@@ -82,7 +82,7 @@ static void test_synthetic_pe32_plus_parser(void) {
     const char *sev = uefi_severity_to_string(UEFI_SEVERITY_CRITICAL);
     ASSERT_TRUE(sev != NULL, "Severity string must not be NULL");
 
-    system("rm -rf /tmp/mock_esp_test");
+    ASSERT_TRUE(system("rm -rf /tmp/mock_esp_test") == 0, "cleanup failed");
     TEST_PASS("test_synthetic_pe32_plus_parser");
 }
 

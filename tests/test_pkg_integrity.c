@@ -68,7 +68,7 @@ static void test_detects_modified_files(void) {
     put("usr/sbin/sshd", "diverted sshd\n");     /* diverted: content legitimately differs */
     put("usr/share/doc/x/README", "edited doc\n"); /* not a system directory: ignored */
     snprintf(list, sizeof(list), "%s/usr/bin/login", g_root);
-    symlink("/etc/hostname", list); /* absolute target would escape the root if followed */
+    ASSERT_TRUE(symlink("/etc/hostname", list) == 0, "symlink failed"); /* absolute target would escape the root if followed */
     char orig_ps[33];
     md5_hex("original ps\n", orig_ps);
     snprintf(list, sizeof(list),

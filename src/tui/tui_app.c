@@ -415,7 +415,7 @@ static void export_case_report(tui_app_state_t *app) {
     char log_buf[512];
     snprintf(log_buf, sizeof(log_buf), "Exported case report %.31s to %.200s", case_id, saved_md);
     tui_app_append_log(app, LOG_LEVEL_INFO, NULL, log_buf);
-    snprintf(app->status_msg, sizeof(app->status_msg), "Report saved to %.200s%s", saved_md,
+    snprintf(app->status_msg, sizeof(app->status_msg), "Report saved to %.180s%s", saved_md,
              on_usb ? "." : " (RAM only: lost at power-off, press F4 to unlock storage).");
 }
 

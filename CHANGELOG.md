@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Compact case reports**: the JSON report is a single line (same keys), and the Markdown report is a short header plus one engine table, with engine names taken from the scanner (new engines appear automatically). Together about 1.3 KB per case instead of 2.2 KB.
 - Report seal files name the bare report file, so `sha256sum -c case_*.sha256` works from wherever the cases directory is mounted.
 
+### Fixed
+- **Builds on glibc that enforces `_FORTIFY_SOURCE`** (e.g. Fedora 44, GCC 16): the default flags now include `-O2`, without which fortify is inactive and newer glibc fails the `-Werror` build. With fortify active, the TUI frame flush retries partial `write()`s instead of dropping part of a frame, and the "Report saved" status line keeps its RAM-only warning instead of cutting it off on a long path.
+- The CMake build links again: `src/pkg_integrity.c` was missing from its source list.
+
 ## [1.4.0] - 2026-11-05
 
 ### Added
