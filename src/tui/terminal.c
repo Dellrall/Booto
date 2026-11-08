@@ -231,7 +231,32 @@ void term_get_dimensions(int *rows, int *cols) {
     if (cols) *cols = g_cols;
 }
 
+#define MAX_CLICK_ZONES 32
+typedef struct {
+    int x0, x1, y;
+    key_type_t type;
+    int ch;
+} click_zone_t;
+static click_zone_t g_zones[MAX_CLICK_ZONES];
+static int g_zone_count = 0;
+
+void term_add_click_zone(int x0, int x1, int y, key_type_t type, int ch) {
+    if (g_zone_count < MAX_CLICK_ZONES && x0 < x1) g_zones[g_zone_count++] = (click_zone_t){x0, x1, y, type, ch};
+}
+
+bool term_apply_click_zone(input_event_t *event) {
+    if (event->type != KEY_MOUSE_CLICK || event->mouse_btn != 0) return false;
+    for (int i = g_zone_count - 1; i >= 0; i--) {
+        if (event->mouse_y == g_zones[i].y && event->mouse_x >= g_zones[i].x0 && event->mouse_x < g_zones[i].x1) {
+            *event = (input_event_t){.type = g_zones[i].type, .ch = g_zones[i].ch};
+            return true;
+        }
+    }
+    return false;
+}
+
 void term_clear(void) {
+    g_zone_count = 0;
     if (!g_back_chars || !g_back_attrs) return;
     size_t cells = (size_t)g_rows * (size_t)g_cols;
     memset(g_back_chars, 0, cells * sizeof(uint32_t)); /* 0 = empty cell, painted as a space */

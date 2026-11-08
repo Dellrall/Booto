@@ -106,9 +106,10 @@ static void render_bottom_bar(tui_app_state_t *app, int rows, int cols) {
     static const struct {
         const char *key;
         const char *label;
+        key_type_t type;
     } hints[] = {
-        {" F5 ", " Scan"},       {" F6 ", " Export"}, {" F3 ", " Unlock"},
-        {" Tab ", " Next pane"}, {" Alt+Z ", " Zoom"}, {" F10 ", " Exit"},
+        {" F5 ", " Scan", KEY_F5},       {" F6 ", " Export", KEY_F6}, {" F3 ", " Unlock", KEY_F3},
+        {" Tab ", " Next pane", KEY_TAB}, {" Alt+Z ", " Zoom", KEY_ALT_Z}, {" F10 ", " Exit", KEY_F10},
     };
     enum { HINT_COUNT = (int)(sizeof(hints) / sizeof(hints[0])) };
     static const int drop_order[] = {4, 3, 2, 1}; /* Zoom, Tab, F3, F6; F5 and F10 always stay */
@@ -135,8 +136,10 @@ static void render_bottom_bar(tui_app_state_t *app, int rows, int cols) {
     x = hx;
     for (int i = 0; i < HINT_COUNT; i++) {
         if (!shown[i]) continue;
+        int x0 = x;
         put_clip(&x, y, cols - 1, hints[i].key, A_KEYCAP);
         put_clip(&x, y, cols - 1, hints[i].label, A_TEXT);
+        term_add_click_zone(x0, x, y, hints[i].type, 0);
         x += 2;
     }
 }
@@ -153,9 +156,11 @@ static void modal_frame(int rows, int cols, int w, int h, const char *title, int
 }
 
 /* Draws a keycap and its label at (x, y), clipped to end; returns the x after the label. */
-static int modal_key(int x, int y, int end, const char *key, const char *label) {
+static int modal_key(int x, int y, int end, const char *key, const char *label, key_type_t type) {
+    int x0 = x;
     put_clip(&x, y, end, key, A_KEYCAP);
     put_clip(&x, y, end, label, A_TEXT);
+    term_add_click_zone(x0, x, y, type, 0);
     return x;
 }
 
@@ -168,17 +173,20 @@ static void render_exit_modal(tui_app_state_t *app, int rows, int cols) {
         const char *key;
         const char *label;
         int dy;
+        key_type_t type;
+        int ch;
     } items[] = {
-        {" P ", "Power off", 2},
-        {" R ", "Reboot", 3},
-        {" S ", "Open a root shell", 4},
-        {" Esc ", "Back to Booto", 6},
+        {" P ", "Power off", 2, KEY_CHAR, 'p'},
+        {" R ", "Reboot", 3, KEY_CHAR, 'r'},
+        {" S ", "Open a root shell", 4, KEY_CHAR, 's'},
+        {" Esc ", "Back to Booto", 6, KEY_ESC, 0},
     };
     for (size_t i = 0; i < sizeof(items) / sizeof(items[0]); i++) {
         int x = mx + 3;
         put_clip(&x, my + items[i].dy, end, items[i].key, A_KEYCAP);
         x = mx + 3 + 7; /* labels aligned after the widest keycap (" Esc ") */
         put_clip(&x, my + items[i].dy, end, items[i].label, A_TEXT);
+        term_add_click_zone(mx + 3, x, my + items[i].dy, items[i].type, items[i].ch);
     }
 }
 
@@ -207,8 +215,8 @@ static void render_luks_modal(tui_app_state_t *app, int rows, int cols) {
         put_clip(&x, my + 6, end, app->luks_status_msg, A_BAD);
     }
 
-    x = modal_key(mx + 3, my + 8, end, " Enter ", persist ? " Unlock" : " Unlock read-only");
-    modal_key(x + 3, my + 8, end, " Esc ", persist ? " Skip (reports stay in RAM)" : " Cancel");
+    x = modal_key(mx + 3, my + 8, end, " Enter ", persist ? " Unlock" : " Unlock read-only", KEY_ENTER);
+    modal_key(x + 3, my + 8, end, " Esc ", persist ? " Skip (reports stay in RAM)" : " Cancel", KEY_ESC);
 }
 
 static void render_unfocused_leaves(wm_node_t *node, wm_node_t *focused, tui_app_state_t *app) {
@@ -565,6 +573,7 @@ int tui_app_run(booto_context_t *ctx) {
         // 5. Input event polling (the timeout keeps the loop redrawing ~20x/s while a scan runs)
         input_event_t event;
         if (term_poll_event(&event, 50)) {
+            term_apply_click_zone(&event); /* bottom-bar hints and modal buttons act as their keys */
             if (app.show_exit_modal) {
                 if (event.type == KEY_CHAR && (event.ch == 'p' || event.ch == 'P' || event.ch == '1')) {
                     prepare_exit(&app, rows, cols);
