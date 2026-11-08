@@ -62,7 +62,7 @@ static void test_roundtrip(void) {
              "assert z.read(i,pwd=b\"infected\")==b\"#!/bin/sh\\necho pwned\\n\"\n"
              "assert z.read(\"pkg/lib/big.bin.malware\",pwd=b\"infected\")==b\"0123\"\n"
              "try:\n z.read(i,pwd=b\"wrong\"); sys.exit(1)\n"
-             "except RuntimeError: pass' '%s'",
+             "except (RuntimeError, zipfile.BadZipFile): pass' '%s'",  /* ZipCrypto checks 1 byte: ~1/256 wrong passwords pass it and fail the CRC instead */
              zip);
     ASSERT_INT_EQ(system(cmd), 0, "python zipfile decrypts with password infected");
     TEST_PASS("test_roundtrip");
