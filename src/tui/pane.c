@@ -107,8 +107,9 @@ static void draw_frame(const wm_node_t *n, bool focused, const char *title) {
     term_draw_box(n->x, n->y, n->w, n->h, title, focused ? A_FRAME : A_MUTED, focused ? A_STRONG : A_TEXT);
 }
 
+/* The cursor row reverses each cell instead of repainting it, so a target, a failure or a count keeps its color. */
 static uint32_t row_attr(bool cursor_row, uint32_t attr) {
-    return cursor_row ? A_CURSOR : attr;
+    return cursor_row ? (attr & ~(uint32_t)ATTR_DIM) | ATTR_REVERSE : attr;
 }
 
 /* First visible index of a list so that `cursor` stays on screen. */
