@@ -41,6 +41,11 @@ int logger_init(log_level_t min_level, const char *log_file);
 void logger_set_callback(log_callback_fn callback, void *user_data);
 
 /**
+ * @brief True when f is a terminal and NO_COLOR is unset or empty (https://no-color.org).
+ */
+int logger_use_color(FILE *f);
+
+/**
  * @brief Close log files and cleanup logger.
  */
 void logger_shutdown(void);

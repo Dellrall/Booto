@@ -17,6 +17,7 @@
 #include <string.h>
 #include <pthread.h>
 #include <time.h>
+#include <unistd.h>
 
 /* Guards every g_* below; held while dispatching so the callback is serialised. */
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -45,6 +46,11 @@ static const char *level_to_color(log_level_t level) {
         case LOG_LEVEL_CRITICAL: return "\033[35;1m"; // Bold Magenta
         default:                 return "\033[0m";
     }
+}
+
+int logger_use_color(FILE *f) {
+    const char *nc = getenv("NO_COLOR");
+    return (!nc || !*nc) && isatty(fileno(f));
 }
 
 int logger_init(log_level_t min_level, const char *log_file) {
@@ -105,8 +111,9 @@ void log_message(log_level_t level, const char *fmt, ...) {
 
     // 1. Console only when no UI callback owns the screen (raw stderr would paint over the TUI)
     if (!g_callback) {
-        fprintf(stderr, "%s[%s] [%s]\033[0m %s\n", level_to_color(level), time_buf,
-                level_to_string(level), msg_buf);
+        int color = logger_use_color(stderr);
+        fprintf(stderr, "%s[%s] [%s]%s %s\n", color ? level_to_color(level) : "", time_buf,
+                level_to_string(level), color ? "\033[0m" : "", msg_buf);
     }
 
     // 2. Output to log file if configured
