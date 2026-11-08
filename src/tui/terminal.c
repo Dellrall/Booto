@@ -548,6 +548,18 @@ static size_t parse_input(const unsigned char *buf, size_t n, input_event_t *eve
             if (buf[3] >= 'A' && buf[3] <= 'E') event->type = console_fkeys[buf[3] - 'A'];
             return 4;
         }
+        if (buf[2] == 'M') {
+            /* Legacy X10 mouse report, the only kind the Linux console sends (via gpm): ESC [ M btn+32 x+33 y+33 */
+            if (n < 6) return n;
+            int btn = buf[3] - 32;
+            if (!(btn & 32) && ((btn & 64) || (btn & 3) != 3)) { /* skip drag motion and releases (low bits 3) */
+                event->type = (btn & 64) ? ((btn & 1) ? KEY_MOUSE_WHEEL_DOWN : KEY_MOUSE_WHEEL_UP) : KEY_MOUSE_CLICK;
+                event->mouse_btn = btn;
+                event->mouse_x = buf[4] - 33;
+                event->mouse_y = buf[5] - 33;
+            }
+            return 6;
+        }
         size_t end = 2;
         while (end < n && (buf[end] < 0x40 || buf[end] > 0x7E)) end++;
         if (end == n) return n; /* truncated sequence: drop it */
