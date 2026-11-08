@@ -61,6 +61,7 @@ typedef struct {
     bool verbose;
     bool mock_drives;
     bool expert_firmware;      /**< Slow, root-only NVRAM scan and SPI flash dump (-x) */
+    bool quarantine;           /**< Export flagged files to <persistence_dir>/quarantine (-q) */
     char target_dev[128];      /**< Raw block device to scan (-t) */
     char target_rootfs[512];   /**< Already-available rootfs directory to inspect (-s) */
     char persistence_dir[512]; /**< Case report output directory (-p) */
