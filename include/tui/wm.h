@@ -105,6 +105,15 @@ void wm_adjust_split_ratio(wm_tree_t *tree, float delta);
  */
 bool wm_close_focused(wm_tree_t *tree);
 
+/** The split whose shared border passes through (x, y), or NULL (for dragging a border with the mouse). */
+wm_node_t *wm_find_divider_at(wm_node_t *node, int x, int y);
+
+/** Moves split's border to column x (left/right split) or row y (top/bottom split), within the minimum pane sizes. */
+void wm_move_divider(wm_tree_t *tree, wm_node_t *split, int x, int y);
+
+/** Moves the focused pane's nearest border on dir's axis by cells in dir (KEY_LEFT/RIGHT/UP/DOWN); false if none. */
+bool wm_resize_focused(wm_tree_t *tree, key_type_t dir, int cells);
+
 /**
  * @brief Find leaf node under a given (x, y) coordinate (for mouse clicks).
  */

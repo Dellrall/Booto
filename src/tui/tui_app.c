@@ -30,6 +30,8 @@
 
 static tui_app_state_t *g_current_app = NULL;
 
+#define CTRL_R 18 /* raw-mode byte for Ctrl+R */
+
 static void tui_logger_hook(log_level_t level, const char *timestamp, const char *msg, void *user_data) {
     (void)user_data;
     if (g_current_app) {
@@ -107,12 +109,14 @@ static void render_bottom_bar(tui_app_state_t *app, int rows, int cols) {
         const char *key;
         const char *label;
         key_type_t type;
+        int ch;
     } hints[] = {
-        {" F5 ", " Scan", KEY_F5},       {" F6 ", " Export", KEY_F6}, {" F3 ", " Unlock", KEY_F3},
-        {" Tab ", " Next pane", KEY_TAB}, {" Alt+Z ", " Zoom", KEY_ALT_Z}, {" F10 ", " Exit", KEY_F10},
+        {" F5 ", " Scan", KEY_F5, 0},       {" F6 ", " Export", KEY_F6, 0}, {" F3 ", " Unlock", KEY_F3, 0},
+        {" Tab ", " Next pane", KEY_TAB, 0}, {" Alt+Z ", " Zoom", KEY_ALT_Z, 0}, {" ^R ", " Resize", KEY_CHAR, CTRL_R},
+        {" F10 ", " Exit", KEY_F10, 0},
     };
     enum { HINT_COUNT = (int)(sizeof(hints) / sizeof(hints[0])) };
-    static const int drop_order[] = {4, 3, 2, 1}; /* Zoom, Tab, F3, F6; F5 and F10 always stay */
+    static const int drop_order[] = {5, 4, 3, 2, 1}; /* Resize, Zoom, Tab, F3, F6; F5 and F10 always stay */
     bool shown[HINT_COUNT];
     int hw = -2;
     for (int i = 0; i < HINT_COUNT; i++) {
@@ -139,7 +143,7 @@ static void render_bottom_bar(tui_app_state_t *app, int rows, int cols) {
         int x0 = x;
         put_clip(&x, y, cols - 1, hints[i].key, A_KEYCAP);
         put_clip(&x, y, cols - 1, hints[i].label, A_TEXT);
-        term_add_click_zone(x0, x, y, hints[i].type, 0);
+        term_add_click_zone(x0, x, y, hints[i].type, hints[i].ch);
         x += 2;
     }
 }
@@ -539,6 +543,8 @@ int tui_app_run(booto_context_t *ctx) {
         else report_persist_result(&app, persistence_unlock(&app.persist, NULL));
     }
 
+    bool resize_mode = false;
+    wm_node_t *drag_split = NULL; /* split whose border the mouse is dragging */
     while (app.running) {
         if (atomic_load(&app.scan_done)) finish_forensic_scan(&app);
 
@@ -659,7 +665,31 @@ int tui_app_run(booto_context_t *ctx) {
                 continue;
             }
 
-            if (event.type == KEY_F10 || (event.type == KEY_CHAR && (event.ch == 'q' || event.ch == 'Q'))) {
+            bool mouse = event.type == KEY_MOUSE_CLICK || event.type == KEY_MOUSE_WHEEL_UP ||
+                         event.type == KEY_MOUSE_WHEEL_DOWN || event.type == KEY_MOUSE_DRAG || event.type == KEY_MOUSE_RELEASE;
+            if (!mouse) drag_split = NULL; /* a key may split panes; never hold a split pointer across it */
+            if (resize_mode && !mouse) {
+                /* Ctrl+R mode: h/j/k/l or arrows move the focused pane's border 1 cell, H/J/K/L by 5. */
+                int c = event.type == KEY_CHAR ? event.ch : 0;
+                key_type_t dir = c == 'h' || c == 'H' ? KEY_LEFT : c == 'l' || c == 'L' ? KEY_RIGHT
+                               : c == 'k' || c == 'K' ? KEY_UP : c == 'j' || c == 'J' ? KEY_DOWN
+                               : (event.type >= KEY_UP && event.type <= KEY_RIGHT) ? event.type : KEY_NONE;
+                if (dir != KEY_NONE) {
+                    if (!wm_resize_focused(app.wm, dir, c >= 'A' && c <= 'Z' ? 5 : 1))
+                        snprintf(app.status_msg, sizeof(app.status_msg), "No border to move that way%s.",
+                                 app.wm->zoomed_leaf ? " while zoomed (Alt+Z)" : "");
+                } else if (event.type == KEY_ESC || event.type == KEY_ENTER || c == CTRL_R || c == 'q') {
+                    resize_mode = false;
+                    snprintf(app.status_msg, sizeof(app.status_msg), "Layout kept.");
+                }
+                continue;
+            }
+
+            if (event.type == KEY_CHAR && event.ch == CTRL_R) {
+                resize_mode = true;
+                snprintf(app.status_msg, sizeof(app.status_msg),
+                         "Resize: h/j/k/l move the border, H/J/K/L by 5, Esc when done.");
+            } else if (event.type == KEY_F10 || (event.type == KEY_CHAR && (event.ch == 'q' || event.ch == 'Q'))) {
                 app.show_exit_modal = true;
             } else if (event.type == KEY_F3 && atomic_load(&app.scan_active)) {
                 snprintf(app.status_msg, sizeof(app.status_msg), "LUKS unlock is disabled while a scan runs.");
@@ -731,8 +761,15 @@ int tui_app_run(booto_context_t *ctx) {
                 } else {
                     export_case_report(&app);
                 }
-            } else if (event.type == KEY_MOUSE_CLICK || event.type == KEY_MOUSE_WHEEL_UP || event.type == KEY_MOUSE_WHEEL_DOWN) {
-                wm_node_t *hit = wm_find_leaf_at(app.wm->root, event.mouse_x, event.mouse_y);
+            } else if (event.type == KEY_MOUSE_DRAG || event.type == KEY_MOUSE_RELEASE) {
+                /* Live drag where the terminal reports motion; the Linux console sends only the release, which still lands it. */
+                if (drag_split) wm_move_divider(app.wm, drag_split, event.mouse_x, event.mouse_y);
+                if (event.type == KEY_MOUSE_RELEASE) drag_split = NULL;
+            } else if (mouse) {
+                wm_node_t *border = event.type == KEY_MOUSE_CLICK && event.mouse_btn == 0 && !app.wm->zoomed_leaf
+                                        ? wm_find_divider_at(app.wm->root, event.mouse_x, event.mouse_y) : NULL;
+                wm_node_t *hit = border ? NULL : wm_find_leaf_at(app.wm->root, event.mouse_x, event.mouse_y);
+                drag_split = border;
                 if (hit) {
                     app.wm->focused_leaf = hit;
                     if (event.type != KEY_MOUSE_CLICK) {

@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **ESP scan by content**: every file starting with `MZ` is inspected, not only `*.efi`. A payload renamed to `grubx64.bak`, or a systemd-boot kernel without an extension, is no longer skipped.
 
 ### Added
+- **Resizable panes**: drag any pane border with the mouse, or press Ctrl+R and move the focused pane's border with h/j/k/l or the arrows (H/J/K/L move 5 cells; Esc finishes). On the Linux console, which reports no motion, the border jumps to where the button is released.
 - **Text editors on the live ISO**: `vi` (vim-tiny) and `nano` are available from the root shell (F10, then S).
 - **Clickable buttons**: the bottom-bar hints (F5, F6, F3, Tab, Alt+Z, F10) and the Exit and LUKS window buttons respond to a left click, the same as their keys.
 - **SPI image analysis**: after an expert-mode dump, the image is walked: firmware volumes and PE images are counted, LZMA sections are inflated by the sandboxed `xz`, and a Windows executable inside the firmware (how WPBT-style and MosaicRegressor-style implants drop an OS payload) is reported as suspicious (medium). Some vendor tools do this too.
