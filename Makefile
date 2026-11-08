@@ -60,14 +60,14 @@ $(FLAGS_STAMP):
 
 $(BUILDDIR)/%.o: $(SRCDIR)/%.c include/version.h $(FLAGS_STAMP) | $(BUILDDIR)
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
+	$(CC) $(CFLAGS) $(INCLUDES) -MMD -MP -c $< -o $@
 
 $(TARGET): $(BUILDDIR)/main.o $(OBJECTS) | $(BINDIR)
 	$(CC) $(CFLAGS) $^ $(LDFLAGS) -o $@
 
 $(BUILDDIR)/main.o: $(SRCDIR)/main.c include/version.h $(FLAGS_STAMP) | $(BUILDDIR)
 	@mkdir -p $(BUILDDIR)
-	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
+	$(CC) $(CFLAGS) $(INCLUDES) -MMD -MP -c $< -o $@
 
 $(BUILDDIR):
 	mkdir -p $(BUILDDIR)
@@ -76,7 +76,7 @@ $(BINDIR):
 	mkdir -p $(BINDIR)
 
 $(BUILDDIR)/test_%: $(TESTDIR)/test_%.c $(OBJECTS) | $(BUILDDIR)
-	$(CC) $(CFLAGS) $(INCLUDES) $< $(OBJECTS) $(LDFLAGS) -o $@
+	$(CC) $(CFLAGS) $(INCLUDES) -MMD -MP $< $(OBJECTS) $(LDFLAGS) -o $@
 
 test: version $(TEST_BINS)
 	@echo "--- Running Test Suite ---"
@@ -151,3 +151,6 @@ iso: all
 
 clean:
 	rm -rf $(BUILDDIR) $(BINDIR) include/version.h *.gcda *.gcno
+
+# Header dependencies written by -MMD: a changed header rebuilds every object that includes it.
+-include $(OBJECTS:.o=.d) $(BUILDDIR)/main.d $(TEST_BINS:=.d)
