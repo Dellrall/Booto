@@ -140,6 +140,16 @@ static void run_expert_firmware(const char *dir) {
     if (e == BOOTO_OK)
         printf("SPI flash: saved %s%s\n  SHA-256 %s\n  Compare it with the vendor's firmware image for this model.\n", image,
                bios_only ? " (BIOS region only: the chipset locks the rest)" : "", hex);
+    if (e == BOOTO_OK) {
+        fw_spi_report_t spi;
+        if (firmware_spi_analyze(image, &spi) == BOOTO_OK) {
+            printf("  %d firmware volume(s), %d/%d LZMA section(s) inflated, %d PE image(s)\n", spi.volumes,
+                   spi.lzma_inflated, spi.lzma_sections, spi.pe_images);
+            if (spi.windows_pe)
+                printf("  SUSPICIOUS (medium): %d Windows executable(s) inside the firmware; implants drop OS payloads "
+                       "this way (some vendor tools do too)\n", spi.windows_pe);
+        }
+    }
     else if (e == BOOTO_ERR_NOT_FOUND)
         printf("SPI flash: flashrom is not installed\n");
     else

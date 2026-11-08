@@ -1103,6 +1103,62 @@ booto_error_t firmware_spi_dump(const char *out_path, char sha256_hex[65], bool 
     return sha256_file_hex(out_path, sha256_hex) ? BOOTO_OK : BOOTO_ERR_IO;
 }
 
+#define SPI_IMAGE_CAP    (64u * 1024u * 1024u)
+#define SPI_INFLATE_CAP  (64u * 1024u * 1024u)
+#define SPI_LZMA_MAX     128
+/* EE4E5898-3914-4259-9D6E-DC7BD79403CF, EFI_SECTION_GUID_DEFINED with this GUID holds LZMA data */
+static const uint8_t LZMA_GUID[16] = { 0x98, 0x58, 0x4e, 0xee, 0x14, 0x39, 0x59, 0x42,
+                                       0x9d, 0x6e, 0xdc, 0x7b, 0xd7, 0x94, 0x03, 0xcf };
+
+static void spi_count_pe(const uint8_t *d, size_t len, fw_spi_report_t *out) {
+    for (size_t i = 0; i + 0x40 <= len; i++) {
+        if (d[i] != 'M' || d[i + 1] != 'Z') continue;
+        uint32_t lfanew = rd_le32(d + i + 0x3c);
+        if (lfanew > len - i || len - i - lfanew < 24 + 70 || memcmp(d + i + lfanew, "PE\0\0", 4) != 0) continue;
+        const uint8_t *opt = d + i + lfanew + 24;
+        uint16_t subsystem = (uint16_t)(opt[68] | (opt[69] << 8));
+        out->pe_images++;
+        if (subsystem == 2 || subsystem == 3) out->windows_pe++;
+    }
+}
+
+booto_error_t firmware_spi_analyze(const char *image_path, fw_spi_report_t *out) {
+    if (!image_path || !out) return BOOTO_ERR_INVALID_ARG;
+    memset(out, 0, sizeof(*out));
+    FILE *fp = fopen(image_path, "rb");
+    if (!fp) return BOOTO_ERR_IO;
+    uint8_t *img = malloc(SPI_IMAGE_CAP + 1);
+    size_t len = img ? fread(img, 1, SPI_IMAGE_CAP + 1, fp) : 0;
+    bool bad = !img || ferror(fp) || len > SPI_IMAGE_CAP;
+    fclose(fp);
+    if (bad) {
+        free(img);
+        return BOOTO_ERR_IO;
+    }
+    for (size_t i = 40; i + 4 <= len; i++)
+        if (img[i] == '_' && memcmp(img + i, "_FVH", 4) == 0) out->volumes++;
+    spi_count_pe(img, len, out);
+    /* shortcut: one level of LZMA only; nested compressed volumes are not walked, add if real images need it */
+    for (size_t i = 4; i + 20 <= len && out->lzma_sections < SPI_LZMA_MAX; i++) {
+        if (img[i] != LZMA_GUID[0] || memcmp(img + i, LZMA_GUID, 16) != 0 || img[i - 1] != 0x02) continue;
+        const uint8_t *sec = img + i - 4;
+        size_t sec_len = (size_t)sec[0] | ((size_t)sec[1] << 8) | ((size_t)sec[2] << 16);
+        size_t data_off = (size_t)(sec[20] | (sec[21] << 8));
+        if (sec_len > len - (i - 4) || data_off < 24 || data_off >= sec_len) continue;
+        out->lzma_sections++;
+        const char *const argv[] = { "xz", "--format=lzma", "-dc", NULL };
+        uint8_t *raw = NULL;
+        size_t raw_len = 0;
+        if (disk_exec_capture(argv, sec + data_off, sec_len - data_off, &raw, &raw_len, SPI_INFLATE_CAP) == BOOTO_OK) {
+            out->lzma_inflated++;
+            spi_count_pe(raw, raw_len, out);
+        }
+        free(raw);
+    }
+    free(img);
+    return BOOTO_OK;
+}
+
 const char *firmware_check_name(fw_check_id_t id) {
     return (size_t)id < FW_CHECK_COUNT ? CHECK_NAMES[id] : "?";
 }

@@ -105,7 +105,7 @@ sudo ./bin/booto -c -s /mnt/evidence                      # scan an already-moun
 | `-m`, `--mock-drives` | Inject virtual mock drives for TUI testing |
 | `-u`, `--update-rules` | Regenerate sealed rule files (`scripts/update_rules.sh`) |
 | `-V`, `--verbose` | Verbose/debug logging |
-| `-x`, `--expert-firmware` | Off by default. After a CLI scan, as root: flag UEFI variables that hide a PE/ELF image or a large packed blob, and dump the SPI flash read-only with `flashrom` (saved as `spi_flash.bin` in `-p <dir>`, else `/tmp`, with its SHA-256). Slower; reported like the host firmware audit, never part of the verdict |
+| `-x`, `--expert-firmware` | Off by default. After a CLI scan, as root: flag UEFI variables that hide a PE/ELF image or a large packed blob, and dump the SPI flash read-only with `flashrom` (saved as `spi_flash.bin` in `-p <dir>`, else `/tmp`, with its SHA-256), then walk the image: LZMA sections are inflated by the sandboxed `xz` and a Windows executable hidden in the firmware is flagged. Slower; reported like the host firmware audit, never part of the verdict |
 | `-q`, `--quarantine` | Off by default; CLI with `-p <dir>`. Copies every flagged file (kernel module, EFI binary, initrd image, preloaded library, modified package file; first 1 MiB of the raw device for MBR findings) into `<dir>/quarantine/booto-quarantine-<time>.zip`: stored entries, ZipCrypto, password `infected`, names ending in `.malware`, mode 0400. Nothing in it can run when the USB is plugged in elsewhere; unpack only on an isolated analysis machine. The report partition is also mounted `noexec` |
 | `-v`, `--version` / `-h`, `--help` | Version / help |
 
