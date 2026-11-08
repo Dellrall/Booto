@@ -23,8 +23,11 @@ static void test_sgr_mouse(void) {
     ASSERT_INT_EQ(e.mouse_y, 4, "Row is zero-based");
     ASSERT_INT_EQ(parse("\033[<64;1;1M").type, KEY_MOUSE_WHEEL_UP, "Button 64 is wheel up");
     ASSERT_INT_EQ(parse("\033[<65;1;1M").type, KEY_MOUSE_WHEEL_DOWN, "Button 65 is wheel down");
-    ASSERT_INT_EQ(parse("\033[<0;10;5m").type, KEY_NONE, "Release is ignored");
-    ASSERT_INT_EQ(parse("\033[<32;10;5M").type, KEY_NONE, "Drag motion is ignored");
+    ASSERT_INT_EQ(parse("\033[<0;10;5m").type, KEY_MOUSE_RELEASE, "Left release");
+    ASSERT_INT_EQ(parse("\033[<2;10;5m").type, KEY_NONE, "Right release is ignored");
+    e = parse("\033[<32;12;6M");
+    ASSERT_TRUE(e.type == KEY_MOUSE_DRAG && e.mouse_x == 11 && e.mouse_y == 5, "Left-button motion is a drag at its cell");
+    ASSERT_INT_EQ(parse("\033[<34;10;5M").type, KEY_NONE, "Right-button motion is ignored");
     ASSERT_INT_EQ(parse("\033[<0;x;5M").type, KEY_NONE, "Malformed sequence is ignored");
     TEST_PASS("test_sgr_mouse");
 }
@@ -67,10 +70,10 @@ static void test_x10_mouse(void) {
     ASSERT_INT_EQ(e.type, KEY_MOUSE_CLICK, "Console left press is a click");
     ASSERT_INT_EQ(e.mouse_x, 9, "Column is zero-based");
     ASSERT_INT_EQ(e.mouse_y, 4, "Row is zero-based");
-    ASSERT_INT_EQ(feed("\033[M#*%", 6).type, KEY_NONE, "Console release is ignored");
+    ASSERT_INT_EQ(feed("\033[M#*%", 6).type, KEY_MOUSE_RELEASE, "Console release");
     ASSERT_INT_EQ(feed("\033[M`!!", 6).type, KEY_MOUSE_WHEEL_UP, "Button 64 is wheel up");
     ASSERT_INT_EQ(feed("\033[Ma!!", 6).type, KEY_MOUSE_WHEEL_DOWN, "Button 65 is wheel down");
-    ASSERT_INT_EQ(feed("\033[M@!!", 6).type, KEY_NONE, "Drag motion is ignored");
+    ASSERT_INT_EQ(feed("\033[M@!!", 6).type, KEY_MOUSE_DRAG, "Console left drag");
     ASSERT_INT_EQ(feed("\033[21~", 5).type, KEY_F10, "F10 decodes to KEY_F10");
     ASSERT_INT_EQ(feed("\033[A", 3).type, KEY_UP, "Up arrow decodes to KEY_UP");
     ASSERT_INT_EQ(feed("\r", 1).type, KEY_ENTER, "Enter decodes to KEY_ENTER");

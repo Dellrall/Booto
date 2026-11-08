@@ -127,7 +127,7 @@ static void update_dimensions(void) {
     memset(g_back_attrs, 0, cells * sizeof(uint32_t));
 }
 
-/* Drains one device until it yields a click or wheel event; motion only moves the drawn pointer. */
+/* Drains one device until it yields a click, drag, release or wheel event; plain motion only moves the drawn pointer. */
 static bool read_abs_pointer(term_abs_ptr_t *p, input_event_t *event) {
     ptr_action_t a = evdev_ptr_read(p, g_rows, g_cols);
     if (p->x >= 0 && p->y >= 0) {
@@ -139,6 +139,8 @@ static bool read_abs_pointer(term_abs_ptr_t *p, input_event_t *event) {
         case PTR_CLICK_RIGHT: event->type = KEY_MOUSE_CLICK; event->mouse_btn = 2; break; /* X10/SGR button numbers */
         case PTR_WHEEL_UP:    event->type = KEY_MOUSE_WHEEL_UP; break;
         case PTR_WHEEL_DOWN:  event->type = KEY_MOUSE_WHEEL_DOWN; break;
+        case PTR_DRAG:        event->type = KEY_MOUSE_DRAG; event->mouse_btn = 0; break;
+        case PTR_RELEASE:     event->type = KEY_MOUSE_RELEASE; event->mouse_btn = 0; break;
         default: return false;
     }
     event->mouse_x = p->x;
@@ -515,6 +517,25 @@ void term_present(void) {
 }
 
 /* Decodes a complete CSI sequence s[0..len) (ESC '[' params final, len >= 3); leaves KEY_NONE if unknown. */
+/* Mouse button code (+32 motion, +64 wheel, bit 0 of a wheel = down) -> event; motion counts only with the left button held. */
+static void mouse_event(int btn, bool release, int x, int y, input_event_t *event) {
+    if (btn & 64) {
+        if (release) return;
+        event->type = (btn & 1) ? KEY_MOUSE_WHEEL_DOWN : KEY_MOUSE_WHEEL_UP;
+    } else if (release) {
+        if ((btn & 3) != 0) return; /* only the left button drags or clicks */
+        event->type = KEY_MOUSE_RELEASE;
+    } else if (btn & 32) {
+        if ((btn & 3) != 0) return;
+        event->type = KEY_MOUSE_DRAG;
+    } else {
+        event->type = KEY_MOUSE_CLICK;
+    }
+    event->mouse_btn = btn & 3;
+    event->mouse_x = x;
+    event->mouse_y = y;
+}
+
 void term_parse_csi(const unsigned char *s, size_t len, input_event_t *event) {
     unsigned char final = s[len - 1];
     const unsigned char *p = s + 2;
@@ -526,13 +547,8 @@ void term_parse_csi(const unsigned char *s, size_t len, input_event_t *event) {
         memcpy(tmp, p + 1, plen - 1);
         tmp[plen - 1] = '\0';
         int btn = 0, mx = 0, my = 0;
-        /* SGR: 'm' = release, +32 = drag motion, +64 = wheel (bit 0: down); only presses and wheel count. */
-        if (sscanf(tmp, "%d;%d;%d", &btn, &mx, &my) == 3 && final == 'M' && !(btn & 32)) {
-            event->type = (btn & 64) ? ((btn & 1) ? KEY_MOUSE_WHEEL_DOWN : KEY_MOUSE_WHEEL_UP) : KEY_MOUSE_CLICK;
-            event->mouse_btn = btn;
-            event->mouse_x = mx - 1;
-            event->mouse_y = my - 1;
-        }
+        /* SGR: 'm' = release, the low bits name the button. */
+        if (sscanf(tmp, "%d;%d;%d", &btn, &mx, &my) == 3) mouse_event(btn, final == 'm', mx - 1, my - 1, event);
         return;
     }
 
@@ -609,12 +625,9 @@ static size_t parse_input(const unsigned char *buf, size_t n, input_event_t *eve
             /* Legacy X10 mouse report, the only kind the Linux console sends (via gpm): ESC [ M btn+32 x+33 y+33 */
             if (n < 6) return n;
             int btn = buf[3] - 32;
-            if (!(btn & 32) && ((btn & 64) || (btn & 3) != 3)) { /* skip drag motion and releases (low bits 3) */
-                event->type = (btn & 64) ? ((btn & 1) ? KEY_MOUSE_WHEEL_DOWN : KEY_MOUSE_WHEEL_UP) : KEY_MOUSE_CLICK;
-                event->mouse_btn = btn;
-                event->mouse_x = buf[4] - 33;
-                event->mouse_y = buf[5] - 33;
-            }
+            /* X10 release: low bits 3 on a non-motion, non-wheel report. */
+            bool release = !(btn & 96) && (btn & 3) == 3;
+            mouse_event(release ? 0 : btn, release, buf[4] - 33, buf[5] - 33, event);
             return 6;
         }
         size_t end = 2;
