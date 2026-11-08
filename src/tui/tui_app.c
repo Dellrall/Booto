@@ -194,6 +194,108 @@ static void render_exit_modal(tui_app_state_t *app, int rows, int cols) {
     }
 }
 
+/* Lines of the Inspect tab: Map = facts, section table and entropy strip; Hex = 16 bytes per line. */
+static int inspect_lines(const inspect_sample_t *s, int tab, int width) {
+    if (tab == 1) return (int)((s->len + 15) / 16);
+    int per = width > 0 ? width : 1;
+    int blocks = (int)((s->len + INSPECT_BLOCK - 1) / INSPECT_BLOCK);
+    return 7 + 2 + s->region_count + (s->regions_total > s->region_count) + 2 + (blocks + per - 1) / per + 1;
+}
+
+static void render_inspect_modal(tui_app_state_t *app, int rows, int cols) {
+    const inspect_sample_t *s = &app->last_scan->inspect;
+    int mx, my, mw;
+    modal_frame(rows, cols, cols, rows - 2, "Inspect (read-only)", &mx, &my, &mw); /* covers every pane, keeps both bars */
+    int mh = rows - 2;
+    int x0 = mx + 2, end = mx + mw - 2, iw = end - x0;
+    int x = x0;
+    x = modal_key(x, my + 1, end, " 1 ", " Map ", KEY_CHAR);
+    term_add_click_zone(x0, x, my + 1, KEY_CHAR, '1');
+    int hx = x + 2;
+    x = modal_key(hx, my + 1, end, " 2 ", " Hex ", KEY_CHAR);
+    term_add_click_zone(hx, x, my + 1, KEY_CHAR, '2');
+    term_puts_clip(app->inspect_tab == 0 ? x0 + 3 : hx + 3, my + 1, 5, app->inspect_tab == 0 ? " Map " : " Hex ",
+                   A_CURSOR);
+    modal_key(x + 2, my + 1, end, " Esc ", " Close", KEY_ESC);
+
+    int top = my + 3, vis = my + mh - 1 - top;
+    if (vis < 1) return;
+    int total = inspect_lines(s, app->inspect_tab, iw);
+    if (app->inspect_scroll > total - vis) app->inspect_scroll = total - vis;
+    if (app->inspect_scroll < 0) app->inspect_scroll = 0;
+    int first = app->inspect_scroll;
+    char line[256];
+#define LINE(i, text, attr) do { int r_ = (i) - first; if (r_ >= 0 && r_ < vis) term_puts_clip(x0, top + r_, iw, text, attr); } while (0)
+    if (app->inspect_tab == 1) {
+        for (int r = 0; r < vis && first + r < total; r++) {
+            inspect_hex_row(s, (size_t)(first + r) * 16, line, sizeof(line));
+            term_puts_clip(x0, top + r, iw, line, A_TEXT);
+        }
+    } else {
+        int i = 0;
+        snprintf(line, sizeof(line), "File     %.200s", s->path);
+        LINE(i, line, A_STRONG); i++;
+        snprintf(line, sizeof(line), "Format   %s", s->format);
+        LINE(i, line, A_TEXT); i++;
+        snprintf(line, sizeof(line), "Size     %llu bytes", (unsigned long long)s->file_size);
+        LINE(i, line, A_TEXT); i++;
+        snprintf(line, sizeof(line), "SHA-256  %s", s->sha256);
+        LINE(i, line, A_TEXT); i++;
+        snprintf(line, sizeof(line), "MD5      %s", s->md5);
+        LINE(i, line, A_TEXT); i++;
+        if (s->hashed_len < s->file_size)
+            snprintf(line, sizeof(line), "Hashes cover the first %llu bytes only.", (unsigned long long)s->hashed_len);
+        else
+            snprintf(line, sizeof(line), "Hashes cover the whole file.");
+        LINE(i, line, A_MUTED); i++;
+        i++;
+        LINE(i, "Sections", A_MUTED); i++;
+        LINE(i, "Name                 Offset      Size        Entropy  Code", A_MUTED); i++;
+        for (int k = 0; k < s->region_count; k++, i++) {
+            const inspect_region_t *g = &s->regions[k];
+            snprintf(line, sizeof(line), "%-20.20s %08llx    %-10llu  %4.2f     %s", g->name,
+                     (unsigned long long)g->offset, (unsigned long long)g->size, g->entropy, g->exec ? "yes" : "");
+            /* Over 7.2 bits/byte is packed or encrypted data; in code that is how bootkits hide a payload. */
+            LINE(i, line, g->entropy > 7.2 ? A_WARN : A_TEXT);
+        }
+        if (s->region_count == 0) { LINE(i, "No section table: raw data.", A_TEXT); i++; }
+        if (s->regions_total > s->region_count) {
+            snprintf(line, sizeof(line), "+%d more not shown", s->regions_total - s->region_count);
+            LINE(i, line, A_MUTED); i++;
+        }
+        i++;
+        snprintf(line, sizeof(line), "Entropy map: one cell per %u KiB of the first %zu KiB (' ' = 0 bits, '@' = 8 bits)",
+                 INSPECT_BLOCK / 1024, (s->len + 1023) / 1024);
+        LINE(i, line, A_MUTED); i++;
+        size_t blocks = (s->len + INSPECT_BLOCK - 1) / INSPECT_BLOCK, per = (size_t)(iw > 0 ? iw : 1);
+        for (size_t b = 0; b < blocks; b += per, i++) {
+            int r = i - first;
+            if (r < 0 || r >= vis) continue;
+            for (size_t c = 0; c < per && b + c < blocks; c++) {
+                double e = inspect_block_entropy(s, b + c);
+                term_putc(x0 + (int)c, top + r, inspect_entropy_char(e), e > 7.2 ? A_WARN : A_TEXT);
+            }
+        }
+    }
+#undef LINE
+    if (first > 0) term_puts_clip(end - 1, top, 1, "^", A_MUTED);
+    if (first + vis < total) term_puts_clip(end - 1, top + vis - 1, 1, "v", A_MUTED);
+}
+
+/* Inspect keys: 1/2/Tab switch tabs, arrows or j/k scroll a line, PgUp/PgDn a page, Home/End or g/G the ends. */
+static void inspect_input(tui_app_state_t *app, const input_event_t *ev, int rows) {
+    int page = rows - 6 > 1 ? rows - 6 : 1, c = ev->type == KEY_CHAR ? ev->ch : 0;
+    if (ev->type == KEY_ESC || c == 'q') app->show_inspect = false;
+    else if (c == '1' || c == '2') { app->inspect_tab = c - '1'; app->inspect_scroll = 0; }
+    else if (ev->type == KEY_TAB) { app->inspect_tab ^= 1; app->inspect_scroll = 0; }
+    else if (ev->type == KEY_UP || ev->type == KEY_MOUSE_WHEEL_UP || c == 'k') app->inspect_scroll -= ev->type == KEY_MOUSE_WHEEL_UP ? 3 : 1;
+    else if (ev->type == KEY_DOWN || ev->type == KEY_MOUSE_WHEEL_DOWN || c == 'j') app->inspect_scroll += ev->type == KEY_MOUSE_WHEEL_DOWN ? 3 : 1;
+    else if (ev->type == KEY_PGUP) app->inspect_scroll -= page;
+    else if (ev->type == KEY_PGDN || c == ' ') app->inspect_scroll += page;
+    else if (ev->type == KEY_HOME || c == 'g') app->inspect_scroll = 0;
+    else if (ev->type == KEY_END || c == 'G') app->inspect_scroll = 1 << 30; /* clamped at the next render */
+}
+
 static void render_luks_modal(tui_app_state_t *app, int rows, int cols) {
     bool persist = app->luks_modal_for_persist;
     int mx, my, mw;
@@ -347,6 +449,7 @@ static void finish_forensic_scan(tui_app_state_t *app) {
     free(app->last_scan);
     app->last_scan = r;
     app->pane_scroll[PANE_THREAT_INSPECTOR] = 0;
+    app->show_inspect = false;
     if (r->quarantine_zip[0]) {
         snprintf(log_buf, sizeof(log_buf), "Quarantined %d file%s to %.180s (ZIP password \"infected\").", r->quarantined,
                  r->quarantined == 1 ? "" : "s", r->quarantine_zip);
@@ -571,6 +674,8 @@ int tui_app_run(booto_context_t *ctx) {
             render_exit_modal(&app, rows, cols);
         } else if (app.show_luks_modal) {
             render_luks_modal(&app, rows, cols);
+        } else if (app.show_inspect) {
+            render_inspect_modal(&app, rows, cols);
         }
 
         // 4. Differential screen flush
@@ -662,6 +767,11 @@ int tui_app_run(booto_context_t *ctx) {
                         snprintf(app.luks_status_msg, sizeof(app.luks_status_msg), "Could not unlock: cryptsetup failed (see Logs).");
                     }
                 }
+                continue;
+            }
+
+            if (app.show_inspect) {
+                inspect_input(&app, &event, rows);
                 continue;
             }
 

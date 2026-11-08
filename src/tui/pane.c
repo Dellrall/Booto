@@ -390,6 +390,7 @@ static void render_findings_pane(wm_node_t *n, bool focused, tui_app_state_t *ap
     }
 
     int top = y;
+    app->inspect_hint_y = -1;
     y += scroll_begin(app, n->pane_type, top, bottom);
     /* Engine / Result / Found / Note; Note, then Found, then Result drop out when narrow. */
     int rx = x0 + 14, fx = rx + 10, nx = fx + 7;
@@ -422,6 +423,10 @@ static void render_findings_pane(wm_node_t *n, bool focused, tui_app_state_t *ap
         put_row(x0, &y, bottom, iw, app->threat.infected_file, A_TEXT);
         put_row(x0, &y, bottom, iw, app->threat.hook_type, A_TEXT);
         put_row(x0, &y, bottom, iw, sha, A_MUTED);
+        if (r->inspect.path[0]) {
+            app->inspect_hint_y = y >= top && y < bottom ? y : -1;
+            put_row(x0, &y, bottom, iw, "Enter  Inspect bytes and map", A_STRONG);
+        }
     }
 
     if (r->firmware_ran) {
@@ -520,6 +525,8 @@ void pane_handle_click(wm_node_t *node, int x, int y, tui_app_state_t *app) {
         if (vis <= 0 || y < node->y + 1 || i >= app->module_count) return;
         app->module_cursor = i;
         if (on_glyph) pane_handle_input(node, &(input_event_t){.type = KEY_CHAR, .ch = ' '}, app);
+    } else if (node->pane_type == PANE_THREAT_INSPECTOR && y == app->inspect_hint_y) {
+        pane_handle_input(node, &(input_event_t){.type = KEY_ENTER}, app);
     }
 }
 
@@ -594,6 +601,15 @@ bool pane_handle_input(wm_node_t *node, const input_event_t *event, tui_app_stat
         }
     } else if (node->pane_type == PANE_THREAT_INSPECTOR || node->pane_type == PANE_PERSISTENCE) {
         int *s = &app->pane_scroll[node->pane_type];
+        if (event->type == KEY_ENTER && node->pane_type == PANE_THREAT_INSPECTOR) {
+            if (app->last_scan && app->last_scan->inspect.path[0]) {
+                app->show_inspect = true;
+                app->inspect_scroll = 0;
+            } else {
+                snprintf(app->status_msg, sizeof(app->status_msg), "Nothing to inspect: the last scan flagged no readable file.");
+            }
+            return true;
+        }
         if (event->type == KEY_UP || (event->type == KEY_CHAR && event->ch == 'k')) {
             if (*s > 0) (*s)--;
             return true;
