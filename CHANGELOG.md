@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Authenticode signature check**: each ESP binary's PKCS#7 signature is now verified (OpenSSL), not just detected. A signed image changed after signing raises `UEFI_AUTHENTICODE_HASH_MISMATCH` (critical); a malformed or broken signature raises `UEFI_AUTHENTICODE_INVALID` (high). Whether the signer is trusted is not checked yet.
+- **MOK list audit**: the firmware audit reads shim's `MokListRT`. A key not shipped by a known distro, or a bare binary hash (trusted without any signature), fails the new "Shim MOK keys known" check: that is how a bootkit gets shim to run unsigned code.
 
 ## [1.5.4-beta] - 2026-11-08
 

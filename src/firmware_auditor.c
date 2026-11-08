@@ -22,6 +22,7 @@
 
 #define EFI_GLOBAL_GUID         "8be4df61-93ca-11d2-aa0d-00e098032b8c"
 #define EFI_IMAGE_SECURITY_GUID "d719b2cb-3d3a-4596-a3bc-dad00e67656f"
+#define SHIM_LOCK_GUID          "605dab50-e046-4300-abb6-3dd810dd8b23"
 #define READ_CAP                (1024u * 1024u)
 #define EFIVAR_ATTR_SIZE        4u
 #define SIGLIST_HDR_SIZE        28u
@@ -103,12 +104,19 @@ static const uint8_t GUID_CERT_X509[16] = {
 
 static const char *const TEST_KEY_MARKERS[] = { "DO NOT TRUST", "DO NOT SHIP" };
 
+/* Substrings of the CNs distros ship in shim's vendor cert or enroll as MOKs. Anything else was enrolled locally. */
+static const char *const KNOWN_MOK_SIGNERS[] = {
+    "Fedora", "Red Hat", "CentOS", "Canonical", "Ubuntu", "Debian", "SUSE", "openSUSE",
+    "Oracle", "AlmaLinux", "Rocky", "Microsoft", NULL
+};
+
 static const char *const CHECK_NAMES[FW_CHECK_COUNT] = {
     "Secure Boot on",
     "Setup mode off",
     "Platform key",
     "No test keys (PKfail)",
     "Revocation list (dbx)",
+    "Shim MOK keys known",
     "IOMMU described (DMAR/IVRS)",
     "Thunderbolt DMA protection",
     "SMM locked",
@@ -122,6 +130,8 @@ typedef struct {
     int x509_count;
     const char *test_marker;    /* first marker found in any X.509 entry, or NULL */
     char first_cn[128];         /* CN of the first X.509 entry, if cheaply found */
+    const char *const *known;   /* if set: NULL-terminated CN substrings; others go to unknown_cn */
+    char unknown_cn[128];       /* first X.509 CN matching none of known ("?" if it has no CN) */
 } siglist_stats_t;
 
 typedef struct {
@@ -242,6 +252,13 @@ static bool parse_siglists(const uint8_t *d, size_t len, siglist_stats_t *st) {
                 const uint8_t *cert = sig + SIG_OWNER_SIZE;
                 size_t cert_len = sig_size - SIG_OWNER_SIZE;
                 if (st->x509_count == 0) extract_cn(cert, cert_len, st->first_cn, sizeof(st->first_cn));
+                if (st->known && !st->unknown_cn[0]) {
+                    char cn[128] = "";
+                    extract_cn(cert, cert_len, cn, sizeof(cn));
+                    bool ok = false;
+                    for (size_t m = 0; cn[0] && !ok && st->known[m]; m++) ok = strstr(cn, st->known[m]) != NULL;
+                    if (!ok) snprintf(st->unknown_cn, sizeof(st->unknown_cn), "%s", cn[0] ? cn : "?");
+                }
                 st->x509_count++;
                 for (size_t m = 0; !st->test_marker && m < sizeof(TEST_KEY_MARKERS) / sizeof(TEST_KEY_MARKERS[0]); m++) {
                     if (memmem(cert, cert_len, TEST_KEY_MARKERS[m], strlen(TEST_KEY_MARKERS[m])))
@@ -352,6 +369,40 @@ static void check_dbx(fw_check_t *c, const efivar_t *dbx) {
     } else {
         c->result = FW_RESULT_PASS;
         snprintf(c->detail, sizeof(c->detail), "%d revoked hashes.", st.sha256_count);
+    }
+}
+
+/* shim's MokListRT: keys and hashes shim trusts on top of db. An attacker who enrolls one boots unsigned code. */
+static void check_mok(fw_check_t *c, const efivar_t *mok) {
+    // shortcut: reads efivarfs only; shim 15.7+ may publish large lists under /sys/firmware/efi/mok-variables instead
+    if (mok->err == ENOENT) {
+        set_check(c, FW_RESULT_NA, "No shim MOK list.");
+        return;
+    }
+    if (mok->err) {
+        c->result = FW_RESULT_UNKNOWN;
+        snprintf(c->detail, sizeof(c->detail), "Could not read MokListRT: %s.", strerror(mok->err));
+        return;
+    }
+    siglist_stats_t st;
+    memset(&st, 0, sizeof(st));
+    st.known = KNOWN_MOK_SIGNERS;
+    if (!parse_siglists(efivar_data(mok), efivar_data_len(mok), &st)) {
+        set_check(c, FW_RESULT_FAIL, "MOK list is malformed.");
+    } else if (st.sha256_count) {
+        c->result = FW_RESULT_FAIL;
+        snprintf(c->detail, sizeof(c->detail), "MOK list trusts %d binary hash%s without a signature.",
+                 st.sha256_count, st.sha256_count == 1 ? "" : "es");
+    } else if (st.unknown_cn[0]) {
+        c->result = FW_RESULT_FAIL;
+        snprintf(c->detail, sizeof(c->detail), "Unknown MOK key \"%.80s\": check it was enrolled on purpose.",
+                 st.unknown_cn);
+    } else if (st.x509_count == 0) {
+        set_check(c, FW_RESULT_NA, "MOK list is empty.");
+    } else {
+        c->result = FW_RESULT_PASS;
+        snprintf(c->detail, sizeof(c->detail), "%d distro key%s, first \"%.80s\".", st.x509_count,
+                 st.x509_count == 1 ? "" : "s", st.first_cn);
     }
 }
 
@@ -876,7 +927,7 @@ booto_error_t firmware_audit(const firmware_paths_t *paths, firmware_report_t *o
     out->uefi_boot = stat(efi, &sb) == 0 && S_ISDIR(sb.st_mode);
     fw_check_t *ck = out->checks;
     if (!out->uefi_boot) {
-        for (int i = FW_CHECK_SECURE_BOOT; i <= FW_CHECK_DBX; i++)
+        for (int i = FW_CHECK_SECURE_BOOT; i <= FW_CHECK_MOK; i++)
             set_check(&ck[i], FW_RESULT_NA, "Booted in BIOS mode: no UEFI variables.");
     } else {
         check_flag_var(&ck[FW_CHECK_SECURE_BOOT], efi, "SecureBoot", 1, "Secure Boot is enabled.",
@@ -894,6 +945,9 @@ booto_error_t firmware_audit(const firmware_paths_t *paths, firmware_report_t *o
         check_platform_key(&ck[FW_CHECK_PLATFORM_KEY], &pk);
         check_test_keys(&ck[FW_CHECK_TEST_KEYS], key_vars, key_names, 3);
         check_dbx(&ck[FW_CHECK_DBX], &dbx);
+        efivar_t mok = read_efivar(efi, "MokListRT", SHIM_LOCK_GUID);
+        check_mok(&ck[FW_CHECK_MOK], &mok);
+        free(mok.buf);
 
         free(pk.buf);
         free(kek.buf);

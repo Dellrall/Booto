@@ -16,6 +16,7 @@
 
 #define GLOBAL_GUID "8be4df61-93ca-11d2-aa0d-00e098032b8c"
 #define IMAGE_GUID  "d719b2cb-3d3a-4596-a3bc-dad00e67656f"
+#define SHIM_GUID   "605dab50-e046-4300-abb6-3dd810dd8b23"
 
 static const uint8_t T_SHA256[16] = {
     0x26, 0x16, 0xc4, 0xc1, 0x4c, 0x50, 0x92, 0x40,
@@ -315,6 +316,7 @@ static void build_good_machine(void) {
     write_cert_var("KEK", GLOBAL_GUID, "Contoso KEK", NULL);
     write_cert_var("db", IMAGE_GUID, "Contoso CA", NULL);
     write_dbx(3);
+    write_cert_var("MokListRT", SHIM_GUID, "Fedora Secure Boot CA", NULL);
     write_dmar(0x04);
     write_tb_domain("1\n");
     build_intel_silicon(true, 0x2A);
@@ -344,6 +346,33 @@ static void test_good_machine(void) {
     ASSERT_TRUE(strstr(r.checks[FW_CHECK_IOMMU].detail, "is set") != NULL, "opt-in flag reported");
     ASSERT_TRUE(!r.chipset_unconfirmed, "modern chipset needs no help request");
     TEST_PASS("test_good_machine");
+}
+
+static void test_mok_list(void) {
+    TEST_START("test_mok_list");
+    firmware_report_t r;
+    build_good_machine();
+    firmware_audit(&g_paths, &r);
+    ASSERT_STR_EQ(r.checks[FW_CHECK_MOK].detail, "1 distro key, first \"Fedora Secure Boot CA\".", "distro MOK passes");
+
+    write_cert_var("MokListRT", SHIM_GUID, "Evil Corp Signing", NULL);
+    firmware_audit(&g_paths, &r);
+    ASSERT_INT_EQ(r.checks[FW_CHECK_MOK].result, FW_RESULT_FAIL, "unknown MOK key fails");
+    ASSERT_TRUE(strstr(r.checks[FW_CHECK_MOK].detail, "Evil Corp Signing") != NULL, "detail names the key");
+
+    uint8_t hash[32], list[128];
+    memset(hash, 0x11, sizeof(hash));
+    write_var("MokListRT", SHIM_GUID, list, append_siglist(list, 0, T_SHA256, hash, sizeof(hash), 2));
+    firmware_audit(&g_paths, &r);
+    ASSERT_STR_EQ(r.checks[FW_CHECK_MOK].detail, "MOK list trusts 2 binary hashes without a signature.", "MOK hashes fail");
+
+    char path[160];
+    snprintf(path, sizeof(path), "%s/MokListRT-%s", g_efi, SHIM_GUID);
+    unlink(path);
+    firmware_audit(&g_paths, &r);
+    remove_tree(g_root);
+    ASSERT_INT_EQ(r.checks[FW_CHECK_MOK].result, FW_RESULT_NA, "no shim, no MOK list");
+    TEST_PASS("test_mok_list");
 }
 
 static void test_pkfail(void) {
@@ -775,6 +804,7 @@ int main(void) {
     printf("\n--- Running Firmware Auditor Tests ---\n");
     test_good_machine();
     test_pkfail();
+    test_mok_list();
     test_insecure_keys();
     test_bios_boot();
     test_no_iommu_no_thunderbolt();
