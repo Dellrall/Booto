@@ -52,6 +52,9 @@ jobs:
       - name: Run Unit Tests (${{ matrix.compiler }})
         run: make CC=${{ matrix.compiler }} test
 
+      - name: Test Sandbox As Root (${{ matrix.compiler }})
+        run: sudo ./build/test_initramfs_auditor
+
       - name: Test CLI Flags
         run: |
           ./bin/booto --version
