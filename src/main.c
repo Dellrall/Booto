@@ -35,11 +35,11 @@ void booto_context_init(booto_context_t *ctx) {
 static void print_banner(void) {
     int color = logger_use_color(stdout);
     if (color) printf("\033[1;36m");
-    printf("  ____                   _        \n");
-    printf(" | __ )   ___    ___   | |_  ___  \n");
-    printf(" |  _ \\  / _ \\  / _ \\  | __|/ _ \\ \n");
-    printf(" | |_) || (_) || (_) | | |_| (_) |\n");
-    printf(" |____/  \\___/  \\___/   \\__|\\___/ \n");
+    printf("  ____                 _\n");
+    printf(" | __ )   ___    ___  | |_   ___\n");
+    printf(" |  _ \\  / _ \\  / _ \\ | __| / _ \\\n");
+    printf(" | |_) || (_) || (_) || |_ | (_) |\n");
+    printf(" |____/  \\___/  \\___/  \\__| \\___/\n");
     if (color) printf("\033[0m");
     printf(" Live Linux Forensic Rootkit & Bootkit Detection Suite\n");
     printf(" Version: %s (Git: %s, Built: %s)\n\n",
