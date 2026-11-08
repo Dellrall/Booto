@@ -666,10 +666,16 @@ int tui_app_run(booto_context_t *ctx) {
                 } else {
                     export_case_report(&app);
                 }
-            } else if (event.type == KEY_MOUSE_CLICK) {
-                wm_node_t *clicked = wm_find_leaf_at(app.wm->root, event.mouse_x, event.mouse_y);
-                if (clicked) {
-                    app.wm->focused_leaf = clicked;
+            } else if (event.type == KEY_MOUSE_CLICK || event.type == KEY_MOUSE_WHEEL_UP || event.type == KEY_MOUSE_WHEEL_DOWN) {
+                wm_node_t *hit = wm_find_leaf_at(app.wm->root, event.mouse_x, event.mouse_y);
+                if (hit) {
+                    app.wm->focused_leaf = hit;
+                    if (event.type != KEY_MOUSE_CLICK) {
+                        input_event_t step = {.type = event.type == KEY_MOUSE_WHEEL_UP ? KEY_UP : KEY_DOWN};
+                        pane_handle_input(hit, &step, &app);
+                    } else if (event.mouse_btn == 0) {
+                        pane_handle_click(hit, event.mouse_x, event.mouse_y, &app);
+                    }
                 }
             } else if (atomic_load(&app.scan_active) && event.type == KEY_ENTER && app.wm->focused_leaf &&
                        app.wm->focused_leaf->pane_type == PANE_STORAGE_DEVICES) {
