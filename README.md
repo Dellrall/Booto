@@ -143,6 +143,8 @@ The shipped DBX, LKM and MBR signatures are illustrative samples, not an authori
 
 The TUI draws with line and symbol glyphs that exist in the Linux console's default (CP437) font, using only the 16 standard colours, so it looks the same on a bare VT as in a terminal emulator. On a terminal without those glyphs (for example some serial consoles), start it with `BOOTO_ASCII=1 booto` to draw plain ASCII instead.
 
+Set `NO_COLOR=1` (see [no-color.org](https://no-color.org)) for a monochrome TUI: bold, dim and reverse video still mark focus, the cursor row and key labels, and every severity is also written out in words. Log and banner colors are also dropped when output is not a terminal.
+
 ---
 
 ## Development Milestones
