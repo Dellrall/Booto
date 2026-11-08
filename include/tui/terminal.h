@@ -94,6 +94,8 @@ typedef enum {
     KEY_MOUSE_CLICK,
     KEY_MOUSE_WHEEL_UP,
     KEY_MOUSE_WHEEL_DOWN,
+    KEY_MOUSE_DRAG,    /* pointer moved with the left button held */
+    KEY_MOUSE_RELEASE, /* button released (X10 does not say which) */
     KEY_RESIZE
 } key_type_t;
 

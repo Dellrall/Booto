@@ -51,16 +51,23 @@ int term_abs_to_cell(int value, int min, int max, int cells) {
 }
 
 ptr_action_t term_abs_feed(term_abs_ptr_t *p, unsigned type, unsigned code, int value, int rows, int cols) {
-    if (type == EV_ABS && code == ABS_X) {
-        p->x = term_abs_to_cell(value, p->x_min, p->x_max, cols);
-        return PTR_NONE;
+    if (type == EV_ABS && (code == ABS_X || code == ABS_Y)) {
+        int *cell = code == ABS_X ? &p->x : &p->y;
+        int next = code == ABS_X ? term_abs_to_cell(value, p->x_min, p->x_max, cols)
+                                 : term_abs_to_cell(value, p->y_min, p->y_max, rows);
+        bool moved = next != *cell;
+        *cell = next;
+        return p->held && moved && p->x >= 0 && p->y >= 0 ? PTR_DRAG : PTR_NONE;
     }
-    if (type == EV_ABS && code == ABS_Y) {
-        p->y = term_abs_to_cell(value, p->y_min, p->y_max, rows);
+    if (type == EV_KEY && (code == BTN_LEFT || code == BTN_TOUCH) && value != 2) {
+        bool was = p->held;
+        p->held = value == 1 && p->x >= 0 && p->y >= 0;
+        if (!p->held && value == 1) return PTR_NONE;
+        if (value == 1 && !was) return PTR_CLICK_LEFT;
+        if (value == 0 && was) return PTR_RELEASE;
         return PTR_NONE;
     }
     if (p->x < 0 || p->y < 0) return PTR_NONE;
-    if (type == EV_KEY && value == 1 && (code == BTN_LEFT || code == BTN_TOUCH)) return PTR_CLICK_LEFT;
     if (type == EV_KEY && value == 1 && code == BTN_RIGHT) return PTR_CLICK_RIGHT;
     if (type == EV_REL && code == REL_WHEEL && value != 0) return value > 0 ? PTR_WHEEL_UP : PTR_WHEEL_DOWN;
     return PTR_NONE;
