@@ -47,14 +47,19 @@ version: include/version.h
 include/version.h: include/version.h.in scripts/gen_version.sh
 	@scripts/gen_version.sh include/version.h.in include/version.h $(VERSION)
 
-$(BUILDDIR)/%.o: $(SRCDIR)/%.c include/version.h | $(BUILDDIR)
+# asan/coverage builds reuse build/ with other flags: record the flags so a change rebuilds every object.
+FLAGS_STAMP = $(BUILDDIR)/.flags
+BUILD_FLAGS = $(CC) $(CFLAGS) $(LDFLAGS)
+$(shell mkdir -p $(BUILDDIR) && echo '$(BUILD_FLAGS)' | cmp -s - $(FLAGS_STAMP) || echo '$(BUILD_FLAGS)' > $(FLAGS_STAMP))
+
+$(BUILDDIR)/%.o: $(SRCDIR)/%.c include/version.h $(FLAGS_STAMP) | $(BUILDDIR)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
 
 $(TARGET): $(BUILDDIR)/main.o $(OBJECTS) | $(BINDIR)
 	$(CC) $(CFLAGS) $^ $(LDFLAGS) -o $@
 
-$(BUILDDIR)/main.o: $(SRCDIR)/main.c include/version.h | $(BUILDDIR)
+$(BUILDDIR)/main.o: $(SRCDIR)/main.c include/version.h $(FLAGS_STAMP) | $(BUILDDIR)
 	@mkdir -p $(BUILDDIR)
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
 

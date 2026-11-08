@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 static void test_clean_grub2_mbr(void) {
     TEST_START("test_clean_grub2_mbr");
@@ -112,7 +113,7 @@ static void test_rovnix_bootkit_detection(void) {
     ASSERT_INT_EQ(err, BOOTO_OK, "Audit buffer must succeed");
     ASSERT_TRUE(res.threats_detected > 0, "Rovnix bootkit must be detected");
     ASSERT_STR_EQ(res.findings[0].rule_id, "MBR_BOOTKIT_ROVNIX", "Must match MBR_BOOTKIT_ROVNIX rule");
-    ASSERT_INT_EQ(res.findings[0].severity, MBR_SEVERITY_CRITICAL, "Rovnix severity must be CRITICAL");
+    ASSERT_INT_EQ(res.findings[0].severity, SEVERITY_CRITICAL, "Rovnix severity must be CRITICAL");
 
     TEST_PASS("test_rovnix_bootkit_detection");
 }
@@ -338,6 +339,50 @@ static void test_device_open_failure_is_error(void) {
     TEST_PASS("test_device_open_failure_is_error");
 }
 
+/* Disk image: GRUB2 MBR, partition 1 at LBA 2048, INT 13h hook stub hidden at LBA 500 (past the old 63-sector cap). */
+static void write_gap_image(const char *path, long size) {
+    uint8_t *img = calloc(1, 2049 * 512);
+    img[0] = 0xEB; img[1] = 0x63; img[2] = 0x90;
+    memcpy(&img[0x180], "Welcome to GRUB!", 16);
+    img[510] = 0x55; img[511] = 0xAA;
+    mbr_partition_record_t *p1 = (mbr_partition_record_t *)&img[MBR_PARTITION_TABLE_OFFSET];
+    p1->status = 0x80;
+    p1->partition_type = 0x83;
+    p1->lba_start = 2048;
+    p1->sector_count = 1000;
+    static const uint8_t stub[] = { 0xFA, 0x31, 0xC0, 0x8E, 0xD0, 0xBC, 0x00, 0x7C, 0xFB, 0x8E, 0xD8, 0xA1, 0x4C, 0x00,
+                                    0xC7, 0x06, 0x4C, 0x00, 0x40, 0x7E, 0xB8, 0x01, 0x02, 0xCD, 0x13, 0xEA, 0x00, 0x7C,
+                                    0x00, 0x00 };
+    memcpy(&img[500 * 512], stub, sizeof(stub));
+    FILE *fp = fopen(path, "wb");
+    if (fp) {
+        fwrite(img, 1, (size_t)size, fp);
+        fclose(fp);
+    }
+    free(img);
+}
+
+static void test_device_deep_gap_and_short_read(void) {
+    TEST_START("test_device_deep_gap_and_short_read");
+    char path[] = "/tmp/test_booto_mbr_XXXXXX";
+    int fd = mkstemp(path);
+    ASSERT_TRUE(fd >= 0, "temp image created");
+    close(fd);
+    mbr_scan_result_t res;
+
+    write_gap_image(path, 2049 * 512);
+    ASSERT_INT_EQ(mbr_audit_device(path, &res), BOOTO_OK, "Full image audits cleanly");
+    ASSERT_TRUE(res.threats_detected > 0, "Payload at LBA 500 must be found");
+    ASSERT_STR_EQ(res.findings[0].rule_id, "MBR_GAP_ANOMALOUS_PAYLOAD", "Deep gap payload rule");
+
+    write_gap_image(path, 2048 * 512); // VBR sector missing
+    ASSERT_INT_EQ(mbr_audit_device(path, &res), BOOTO_ERR_IO, "Unreadable VBR must be an error, never clean");
+    ASSERT_TRUE(res.threats_detected > 0, "Findings from readable sectors are kept");
+
+    unlink(path);
+    TEST_PASS("test_device_deep_gap_and_short_read");
+}
+
 int main(void) {
     printf("\n--- Running MBR/VBR Bootkit Auditor Tests ---\n");
     test_clean_grub2_mbr();
@@ -353,6 +398,7 @@ int main(void) {
     test_vbr_gapz_detection();
     test_corrupt_signature_and_partitions();
     test_device_open_failure_is_error();
+    test_device_deep_gap_and_short_read();
     TEST_SUMMARY();
     return 0;
 }

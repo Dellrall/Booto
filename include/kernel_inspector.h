@@ -17,14 +17,6 @@ extern "C" {
 
 #define MAX_KERNEL_THREATS 64
 
-typedef enum {
-    SEVERITY_INFO = 0,
-    SEVERITY_LOW,
-    SEVERITY_MEDIUM,
-    SEVERITY_HIGH,
-    SEVERITY_CRITICAL
-} threat_severity_t;
-
 typedef struct {
     char threat_name[64];
     char file_path[256];
@@ -32,7 +24,7 @@ typedef struct {
     char detection_rule[64];
     char matched_symbol[64];
     uint64_t symbol_offset;
-    threat_severity_t severity;
+    booto_severity_t severity;
     char description[256];
 } kernel_threat_finding_t;
 
@@ -65,11 +57,6 @@ booto_error_t kernel_inspect_directory(const char *lib_modules_dir, kernel_scan_
  * @return BOOTO_OK on success, negative error code on failure.
  */
 booto_error_t kernel_inspect_vmlinuz(const char *vmlinuz_path, kernel_scan_result_t *result);
-
-/**
- * @brief Get string representation of threat severity.
- */
-const char *kernel_severity_to_string(threat_severity_t severity);
 
 #ifdef __cplusplus
 }

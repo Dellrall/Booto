@@ -32,6 +32,18 @@ typedef enum {
     BOOTO_ERR_CANCELLED         = -10
 } booto_error_t;
 
+/** Finding severity, shared by every engine; the order matches rules_severity_level(). */
+typedef enum {
+    SEVERITY_INFO = 0,
+    SEVERITY_LOW,
+    SEVERITY_MEDIUM,
+    SEVERITY_HIGH,
+    SEVERITY_CRITICAL
+} booto_severity_t;
+
+/** "INFO".."CRITICAL"; out-of-range values map to "INFO". */
+const char *booto_severity_str(booto_severity_t severity);
+
 /**
  * @brief Runtime mode of operation.
  */

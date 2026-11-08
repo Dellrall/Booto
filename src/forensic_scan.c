@@ -16,6 +16,7 @@
 #include <dirent.h>
 #include <inttypes.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
@@ -297,18 +298,35 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
     return BOOTO_OK;
 }
 
+/* Initramfs, preload and package findings carry no severity: each is confirmed tampering, so CRITICAL. */
+static booto_severity_t highest_severity(const forensic_scan_report_t *r) {
+    if (r->initramfs.threats_detected || r->preload.threats_detected) return SEVERITY_CRITICAL;
+    booto_severity_t max = SEVERITY_INFO;
+    for (int i = 0; i < r->mbr.threats_detected; i++)
+        if (r->mbr.findings[i].severity > max) max = r->mbr.findings[i].severity;
+    for (int i = 0; i < r->uefi.bootkits_detected; i++)
+        if (r->uefi.findings[i].severity > max) max = r->uefi.findings[i].severity;
+    for (int i = 0; i < r->kernel.threats_detected; i++)
+        if (r->kernel.findings[i].severity > max) max = r->kernel.findings[i].severity;
+    return max;
+}
+
 void forensic_scan_fill_case_summary(const forensic_scan_report_t *r, const char *case_id, const char *examiner,
                                      forensic_case_summary_t *sum) {
     if (!r || !sum) return;
     memset(sum, 0, sizeof(*sum));
-    snprintf(sum->case_id, sizeof(sum->case_id), "%.63s", case_id ? case_id : "");
-    snprintf(sum->examiner, sizeof(sum->examiner), "%.63s", examiner ? examiner : "unknown");
+    time_t now = time(NULL);
+    struct tm tm_utc;
+    bool have_time = gmtime_r(&now, &tm_utc) != NULL;
+    if (case_id) snprintf(sum->case_id, sizeof(sum->case_id), "%.63s", case_id);
+    else if (!have_time || strftime(sum->case_id, sizeof(sum->case_id), "CASE-%Y%m%d-%H%M%S", &tm_utc) == 0)
+        snprintf(sum->case_id, sizeof(sum->case_id), "CASE-unknown");
+    if (!examiner) examiner = getenv("USER");
+    snprintf(sum->examiner, sizeof(sum->examiner), "%.63s", (examiner && examiner[0]) ? examiner : "unknown");
     snprintf(sum->target_disk, sizeof(sum->target_disk), "%.127s", r->target_dev[0] ? r->target_dev : r->scan_root);
     snprintf(sum->target_fs, sizeof(sum->target_fs), "unknown");
 
-    time_t now = time(NULL);
-    struct tm tm_utc;
-    if (gmtime_r(&now, &tm_utc)) strftime(sum->timestamp, sizeof(sum->timestamp), "%Y-%m-%d %H:%M:%S UTC", &tm_utc);
+    if (have_time) strftime(sum->timestamp, sizeof(sum->timestamp), "%Y-%m-%d %H:%M:%S UTC", &tm_utc);
 
     sum->mbr_threats_count = r->mbr.threats_detected;
     sum->kernel_threats_count = r->kernel.threats_detected;
@@ -316,7 +334,7 @@ void forensic_scan_fill_case_summary(const forensic_scan_report_t *r, const char
     sum->initramfs_threats_count = r->initramfs.threats_detected;
     sum->preload_threats_count = r->preload.threats_detected;
     sum->total_threats = r->total_threats;
-    snprintf(sum->highest_severity, sizeof(sum->highest_severity), "%s", r->total_threats > 0 ? "CRITICAL" : "NONE");
+    snprintf(sum->highest_severity, sizeof(sum->highest_severity), "%s", r->total_threats > 0 ? booto_severity_str(highest_severity(r)) : "NONE");
     snprintf(sum->verdict, sizeof(sum->verdict), "%s", forensic_scan_verdict_str(r->verdict));
     for (int i = 0; i < SCAN_MOD_COUNT; i++) {
         snprintf(sum->module_status[i], sizeof(sum->module_status[i]), "%s", forensic_scan_status_str(r->status[i]));

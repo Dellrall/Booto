@@ -21,16 +21,6 @@
 #include <string.h>
 #include <sys/stat.h>
 
-const char *kernel_severity_to_string(threat_severity_t severity) {
-    switch (severity) {
-        case SEVERITY_CRITICAL: return "CRITICAL";
-        case SEVERITY_HIGH:     return "HIGH";
-        case SEVERITY_MEDIUM:   return "MEDIUM";
-        case SEVERITY_LOW:      return "LOW";
-        default:                return "INFO";
-    }
-}
-
 static void add_threat_finding(kernel_scan_result_t *result,
                                const char *threat_name,
                                const char *file_path,
@@ -38,7 +28,7 @@ static void add_threat_finding(kernel_scan_result_t *result,
                                const char *rule_id,
                                const char *matched_sym,
                                uint64_t offset,
-                               threat_severity_t severity,
+                               booto_severity_t severity,
                                const char *description) {
     if (!result || result->threats_detected >= MAX_KERNEL_THREATS) return;
 
@@ -54,7 +44,7 @@ static void add_threat_finding(kernel_scan_result_t *result,
 
     LOG_CRITICAL("[ALERT] %s in %s (Rule: %s, Symbol: %s, Severity: %s)",
                  f->threat_name, f->file_path, f->detection_rule, f->matched_symbol,
-                 kernel_severity_to_string(f->severity));
+                 booto_severity_str(f->severity));
 }
 
 #define LKM_DECOMP_CAP ((size_t)256 * 1024 * 1024)
@@ -89,7 +79,7 @@ static void analyze_lkm(const char *ko_path, const rules_lkm_set_t *rules, elf_b
                                    rule->rule_id,
                                    sym->name,
                                    sym->value,
-                                   (threat_severity_t)rules_severity_level(rule->severity),
+                                   (booto_severity_t)rules_severity_level(rule->severity),
                                    rule->description);
                 break; // one finding per (symbol, rule)
             }
