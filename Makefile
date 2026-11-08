@@ -51,6 +51,10 @@ include/version.h: include/version.h.in scripts/gen_version.sh
 FLAGS_STAMP = $(BUILDDIR)/.flags
 BUILD_FLAGS = $(CC) $(CFLAGS) $(LDFLAGS)
 $(shell mkdir -p $(BUILDDIR) && echo '$(BUILD_FLAGS)' | cmp -s - $(FLAGS_STAMP) || echo '$(BUILD_FLAGS)' > $(FLAGS_STAMP))
+# Recreates the stamp when `make clean all` deletes it after the line above ran.
+$(FLAGS_STAMP):
+	@mkdir -p $(BUILDDIR)
+	@echo '$(BUILD_FLAGS)' > $@
 
 $(BUILDDIR)/%.o: $(SRCDIR)/%.c include/version.h $(FLAGS_STAMP) | $(BUILDDIR)
 	@mkdir -p $(dir $@)
