@@ -384,6 +384,53 @@ static void test_esp_scan_by_magic(void) {
     TEST_PASS("test_esp_scan_by_magic");
 }
 
+static void write_pe(const char *dir, const char *rel, const uint8_t *b, size_t len) {
+    char path[160], cmd[200];
+    snprintf(path, sizeof(path), "%s/%s", dir, rel);
+    snprintf(cmd, sizeof(cmd), "mkdir -p \"$(dirname '%s')\"", path);
+    if (system(cmd) != 0) return;
+    FILE *fp = fopen(path, "wb");
+    if (fp) { fwrite(b, 1, len, fp); fclose(fp); }
+}
+
+static int count_rule(const uefi_scan_result_t *res, const char *rule) {
+    int n = 0;
+    for (int i = 0; i < res->bootkits_detected; i++) n += strcmp(res->findings[i].rule_id, rule) == 0;
+    return n;
+}
+
+static void test_esp_layout_and_sbat(void) {
+    TEST_START("test_esp_layout_and_sbat");
+    uint8_t b[0x400], old[0x400];
+    size_t len = build_pe(b, sizeof(b), true, false);
+    memcpy(old, b, sizeof(b));
+    memcpy(old + 0x188, ".sbat", 5);  // the one section, at 0x200
+    static const char csv[] = "sbat,1,SBAT Version,sbat,1,https://x\ngrub,2,Free Software Foundation,grub,2.04,https://x\n";
+    memcpy(old + 0x200, csv, sizeof(csv) - 1);
+    memset(old + 0x200 + sizeof(csv) - 1, 0, 0x100 - (sizeof(csv) - 1));
+
+    char dir[] = "/tmp/booto_esp_XXXXXX", cmd[64];
+    ASSERT_TRUE(mkdtemp(dir) != NULL, "mkdtemp");
+    write_pe(dir, "system32/winload.efi", b, len);
+    write_pe(dir, "EFI/Microsoft/Boot/grubx64.efi", b, len);
+    write_pe(dir, "EFI/Microsoft/Boot/bootmgfw.efi", b, len);
+    write_pe(dir, "EFI/fedora/grubx64-real.efi", b, len);
+    write_pe(dir, "EFI/fedora/shimx64.efi", b, len);
+    write_pe(dir, "EFI/ubuntu/grubx64.efi", old, len);
+    uefi_scan_result_t res;
+    memset(&res, 0, sizeof(res));
+    uefi_inspect_esp_directory(dir, &res);
+    snprintf(cmd, sizeof(cmd), "rm -rf '%s'", dir);
+    if (system(cmd) != 0) perror("rm");
+
+    ASSERT_INT_EQ(res.efi_files_scanned, 6, "Every PE scanned");
+    ASSERT_INT_EQ(count_rule(&res, "UEFI_ESP_SYSTEM32"), 1, "ESP:/system32 flagged");
+    ASSERT_INT_EQ(count_rule(&res, "UEFI_ESP_FOREIGN_LOADER"), 1, "GRUB in EFI/Microsoft flagged; bootmgfw is not");
+    ASSERT_INT_EQ(count_rule(&res, "UEFI_ESP_SHADOW_LOADER"), 1, "Renamed-aside loader flagged; shimx64.efi is not");
+    ASSERT_INT_EQ(count_rule(&res, "UEFI_SBAT_REVOKED"), 1, "grub,2 below SbatLevel flagged; no .sbat is not");
+    TEST_PASS("test_esp_layout_and_sbat");
+}
+
 int main(void) {
     printf("\n--- Running UEFI & ESP Bootkit Analyzer Tests ---\n");
     test_synthetic_pe32_plus_parser();
@@ -395,6 +442,7 @@ int main(void) {
     test_packed_code_section();
     test_authenticode_signature();
     test_esp_scan_by_magic();
+    test_esp_layout_and_sbat();
     TEST_SUMMARY();
     return 0;
 }
