@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **ESP scan by content**: every file starting with `MZ` is inspected, not only `*.efi`. A payload renamed to `grubx64.bak`, or a systemd-boot kernel without an extension, is no longer skipped.
 
 ### Added
+- **Clickable buttons**: the bottom-bar hints (F5, F6, F3, Tab, Alt+Z, F10) and the Exit and LUKS window buttons respond to a left click, the same as their keys.
 - **SPI image analysis**: after an expert-mode dump, the image is walked: firmware volumes and PE images are counted, LZMA sections are inflated by the sandboxed `xz`, and a Windows executable inside the firmware (how WPBT-style and MosaicRegressor-style implants drop an OS payload) is reported as suspicious (medium). Some vendor tools do this too.
 - **RPM package integrity**: Fedora, RHEL and openSUSE roots are now verified too. The `rpmdb.sqlite` is opened read-only and immutable (never written, no journal), each package header is parsed in bounds, and every regular file is re-hashed against its recorded SHA-256 digest. A symlink that points the rpmdb out of the target root is not followed.
 - **pacman package integrity**: Arch-based roots are now verified too. Each package's `mtree` in `/var/lib/pacman/local` is inflated by the sandboxed `gzip` and every system file is re-hashed against its SHA-256 digest.

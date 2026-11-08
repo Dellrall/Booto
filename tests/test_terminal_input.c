@@ -77,7 +77,27 @@ static void test_x10_mouse(void) {
     TEST_PASS("test_x10_mouse");
 }
 
+static void test_click_zones(void) {
+    TEST_START("test_click_zones");
+    term_clear();
+    term_add_click_zone(10, 20, 3, KEY_F5, 0);
+    term_add_click_zone(15, 25, 3, KEY_CHAR, 'p');
+    input_event_t e = {.type = KEY_MOUSE_CLICK, .mouse_x = 12, .mouse_y = 3};
+    ASSERT_TRUE(term_apply_click_zone(&e) && e.type == KEY_F5, "Click inside a zone becomes its key");
+    e = (input_event_t){.type = KEY_MOUSE_CLICK, .mouse_x = 17, .mouse_y = 3};
+    ASSERT_TRUE(term_apply_click_zone(&e) && e.type == KEY_CHAR && e.ch == 'p', "Later zone wins on overlap");
+    e = (input_event_t){.type = KEY_MOUSE_CLICK, .mouse_x = 25, .mouse_y = 3};
+    ASSERT_TRUE(!term_apply_click_zone(&e) && e.type == KEY_MOUSE_CLICK, "End column is outside the zone");
+    e = (input_event_t){.type = KEY_MOUSE_CLICK, .mouse_x = 12, .mouse_y = 3, .mouse_btn = 2};
+    ASSERT_TRUE(!term_apply_click_zone(&e), "Right click is not a button press");
+    term_clear();
+    e = (input_event_t){.type = KEY_MOUSE_CLICK, .mouse_x = 12, .mouse_y = 3};
+    ASSERT_TRUE(!term_apply_click_zone(&e), "term_clear drops last frame's zones");
+    TEST_PASS("test_click_zones");
+}
+
 int main(void) {
+    test_click_zones();
     test_sgr_mouse();
     test_sgr_attrs();
     test_x10_mouse();

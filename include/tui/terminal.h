@@ -136,9 +136,15 @@ void term_get_dimensions(int *rows, int *cols);
 bool term_poll_event(input_event_t *event, int timeout_ms);
 
 /**
- * @brief Clear back buffer.
+ * @brief Clear back buffer and the click zones of the last frame.
  */
 void term_clear(void);
+
+/** Makes a left click on row y, columns [x0, x1), act as a key press of type (ch for KEY_CHAR). Later zones win. */
+void term_add_click_zone(int x0, int x1, int y, key_type_t type, int ch);
+
+/** Rewrites a left click that lands in a click zone into that zone's key event; returns true if it did. */
+bool term_apply_click_zone(input_event_t *event);
 
 /**
  * @brief Put an ASCII character at coordinate with attributes in back buffer.
