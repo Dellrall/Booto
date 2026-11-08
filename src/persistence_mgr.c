@@ -179,7 +179,7 @@ booto_error_t persistence_unlock(persistence_mgr_t *mgr, const char *passphrase)
         source = "/dev/mapper/" PERSISTENCE_MAPPER_NAME;
     }
 
-    if (mount(source, DEFAULT_PERSISTENCE_MOUNT, "ext4", MS_NODEV | MS_NOSUID, NULL) != 0) {
+    if (mount(source, DEFAULT_PERSISTENCE_MOUNT, "ext4", MS_NODEV | MS_NOSUID | MS_NOEXEC, NULL) != 0) {
         LOG_ERROR("Failed to mount persistence volume %s: %s", source, strerror(errno));
         if (mgr->encrypted) close_mapper();
         return BOOTO_ERR_MOUNT_FAILED;
