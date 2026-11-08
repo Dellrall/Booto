@@ -22,12 +22,13 @@ extern "C" {
 #define MAX_DRIVES    16
 #define MAX_MODULES   8
 
-/* Style tokens: 16 ANSI colors only (the Linux console has no more); meaning is always also spelled out in words. */
+/* Style tokens: black and white; green/yellow/red only mean clean/suspicious/failed (cyan keycaps excepted).
+ * 16 ANSI colors only (the Linux console has no more); meaning is always also spelled out in words. */
 #define A_TEXT   MAKE_ATTR(COLOR_DEFAULT, COLOR_DEFAULT, ATTR_NONE)
 #define A_STRONG MAKE_ATTR(COLOR_DEFAULT, COLOR_DEFAULT, ATTR_BOLD)
 #define A_MUTED  MAKE_ATTR(COLOR_DEFAULT, COLOR_DEFAULT, ATTR_DIM)
-#define A_FRAME  MAKE_ATTR(COLOR_CYAN, COLOR_DEFAULT, ATTR_BOLD)   /* focused pane and modals; others use A_MUTED */
-#define A_TARGET MAKE_ATTR(COLOR_YELLOW, COLOR_DEFAULT, ATTR_BOLD)
+#define A_FRAME  MAKE_ATTR(COLOR_DEFAULT, COLOR_DEFAULT, ATTR_BOLD) /* focused pane and modals; others use A_MUTED */
+#define A_TARGET MAKE_ATTR(COLOR_DEFAULT, COLOR_DEFAULT, ATTR_BOLD)
 #define A_OK     MAKE_ATTR(COLOR_GREEN, COLOR_DEFAULT, ATTR_NONE)
 #define A_WARN   MAKE_ATTR(COLOR_YELLOW, COLOR_DEFAULT, ATTR_NONE)
 #define A_BAD    MAKE_ATTR(COLOR_RED, COLOR_DEFAULT, ATTR_BOLD)
@@ -37,7 +38,7 @@ extern "C" {
 #define A_V_CLEAN   MAKE_ATTR(COLOR_BLACK, COLOR_GREEN, ATTR_NONE)
 #define A_V_THREATS MAKE_ATTR(COLOR_BRIGHT_WHITE, COLOR_RED, ATTR_BOLD)
 #define A_V_INCOMPL MAKE_ATTR(COLOR_BLACK, COLOR_YELLOW, ATTR_NONE)
-#define A_V_NONE    MAKE_ATTR(COLOR_BRIGHT_WHITE, COLOR_BLUE, ATTR_BOLD)
+#define A_V_NONE    MAKE_ATTR(COLOR_BLACK, COLOR_WHITE, ATTR_NONE)
 
 typedef struct {
     char name[128];
