@@ -284,6 +284,22 @@ static void render_logs_pane(wm_node_t *n, bool focused, tui_app_state_t *app) {
     pthread_mutex_unlock(&app->log_lock);
 }
 
+/* Scrolled pane body: rows [top, bottom) show content shifted up by pane_scroll; returns that shift. */
+static int scroll_begin(tui_app_state_t *app, pane_type_t t, int top, int bottom) {
+    term_set_clip_rows(top, bottom);
+    return -app->pane_scroll[t];
+}
+
+/* y_end = row after the last content row drawn; records how far the body can scroll and marks hidden rows. */
+static void scroll_end(const wm_node_t *n, tui_app_state_t *app, int top, int bottom, int y_end) {
+    pane_type_t t = n->pane_type;
+    term_set_clip_rows(0, -1);
+    int over = y_end - bottom;
+    app->pane_scroll_max[t] = app->pane_scroll[t] + (over > 0 ? over : 0);
+    if (app->pane_scroll[t] > app->pane_scroll_max[t]) app->pane_scroll[t] = app->pane_scroll_max[t];
+    if (bottom > top) draw_scroll_marks(n, top, bottom - top, app->pane_scroll[t] > 0, over > 0, -1);
+}
+
 /* Appends one clipped line at *y if it is still inside the pane, then advances *y. */
 static void put_row(int x, int *y, int bottom, int w, const char *s, uint32_t attr) {
     if (*y < bottom) term_puts_clip(x, *y, w, s, attr);
@@ -373,6 +389,8 @@ static void render_findings_pane(wm_node_t *n, bool focused, tui_app_state_t *ap
         return;
     }
 
+    int top = y;
+    y += scroll_begin(app, n->pane_type, top, bottom);
     /* Engine / Result / Found / Note; Note, then Found, then Result drop out when narrow. */
     int rx = x0 + 14, fx = rx + 10, nx = fx + 7;
     bool show_res = rx + 7 <= right, show_found = fx + 5 <= right, show_note = nx + 4 <= right;
@@ -384,7 +402,7 @@ static void render_findings_pane(wm_node_t *n, bool focused, tui_app_state_t *ap
         if (show_note) term_puts_clip(nx, y, right - nx, "Note", A_MUTED);
     }
     y++;
-    for (int m = 0; m < SCAN_MOD_COUNT && y < bottom; m++, y++) {
+    for (int m = 0; m < SCAN_MOD_COUNT; m++, y++) {
         int found = forensic_scan_module_threats(r, (scan_module_id_t)m);
         char num[16];
         snprintf(num, sizeof(num), "%d", found);
@@ -406,29 +424,32 @@ static void render_findings_pane(wm_node_t *n, bool focused, tui_app_state_t *ap
         put_row(x0, &y, bottom, iw, sha, A_MUTED);
     }
 
-    if (!r->firmware_ran) return;
-    y++;
-    put_row(x0, &y, bottom, iw, "Firmware of this machine (not part of the verdict)", A_MUTED);
-    /* Check names run to 27 columns, wider than the engine column. */
-    int frx = x0 + 29, fdx = frx + 9;
-    bool show_fres = frx + 4 <= right, show_fdet = fdx + 4 <= right;
-    int fnw = show_fres ? frx - x0 - 1 : iw;
-    for (int c = 0; c < FW_CHECK_COUNT && y < bottom; c++, y++) {
-        const fw_check_t *k = &r->firmware.checks[c];
-        uint32_t ra = k->result == FW_RESULT_PASS ? A_OK : k->result == FW_RESULT_FAIL ? A_BAD
-                    : k->result == FW_RESULT_UNKNOWN ? A_WARN : A_MUTED;
-        term_puts_clip(x0, y, fnw, firmware_check_name((fw_check_id_t)c), A_TEXT);
-        if (show_fres) term_puts_clip(frx, y, fdx - frx - 1, firmware_result_str(k->result), ra);
-        if (show_fdet) term_puts_clip(fdx, y, right - fdx, k->detail, A_MUTED);
+    if (r->firmware_ran) {
+        y++;
+        put_row(x0, &y, bottom, iw, "Firmware of this machine (not part of the verdict)", A_MUTED);
+        /* Check names run to 27 columns, wider than the engine column. */
+        int frx = x0 + 29, fdx = frx + 9;
+        bool show_fres = frx + 4 <= right, show_fdet = fdx + 4 <= right;
+        int fnw = show_fres ? frx - x0 - 1 : iw;
+        for (int c = 0; c < FW_CHECK_COUNT; c++, y++) {
+            const fw_check_t *k = &r->firmware.checks[c];
+            uint32_t ra = k->result == FW_RESULT_PASS ? A_OK : k->result == FW_RESULT_FAIL ? A_BAD
+                        : k->result == FW_RESULT_UNKNOWN ? A_WARN : A_MUTED;
+            term_puts_clip(x0, y, fnw, firmware_check_name((fw_check_id_t)c), A_TEXT);
+            if (show_fres) term_puts_clip(frx, y, fdx - frx - 1, firmware_result_str(k->result), ra);
+            if (show_fdet) term_puts_clip(fdx, y, right - fdx, k->detail, A_MUTED);
+        }
+        if (r->firmware.chipset_unconfirmed)
+            put_row(x0, &y, bottom, iw, "Chipset not confirmed yet: run booto -c -t <disk> to see how to help.", A_WARN);
     }
-    if (r->firmware.chipset_unconfirmed)
-        put_row(x0, &y, bottom, iw, "Chipset not confirmed yet: run booto -c -t <disk> to see how to help.", A_WARN);
+    scroll_end(n, app, top, bottom, y);
 }
 
 static void render_persistence_pane(wm_node_t *n, bool focused, tui_app_state_t *app) {
     draw_frame(n, focused, "Reports");
-    int x0 = n->x + 2, iw = n->w - 4, right = x0 + iw, y = n->y + 1, bottom = n->y + n->h - 1;
+    int x0 = n->x + 2, iw = n->w - 4, right = x0 + iw, top = n->y + 1, bottom = n->y + n->h - 1;
     if (iw <= 0) return;
+    int y = top + scroll_begin(app, n->pane_type, top, bottom);
 
     if (y < bottom) {
         const persistence_mgr_t *p = &app->persist;
@@ -453,10 +474,11 @@ static void render_persistence_pane(wm_node_t *n, bool focused, tui_app_state_t 
         {" F6 ", "Export case report (JSON + Markdown, SHA-256 checksum)"},
         {" F7 ", "Toggle quarantine: flagged files to an encrypted ZIP"},
     };
-    for (size_t i = 0; i < sizeof(HINTS) / sizeof(HINTS[0]) && y < bottom; i++, y++) {
+    for (size_t i = 0; i < sizeof(HINTS) / sizeof(HINTS[0]); i++, y++) {
         int w = term_puts_clip(x0, y, iw, HINTS[i].key, A_KEYCAP);
         term_puts_clip(x0 + w + 1, y, right - (x0 + w + 1), HINTS[i].what, A_TEXT);
     }
+    scroll_end(n, app, top, bottom, y);
 }
 
 void pane_render(wm_node_t *node, bool is_focused, tui_app_state_t *app) {
@@ -568,6 +590,16 @@ bool pane_handle_input(wm_node_t *node, const input_event_t *event, tui_app_stat
         if (event->type == KEY_CHAR && event->ch == ' ') {
             app->modules[app->module_cursor].enabled = !app->modules[app->module_cursor].enabled;
             snprintf(app->status_msg, sizeof(app->status_msg), "Toggled module: %.200s", app->modules[app->module_cursor].name);
+            return true;
+        }
+    } else if (node->pane_type == PANE_THREAT_INSPECTOR || node->pane_type == PANE_PERSISTENCE) {
+        int *s = &app->pane_scroll[node->pane_type];
+        if (event->type == KEY_UP || (event->type == KEY_CHAR && event->ch == 'k')) {
+            if (*s > 0) (*s)--;
+            return true;
+        }
+        if (event->type == KEY_DOWN || (event->type == KEY_CHAR && event->ch == 'j')) {
+            if (*s < app->pane_scroll_max[node->pane_type]) (*s)++;
             return true;
         }
     } else if (node->pane_type == PANE_LIVE_LOGS) {

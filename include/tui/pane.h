@@ -82,6 +82,8 @@ typedef struct {
     module_item_t modules[MAX_MODULES];
     int module_count;
     int module_cursor;
+    int pane_scroll[PANE_COUNT];        // first hidden row count for the Findings and Reports panes
+    int pane_scroll_max[PANE_COUNT];    // set by the last render
 
     // Log state (log_lock guards log_ring/log_head/log_count/log_scroll; appended from any thread)
     pthread_mutex_t log_lock;

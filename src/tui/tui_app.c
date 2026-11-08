@@ -331,6 +331,7 @@ static void finish_forensic_scan(tui_app_state_t *app) {
     }
     free(app->last_scan);
     app->last_scan = r;
+    app->pane_scroll[PANE_THREAT_INSPECTOR] = 0;
     if (r->quarantine_zip[0]) {
         snprintf(log_buf, sizeof(log_buf), "Quarantined %d file%s to %.180s (ZIP password \"infected\").", r->quarantined,
                  r->quarantined == 1 ? "" : "s", r->quarantine_zip);
