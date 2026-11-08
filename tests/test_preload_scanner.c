@@ -256,6 +256,35 @@ static void test_persistence_sweep(void) {
     TEST_PASS("test_persistence_sweep");
 }
 
+static void test_known_rootkit_files(void) {
+    TEST_START("test_known_rootkit_files");
+    make_root();
+    write_file("/etc/libsystem.so", "ELF");
+    write_file("/XxJynx/.keep", "");
+    char link[128];
+    snprintf(link, sizeof(link), "%s/XxJynx/jynx2.so", g_root);
+    ASSERT_TRUE(symlink("/etc/passwd", link) == 0, "Plant symlink");
+    write_file("/usr/lib/libsystem.so", "not an IOC path");
+
+    preload_scan_result_t res;
+    booto_error_t err = preload_scan_rootfs(g_root, &res);
+    remove_tree();
+
+    ASSERT_INT_EQ(err, BOOTO_OK, "Scan must return BOOTO_OK");
+    ASSERT_INT_EQ(res.threats_detected, 2, "Only the two planted IOC paths are reported");
+    bool kinsing = false, jynx = false;
+    for (int i = 0; i < res.threats_detected; i++) {
+        const preload_finding_t *f = &res.findings[i];
+        kinsing |= strcmp(f->rule_id, "IOC_KINSING") == 0 && strcmp(f->target_library, "/etc/libsystem.so") == 0 &&
+                   strcmp(f->sha256, "0000000000000000000000000000000000000000000000000000000000000000") != 0;
+        /* A symlink is reported but never followed out of the target root (no hash, nothing to quarantine). */
+        jynx |= strcmp(f->rule_id, "IOC_JYNX2") == 0 && f->target_library[0] == '\0';
+    }
+    ASSERT_TRUE(kinsing, "Kinsing libsystem.so reported and hashed");
+    ASSERT_TRUE(jynx, "Jynx2 symlink reported without following it");
+    TEST_PASS("test_known_rootkit_files");
+}
+
 int main(void) {
     printf("\n--- Running LD_PRELOAD & PAM Interceptor Tests ---\n");
     test_ld_preload_detection();
@@ -267,6 +296,7 @@ int main(void) {
     test_udev_run_hook();
     test_merged_usr_not_doubled();
     test_persistence_sweep();
+    test_known_rootkit_files();
     TEST_SUMMARY();
     return 0;
 }

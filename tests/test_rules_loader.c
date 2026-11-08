@@ -171,11 +171,14 @@ static void test_absent_uses_builtin(void) {
     const rules_dbx_set_t *dbx = NULL;
     const rules_lkm_set_t *lkm = NULL;
     const rules_mbr_set_t *mbr = NULL;
+    const rules_ioc_set_t *ioc = NULL;
     booto_error_t e1 = rules_get_dbx(&dbx);
     booto_error_t e2 = rules_get_lkm(&lkm);
     booto_error_t e3 = rules_get_mbr(&mbr);
+    booto_error_t e4 = rules_get_ioc(&ioc);
     cleanup_dir(dir);
-    ASSERT_TRUE(e1 == BOOTO_OK && e2 == BOOTO_OK && e3 == BOOTO_OK, "Absent rules fall back to built-ins");
+    ASSERT_TRUE(e1 == BOOTO_OK && e2 == BOOTO_OK && e3 == BOOTO_OK && e4 == BOOTO_OK, "Absent rules fall back to built-ins");
+    ASSERT_TRUE(ioc->source == RULES_SOURCE_BUILTIN && ioc->count > 0, "IOC built-in non-empty");
     ASSERT_INT_EQ(dbx->source, RULES_SOURCE_BUILTIN, "DBX built-in");
     ASSERT_INT_EQ(lkm->source, RULES_SOURCE_BUILTIN, "LKM built-in");
     ASSERT_INT_EQ(mbr->source, RULES_SOURCE_BUILTIN, "MBR built-in");
@@ -199,9 +202,11 @@ static void test_repo_rules_match_builtin(void) {
     static rules_dbx_set_t file_dbx;
     static rules_lkm_set_t file_lkm;
     static rules_mbr_set_t file_mbr;
+    static rules_ioc_set_t file_ioc;
     const rules_dbx_set_t *dbx = NULL;
     const rules_lkm_set_t *lkm = NULL;
     const rules_mbr_set_t *mbr = NULL;
+    const rules_ioc_set_t *ioc = NULL;
 
     setenv("BOOTO_RULES_DIR", "rules", 1);
     setenv("BOOTO_RULES_DIR_ONLY", "1", 1);
@@ -209,6 +214,9 @@ static void test_repo_rules_match_builtin(void) {
     ASSERT_INT_EQ(rules_get_dbx(&dbx), BOOTO_OK, "Repo DBX rules load");
     ASSERT_INT_EQ(rules_get_lkm(&lkm), BOOTO_OK, "Repo LKM rules load");
     ASSERT_INT_EQ(rules_get_mbr(&mbr), BOOTO_OK, "Repo MBR rules load");
+    ASSERT_INT_EQ(rules_get_ioc(&ioc), BOOTO_OK, "Repo IOC rules load");
+    ASSERT_INT_EQ(ioc->source, RULES_SOURCE_FILE, "IOC from file");
+    file_ioc = *ioc;
     ASSERT_INT_EQ(dbx->source, RULES_SOURCE_FILE, "DBX from file");
     ASSERT_INT_EQ(lkm->source, RULES_SOURCE_FILE, "LKM from file");
     ASSERT_INT_EQ(mbr->source, RULES_SOURCE_FILE, "MBR from file");
@@ -221,6 +229,7 @@ static void test_repo_rules_match_builtin(void) {
     booto_error_t e1 = rules_get_dbx(&dbx);
     booto_error_t e2 = rules_get_lkm(&lkm);
     booto_error_t e3 = rules_get_mbr(&mbr);
+    booto_error_t e4 = rules_get_ioc(&ioc);
     cleanup_dir(dir);
     unsetenv("BOOTO_RULES_DIR");
     unsetenv("BOOTO_RULES_DIR_ONLY");
@@ -232,6 +241,9 @@ static void test_repo_rules_match_builtin(void) {
     ASSERT_TRUE(memcmp(file_dbx.entries, dbx->entries, sizeof(dbx->entries)) == 0, "DBX entries identical");
     ASSERT_TRUE(memcmp(file_lkm.entries, lkm->entries, sizeof(lkm->entries)) == 0, "LKM entries identical");
     ASSERT_TRUE(memcmp(file_mbr.entries, mbr->entries, sizeof(mbr->entries)) == 0, "MBR entries identical");
+    ASSERT_INT_EQ(e4, BOOTO_OK, "IOC built-ins load");
+    ASSERT_INT_EQ(file_ioc.count, ioc->count, "IOC counts equal");
+    ASSERT_TRUE(memcmp(file_ioc.entries, ioc->entries, sizeof(ioc->entries)) == 0, "IOC entries identical");
     TEST_PASS("test_repo_rules_match_builtin");
 }
 

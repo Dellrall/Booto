@@ -5,7 +5,7 @@
 # fetched from the network.
 # - UEFI DBX revocations: from the vendored Microsoft dbx list (rules/sources/) via
 #   scripts/gen_dbx_rules.py, which also writes src/dbx_builtin.inc when run from the repo.
-# - LKM rootkit and MBR/VBR bootkit signatures: kept in sync by hand with the built-in
+# - LKM rootkit, MBR/VBR bootkit and rootkit file IOC rules: kept in sync by hand with the built-in
 #   tables in src/rules_loader.c.
 # From the repo root, `scripts/update_rules.sh rules` reproduces the committed rules/ byte-for-byte.
 # ==============================================================================
@@ -210,8 +210,86 @@ cat << 'EOF_MBR' > "${RULES_DIR}/mbr_bootkit_signatures.json"
 }
 EOF_MBR
 
+# 4. Known rootkit file paths (presence under the target root is the indicator; mirrors G_BUILTIN_IOC)
+echo "[+] Writing known rootkit file indicators..."
+cat << 'EOF_IOC' > "${RULES_DIR}/rootkit_file_iocs.json"
+{
+  "files": [
+    {
+      "name": "Jynx2 LD_PRELOAD Rootkit",
+      "rule_id": "IOC_JYNX2",
+      "description": "Jynx2 installs its hooking libraries under /XxJynx",
+      "paths": [
+        "/XxJynx/jynx2.so",
+        "/XxJynx/reality.so"
+      ]
+    },
+    {
+      "name": "Reptile Rootkit",
+      "rule_id": "IOC_REPTILE",
+      "description": "Reptile keeps its control tools in its default /reptile directory",
+      "paths": [
+        "/reptile/reptile_cmd",
+        "/reptile/reptile_shell",
+        "/reptile/reptile_start"
+      ]
+    },
+    {
+      "name": "Kinsing Cryptojacker",
+      "rule_id": "IOC_KINSING",
+      "description": "Kinsing drops libsystem.so (preloaded to hide its miner) and its kdevtmpfsi miner",
+      "paths": [
+        "/etc/libsystem.so",
+        "/var/tmp/kinsing",
+        "/var/tmp/kdevtmpfsi",
+        "/tmp/kinsing",
+        "/tmp/kdevtmpfsi"
+      ]
+    },
+    {
+      "name": "Ebury OpenSSH Backdoor",
+      "rule_id": "IOC_EBURY_LIBNS2",
+      "description": "Ebury (Operation Windigo) loads its backdoor from libns2.so",
+      "paths": [
+        "/lib/libns2.so",
+        "/lib64/libns2.so",
+        "/lib/x86_64-linux-gnu/libns2.so",
+        "/usr/lib64/libns2.so"
+      ]
+    },
+    {
+      "name": "SucKIT Rootkit",
+      "rule_id": "IOC_SUCKIT",
+      "description": "SucKIT replaces init and hides its files under these paths",
+      "paths": [
+        "/sbin/initsk12",
+        "/sbin/initxrk",
+        "/usr/share/locale/sk/.sk12"
+      ]
+    },
+    {
+      "name": "T0rn Rootkit",
+      "rule_id": "IOC_T0RN",
+      "description": "T0rn keeps its tools in hidden directories under /usr",
+      "paths": [
+        "/usr/src/.puta",
+        "/usr/info/.t0rn"
+      ]
+    },
+    {
+      "name": "Phalanx2 Rootkit",
+      "rule_id": "IOC_PHALANX2",
+      "description": "Phalanx2 stores its configuration in /etc/khubd.p2",
+      "paths": [
+        "/etc/khubd.p2"
+      ]
+    }
+  ]
+}
+EOF_IOC
+
 echo "[+] Sealing rules files (sha256sum)..."
-for f in uefi_dbx_revocations lkm_rootkit_signatures mbr_bootkit_signatures; do
+for f in uefi_dbx_revocations lkm_rootkit_signatures mbr_bootkit_signatures rootkit_file_iocs; do
     sha256sum "${RULES_DIR}/${f}.json" > "${RULES_DIR}/${f}.json.sha256"
 done
 
@@ -219,3 +297,4 @@ echo "=== Rules Generated Successfully ==="
 echo "Total DBX Rules: ${DBX_COUNT}"
 echo "Total LKM Rules: 15"
 echo "Total MBR Rules: 6"
+echo "Total File IOC Rules: 7"
