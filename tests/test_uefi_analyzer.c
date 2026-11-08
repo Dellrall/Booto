@@ -222,6 +222,40 @@ static void test_pe_wrapping_offset_rejected(void) {
     TEST_PASS("test_pe_wrapping_offset_rejected");
 }
 
+/* An 8 KiB executable section: random bytes are flagged as packed, ordinary-looking bytes are not. */
+static bool packed_flagged(bool random_bytes) {
+    static uint8_t b[0x2200];
+    build_pe(b, sizeof(b), true, false);
+    size_t sect = 0x84 + 20 + 0xF0;
+    b[sect + 16] = 0x00; b[sect + 17] = 0x20;      // SizeOfRawData = 0x2000
+    b[sect + 39] = 0x20;                           // IMAGE_SCN_MEM_EXECUTE
+    uint32_t x = 2463534242u;
+    for (size_t i = 0x200; i < sizeof(b); i++) {
+        x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+        b[i] = random_bytes ? (uint8_t)x : (uint8_t)(i % 16);
+    }
+    const char *path = "/tmp/booto_packed_test.efi";
+    FILE *fp = fopen(path, "wb");
+    if (!fp) return false;
+    fwrite(b, 1, sizeof(b), fp);
+    fclose(fp);
+    uefi_scan_result_t res;
+    memset(&res, 0, sizeof(res));
+    uefi_inspect_efi_file(path, &res);
+    unlink(path);
+    for (int i = 0; i < res.bootkits_detected; i++) {
+        if (strcmp(res.findings[i].rule_id, "UEFI_PACKED_CODE_SECTION") == 0) return true;
+    }
+    return false;
+}
+
+static void test_packed_code_section(void) {
+    TEST_START("test_packed_code_section");
+    ASSERT_TRUE(packed_flagged(true), "High-entropy executable section is flagged as packed");
+    ASSERT_TRUE(!packed_flagged(false), "Low-entropy executable section is not flagged");
+    TEST_PASS("test_packed_code_section");
+}
+
 int main(void) {
     printf("\n--- Running UEFI & ESP Bootkit Analyzer Tests ---\n");
     test_synthetic_pe32_plus_parser();
@@ -230,6 +264,7 @@ int main(void) {
     test_authenticode_invariance();
     test_pe32_parser();
     test_pe_wrapping_offset_rejected();
+    test_packed_code_section();
     TEST_SUMMARY();
     return 0;
 }

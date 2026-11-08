@@ -30,6 +30,9 @@ typedef struct {
     bool is_revoked_dbx;
     char matched_threat[96];
     booto_severity_t matched_severity;
+    uint32_t exec_ptr;        // largest executable section: file offset (0 = none)
+    uint32_t exec_size;       // and raw size
+    double exec_entropy;      // its entropy in bits/byte (set by uefi_parse_pe_file only)
 } pe_efi_info_t;
 
 typedef struct {

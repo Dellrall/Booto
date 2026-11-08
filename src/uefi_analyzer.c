@@ -29,6 +29,8 @@ static bool in_bounds(size_t len, uint64_t off, uint64_t size) {
     return off <= len && size <= len - off;
 }
 
+#define PE_SCN_MEM_EXECUTE 0x20000000u
+
 typedef struct { uint32_t ptr; uint32_t size; } raw_section_t;
 
 static int cmp_section(const void *a, const void *b) {
@@ -120,6 +122,10 @@ booto_error_t uefi_parse_pe_buffer(const uint8_t *buf, size_t len, pe_efi_info_t
             free(secs);
             return BOOTO_ERR_CORRUPT_DATA;
         }
+        if ((rd32(e + 36) & PE_SCN_MEM_EXECUTE) && size > info->exec_size) {
+            info->exec_ptr = ptr;
+            info->exec_size = size;
+        }
         secs[n].ptr = ptr;
         secs[n].size = size;
         n++;
@@ -192,11 +198,19 @@ booto_error_t uefi_parse_pe_file(const char *path, pe_efi_info_t *info) {
     }
 
     booto_error_t ret = uefi_parse_pe_buffer(buf, (size_t)fsize, info);
+    if (ret == BOOTO_OK && info->exec_size) { // range already bounds-checked by the parser
+        size_t hist[256] = { 0 };
+        for (uint32_t i = 0; i < info->exec_size; i++) hist[buf[info->exec_ptr + i]]++;
+        info->exec_entropy = entropy_bits(hist, info->exec_size);
+    }
     snprintf(info->file_path, sizeof(info->file_path), "%s", path);
     free(buf);
 
     return ret;
 }
+
+#define UEFI_PACKED_ENTROPY_BITS 7.2
+#define UEFI_PACKED_MIN_BYTES 4096u
 
 static void add_uefi_threat(uefi_scan_result_t *result,
                             const char *threat_name,
@@ -251,6 +265,17 @@ booto_error_t uefi_inspect_efi_file(const char *efi_path, uefi_scan_result_t *re
                         "UEFI_MISSING_AUTHENTICODE",
                         SEVERITY_HIGH,
                         "EFI executable does not contain an embedded Authenticode signature table");
+    }
+
+    // 3. Heuristic: compressed or encrypted code (packer / loader stub). Normal x86-64 code is about 6 bits/byte.
+    if (pe.exec_size >= UEFI_PACKED_MIN_BYTES && pe.exec_entropy >= UEFI_PACKED_ENTROPY_BITS) {
+        add_uefi_threat(result,
+                        "Packed EFI Executable",
+                        efi_path,
+                        pe.sha256,
+                        "UEFI_PACKED_CODE_SECTION",
+                        SEVERITY_MEDIUM,
+                        "Executable section is high-entropy (compressed or encrypted code), typical of packed bootkit loaders");
     }
 
     return BOOTO_OK;
