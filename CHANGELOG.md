@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Mouse in VMs (VirtualBox, QEMU, VMware tablets) and on touchscreens**: Booto reads absolute pointers straight from `/dev/input` and draws its own pointer, so it sits under the host cursor. Before, `gpm` turned the tablet's positions into relative motion, starting from the middle of the screen and drifting past the edges. Booto grabs these devices while it runs, so `gpm` stops moving its own pointer for them; touchpads and ordinary mice still go through `gpm`. Needs root, as on the live ISO.
+
 ## [1.5.1-beta] - 2026-11-08
 
 ### Fixed

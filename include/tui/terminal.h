@@ -117,6 +117,19 @@ int term_init(void);
 /** Decodes one complete CSI sequence s[0..len) (ESC '[' ... final) into event; leaves KEY_NONE if unknown. */
 void term_parse_csi(const unsigned char *s, size_t len, input_event_t *event);
 
+/** One evdev absolute pointer: axis ranges and the last cell it pointed at (-1 until known). */
+typedef struct {
+    int fd;
+    int x_min, x_max, y_min, y_max;
+    int x, y;
+} term_abs_ptr_t;
+
+/** Maps an absolute axis value in [min, max] onto a cell index in [0, cells). */
+int term_abs_to_cell(int value, int min, int max, int cells);
+
+/** Feeds one evdev event (type, code, value) to p; returns true and fills out on a click or wheel. */
+bool term_abs_feed(term_abs_ptr_t *p, unsigned type, unsigned code, int value, int rows, int cols, input_event_t *out);
+
 /** Writes the SGR escape for attr into out; returns its length, or 0 if it does not fit. */
 size_t term_sgr(uint32_t attr, char *out, size_t len);
 
