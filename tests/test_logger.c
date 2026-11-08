@@ -2,9 +2,11 @@
  * @file test_logger.c
  * @brief Unit tests for forensic logger subsystem.
  */
+#define _XOPEN_SOURCE 700 // posix_openpt, grantpt, unlockpt, ptsname
 #include "test_framework.h"
 #include "logger.h"
 
+#include <fcntl.h>
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
@@ -90,11 +92,35 @@ static void test_logger_two_threads(void) {
     TEST_PASS("test_logger_two_threads");
 }
 
+static void test_logger_use_color(void) {
+    TEST_START("test_logger_use_color");
+    FILE *file = tmpfile();
+    ASSERT_TRUE(file != NULL, "tmpfile opens");
+    unsetenv("NO_COLOR");
+    ASSERT_INT_EQ(logger_use_color(file), 0, "A file gets no color");
+    fclose(file);
+
+    int master = posix_openpt(O_RDWR | O_NOCTTY);
+    ASSERT_TRUE(master >= 0 && grantpt(master) == 0 && unlockpt(master) == 0, "pty opens");
+    FILE *tty = fopen(ptsname(master), "w");
+    ASSERT_TRUE(tty != NULL, "pty slave opens");
+    ASSERT_INT_EQ(logger_use_color(tty), 1, "A terminal gets color");
+    setenv("NO_COLOR", "1", 1);
+    ASSERT_INT_EQ(logger_use_color(tty), 0, "NO_COLOR turns color off");
+    setenv("NO_COLOR", "", 1);
+    ASSERT_INT_EQ(logger_use_color(tty), 1, "Empty NO_COLOR is ignored");
+    unsetenv("NO_COLOR");
+    fclose(tty);
+    close(master);
+    TEST_PASS("test_logger_use_color");
+}
+
 int main(void) {
     printf("\n--- Running Logger Tests ---\n");
     test_logger_callback();
     test_logger_callback_silences_stderr();
     test_logger_two_threads();
+    test_logger_use_color();
     TEST_SUMMARY();
     return 0;
 }
