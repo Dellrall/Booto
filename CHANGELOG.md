@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.0-beta] - 2026-11-09
+
 ### Added
 - **Live mouse on the Linux console**: Booto reads real mice through evdev, the way it already read VM tablets, and draws its own pointer. Borders now follow the mouse while you drag (before, they jumped on release). The mouse goes back to gpm in the root shell. Desktop terminals and SSH sessions keep their own pointer; Booto grabs nothing there.
 - **Resize pointer**: over a pane border the pointer turns into `↔` or `↕`, and the border being dragged lights up. In terminals, hover is reported too (mode 1003).
