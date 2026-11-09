@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Man pages**: `man booto` covers every option, TUI key, exit code and error message; `man booto-checks` explains each finding ID, its severity and what to check. Both ship on the ISO (with `man-db`); `make test` fails when a rule ID or option has no entry.
+
 ### Changed
 - License: GPL-3.0-or-later (was MIT). The ISO ships the license text at `/usr/share/booto/LICENSE`.
 
