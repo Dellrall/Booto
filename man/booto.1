@@ -142,11 +142,21 @@ so it cannot run by accident when the ZIP is opened elsewhere.
 Show debug messages.
 .SH TUI
 The TUI shows tiled panes: Storage, Scanner modules, Live logs, Threat
-inspector and Case report. The mouse works on the Linux console (through
+inspector and Case report. Click to focus a pane or select a row, click a bar
+button, and use the wheel to scroll. Drag a border to resize the panes on
+either side; the cell next to a border grabs it too. Over a border the pointer
+turns into a left-right or up-down arrow, and the border being dragged is
+drawn in bold cyan.
+.PP
+On the Linux console, run as root,
+.B booto
+reads mice and VM tablets directly from
+.I /dev/input/event*
+and draws its own pointer, a reverse-video cell. It holds them while it runs
+and hands them back to
 .BR gpm (8)
-or evdev) and in terminals with mouse reporting: click to focus a pane or
-select a row, click a bar button, drag a border to resize, and use the wheel
-to scroll.
+in the root shell. Elsewhere (a desktop terminal, SSH) the terminal's own
+mouse reporting is used.
 .SS Keys
 .TP
 .B F5
