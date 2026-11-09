@@ -17,6 +17,7 @@
 #include <openssl/objects.h>
 #include <openssl/pkcs7.h>
 #include <openssl/x509.h>
+#include <openssl/x509v3.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -24,6 +25,37 @@
 
 #define WIN_CERT_TYPE_PKCS_SIGNED_DATA 0x0002
 #define SPC_INDIRECT_DATA_OID "1.3.6.1.4.1.311.2.1.4"
+
+#include "ms_roots.inc"
+
+/* The signer chains to a Microsoft root. Expiry is ignored: boot files outlive their signing certificates. */
+static bool signer_is_microsoft(PKCS7 *p7) {
+    static const unsigned char *const roots[] = { MicRooCerAut_2010_06_23_crt, MicRooCerAut2011_2011_03_22_crt,
+                                                  MicrosoftRootCert_crt };
+    const unsigned int lens[] = { MicRooCerAut_2010_06_23_crt_len, MicRooCerAut2011_2011_03_22_crt_len,
+                                  MicrosoftRootCert_crt_len };
+    STACK_OF(X509) *signers = PKCS7_get0_signers(p7, NULL, 0);
+    X509_STORE *store = X509_STORE_new();
+    X509_STORE_CTX *ctx = X509_STORE_CTX_new();
+    bool ok = false;
+    if (signers && sk_X509_num(signers) == 1 && store && ctx) {
+        for (size_t i = 0; i < sizeof(roots) / sizeof(roots[0]); i++) {
+            const unsigned char *p = roots[i];
+            X509 *c = d2i_X509(NULL, &p, (long)lens[i]);
+            if (c) X509_STORE_add_cert(store, c);
+            X509_free(c);
+        }
+        if (X509_STORE_CTX_init(ctx, store, sk_X509_value(signers, 0), p7->d.sign->cert) == 1) {
+            X509_STORE_CTX_set_flags(ctx, X509_V_FLAG_NO_CHECK_TIME);
+            X509_STORE_CTX_set_purpose(ctx, X509_PURPOSE_ANY);
+            ok = X509_verify_cert(ctx) == 1;
+        }
+    }
+    X509_STORE_CTX_free(ctx);
+    X509_STORE_free(store);
+    sk_X509_free(signers);
+    return ok;
+}
 
 static bool oid_is(const ASN1_OBJECT *obj, const char *dotted) {
     char txt[64];
@@ -87,6 +119,7 @@ static authenticode_state_t check_p7(PKCS7 *p7, const pe_efi_info_t *info) {
 void authenticode_verify(const uint8_t *buf, size_t len, pe_efi_info_t *info) {
     if (!buf || !info) return;
     info->authenticode_state = AUTHENTICODE_NONE;
+    info->authenticode_microsoft = false;
     if (!info->has_authenticode) return; // parser already bounds-checked the table against len
     (void)len;
 
@@ -104,6 +137,7 @@ void authenticode_verify(const uint8_t *buf, size_t len, pe_efi_info_t *info) {
     const unsigned char *der = wc + 8;
     PKCS7 *p7 = d2i_PKCS7(NULL, &der, (long)(dw_len - 8));
     if (p7) info->authenticode_state = check_p7(p7, info);
+    if (info->authenticode_state == AUTHENTICODE_VALID) info->authenticode_microsoft = signer_is_microsoft(p7);
     PKCS7_free(p7);
     ERR_clear_error();
 }

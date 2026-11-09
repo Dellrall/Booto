@@ -342,6 +342,10 @@ static void test_authenticode_signature(void) {
     size_t len = sign_pe(b, sizeof(b));
     ASSERT_TRUE(len > 0, "Test image signed");
     ASSERT_INT_EQ(verify_state(b, len), AUTHENTICODE_VALID, "Intact signed image verifies");
+    pe_efi_info_t signed_info;
+    ASSERT_INT_EQ(uefi_parse_pe_buffer(b, len, &signed_info), BOOTO_OK, "Signed image parses");
+    authenticode_verify(b, len, &signed_info);
+    ASSERT_TRUE(!signed_info.authenticode_microsoft, "Self-signed image does not chain to a Microsoft root");
 
     b[0x250] ^= 0x01;
     ASSERT_INT_EQ(verify_state(b, len), AUTHENTICODE_HASH_MISMATCH, "Patched section breaks the signed digest");
