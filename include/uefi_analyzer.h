@@ -36,6 +36,7 @@ typedef struct {
     uint32_t cert_table_size; // Security Directory Size
     bool has_authenticode;
     authenticode_state_t authenticode_state; // set by uefi_parse_pe_file / authenticode_verify
+    bool authenticode_microsoft; // VALID and the signer chains to a Microsoft root (expiry ignored)
     bool is_revoked_dbx;
     char matched_threat[96];
     booto_severity_t matched_severity;
@@ -81,7 +82,8 @@ booto_error_t uefi_parse_pe_buffer(const uint8_t *buf, size_t len, pe_efi_info_t
 
 /**
  * @brief Verify the embedded Authenticode signature of an image uefi_parse_pe_buffer already parsed.
- *        Checks signature integrity and the signed digest; it does not check the signer against db.
+ *        Checks signature integrity and the signed digest, and whether the signer chains to a Microsoft root;
+ *        it does not check the signer against db.
  * @param buf Same bytes passed to uefi_parse_pe_buffer.
  * @param len Buffer length.
  * @param info Parsed info; authenticode_state is written.
