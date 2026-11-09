@@ -87,6 +87,7 @@ test: version $(TARGET) $(TEST_BINS)
 		echo "Executing $$t..."; \
 		$$t || exit 1; \
 	done
+	@scripts/check_man.sh
 	@echo "All tests passed successfully!"
 
 asan: clean
