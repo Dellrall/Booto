@@ -1,0 +1,353 @@
+.TH BOOTO-CHECKS 7 2026-11-09 "Booto" "Miscellaneous"
+.SH NAME
+booto-checks \- every finding Booto can report, what it means, and what to do
+.SH DESCRIPTION
+Each finding in a
+.BR booto (1)
+scan carries a rule ID, a severity and the file or sector it was found in.
+This page lists every rule ID by engine.
+.PP
+Severities, lowest to highest:
+.BR INFO ,
+.BR LOW ,
+.BR MEDIUM ,
+.BR HIGH ,
+.BR CRITICAL .
+A case report's
+.B highest_severity
+is the highest one among its findings. Initramfs, preload/persistence and
+package findings carry no severity of their own and count as
+.BR CRITICAL ,
+because each one is direct evidence of tampering.
+.PP
+Any finding makes the verdict
+.BR THREATS .
+.B LOW
+and
+.B MEDIUM
+findings also occur on clean systems (custom builds, third-party drivers);
+check them against what the owner installed before you call the machine
+compromised.
+.PP
+.B MBR_UNKNOWN
+and
+.B RULE_UNKNOWN
+appear only when a finding was created without an ID; please report them as
+bugs.
+.SH MBR AND VBR
+Run on raw sectors of
+.BR \-t " \fIdev\fR."
+.TP
+.BR MBR_INVALID_BOOT_SIGNATURE " (HIGH)"
+Sector 0 does not end with 0x55AA. The MBR was overwritten or wiped. Common
+after a wiper; also on blank or GPT-only disks written by unusual tools.
+.TP
+.BR MBR_CORRUPT_PARTITION_TABLE " (HIGH)"
+A partition entry's status byte is neither 0x00 nor 0x80. The table was
+edited by hand or by malware.
+.TP
+.BR MBR_MULTIPLE_ACTIVE_PARTITIONS " (MEDIUM)"
+More than one partition is marked bootable. Legal for some old tools, but
+also a way to redirect booting.
+.TP
+.BR MBR_GAP_ANOMALOUS_PAYLOAD " (HIGH)"
+The sectors between the MBR and the first partition hold data that is neither
+zero nor a known GRUB or Syslinux stage. Bootkits hide their second stage
+here.
+.TP
+.BR MBR_BOOTKIT_ROVNIX " (CRITICAL)"
+Rovnix/Carberp boot code that jumps to hidden sectors before the partition
+table is read.
+.TP
+.BR MBR_BOOTKIT_TDL4_MEBROOT " (CRITICAL)"
+TDL4 or Sinowal (Mebroot): the INT 13h disk handler is rewired to load the
+rootkit from reserved sectors.
+.TP
+.BR MBR_BOOTKIT_STONED " (CRITICAL)"
+Classic Stoned-family bootkit: hooks INT 13h and moves the original boot
+sector to high memory.
+.TP
+.BR MBR_WIPER_RANSOMWARE " (CRITICAL)"
+HermeticWiper-style destructive MBR or ransomware screen in place of the boot
+loader.
+.TP
+.BR MBR_HEURISTIC_DISK_WRITE " (HIGH)"
+Unrecognised boot code calls the BIOS disk-write service. Normal boot loaders
+only read. Checked only when the boot loader is not a known one.
+.TP
+.BR VBR_INVALID_SIGNATURE " (HIGH)"
+A partition boot record has a Microsoft OEM ID but no 0x55AA signature.
+.TP
+.BR VBR_CORRUPTED_BPB " (HIGH)"
+A partition boot record has impossible disk geometry in its BIOS parameter
+block, a sign of a VBR hook or tampering.
+.TP
+.BR VBR_BOOTKIT_GAPZ " (CRITICAL)"
+GAPZ/Cidox code in a partition boot record that takes control before the
+Windows kernel starts.
+.SH KERNEL MODULES
+Run on every
+.I .ko
+(also
+.IR .ko.gz ,
+.IR .ko.xz ,
+.IR .ko.zst )
+under the target's
+.IR /lib/modules .
+The
+.B LKM_*
+signature rules match symbol names the module imports or defines.
+.TP
+.BR LKM_UNSIGNED " (HIGH)"
+The module has no signature although the kernel's own modules are signed: it
+was added after the system was installed. DKMS drivers (NVIDIA, VirtualBox,
+ZFS) also show up here; compare with what the owner installed.
+.TP
+.BR LKM_MISSING_LICENSE " (LOW)"
+The module declares no license. Rootkits often skip it; so do some
+home-built modules.
+.TP
+.BR LKM_HOOK_SYS_CALL_TABLE " (CRITICAL)"
+References
+.BR sys_call_table ,
+the table rootkits patch to hook system calls.
+.TP
+.BR LKM_KALLSYMS_LOOKUP " (MEDIUM)"
+Resolves unexported kernel symbols at run time, the first step of most
+syscall hooks. Some legitimate tracing modules do this too.
+.TP
+.BR LKM_DIAMORPHINE_CORE " (CRITICAL)"
+Diamorphine rootkit symbols.
+.TP
+.BR LKM_HOOK_KILL " (CRITICAL)"
+Hooks
+.B kill
+to accept magic signals, for example signal 64 to grant root.
+.TP
+.BR LKM_HOOK_GETDENTS ", " LKM_HOOK_GETDENTS64 " (CRITICAL)"
+Hooks directory listing to hide files and directories from
+.BR ls (1).
+.TP
+.BR LKM_DKOM_HIDE_MODULE " (CRITICAL)"
+Unlinks itself from the module list so
+.BR lsmod (8)
+does not show it.
+.TP
+.BR LKM_DKOM_HIDE_PROC " (CRITICAL)"
+Hides processes from
+.IR /proc .
+.TP
+.BR LKM_FTRACE_HOOK_INSTALL " (CRITICAL)"
+Uses ftrace to redirect kernel functions.
+.TP
+.BR LKM_FTRACE_HOOK_REMOVE " (HIGH)"
+Ftrace hook removal routine, found with the hook above.
+.TP
+.BR LKM_KHOOK_ENGINE " (CRITICAL)"
+Khook inline function hooking framework.
+.TP
+.BR LKM_REPTILE_HOOK " (CRITICAL)"
+Reptile rootkit file and network hooks.
+.TP
+.BR LKM_SUTERUSU_SIGNATURE " (CRITICAL)"
+Suterusu rootkit framework.
+.TP
+.BR LKM_NET_PORT_HIDER " (CRITICAL)"
+Hooks the TCP or UDP socket listing to hide ports from
+.BR ss (8)
+and
+.BR netstat (8).
+.SH UEFI
+Run on every EFI executable on the EFI System Partition.
+.TP
+.BR UEFI_DBX_REVOCATION_MATCH " (per entry)"
+The file's Authenticode hash is in Microsoft's Secure Boot revocation list:
+a known bootkit or a known-vulnerable loader, such as the Windows boot
+manager BlackLotus downgrades to.
+.TP
+.BR UEFI_AUTHENTICODE_HASH_MISMATCH " (CRITICAL)"
+The signature is intact but the file was changed after signing: a patched
+loader.
+.TP
+.BR UEFI_MISSING_AUTHENTICODE " (HIGH)"
+The file is not signed. Fine only if Secure Boot is off and the owner built
+it.
+.TP
+.BR UEFI_AUTHENTICODE_INVALID " (HIGH)"
+The signature table is malformed or its PKCS#7 signature does not verify.
+.TP
+.BR UEFI_SBAT_REVOKED " (MEDIUM)"
+The loader's SBAT generation is below the current revocation level: a
+revoked, known-vulnerable shim or GRUB.
+.TP
+.BR UEFI_PACKED_CODE_SECTION " (MEDIUM)"
+The code section is near-random (compressed or encrypted), typical of packed
+bootkit loaders.
+.TP
+.BR UEFI_ESP_SYSTEM32 " (HIGH)"
+Executables in
+.IR ESP:/system32 ,
+where BlackLotus stages its vulnerable boot chain.
+.TP
+.BR UEFI_ESP_FOREIGN_LOADER " (HIGH)"
+GRUB or shim inside
+.IR EFI/Microsoft ,
+the BlackLotus payload layout.
+.TP
+.BR UEFI_ESP_SHADOW_LOADER " (MEDIUM)"
+A copy of a boot loader renamed aside, how a replacement loader chainloads
+the original.
+.SH INITRAMFS
+Each initramfs image is unpacked in memory and its scripts are searched.
+These findings are reported by title:
+.TP
+.B Reverse Shell Payload
+.I /dev/tcp/
+or
+.I /dev/udp/
+redirection in a boot script.
+.TP
+.B Interactive Reverse Shell
+.B bash \-i
+in a boot script.
+.TP
+.B Netcat Backdoor
+.B nc \-e
+in a boot script.
+.TP
+.B FIFO Pipe Shell Backdoor
+.B mkfifo /tmp/
+in a boot script, the usual reverse-shell pipe.
+.TP
+.B Silent Remote Payload Fetcher
+.B curl \-s
+or
+.B wget \-q
+during early boot.
+.TP
+.BR "Ramdisk LKM Injection" ", " "Temp LKM Injection"
+.B insmod
+from
+.I /dev/shm
+or
+.IR /tmp .
+.TP
+.B Untrusted Kernel Re-execution
+.B kexec \-l
+during boot: swaps in another kernel.
+.PP
+A malformed, truncated or unrecognised image is not a finding: it makes the
+engine
+.B FAILED
+and the verdict INCOMPLETE.
+.SH PRELOAD AND PERSISTENCE
+.TP
+.B PRELOAD_ACTIVE_HOOK
+.I /etc/ld.so.preload
+loads a library into every program: the classic userland rootkit hook.
+.TP
+.B PRELOAD_ENV_HOOK
+.I /etc/environment
+sets
+.B LD_PRELOAD
+for every login.
+.TP
+.B PRELOAD_SUSPICIOUS_CONF_PATH
+An
+.I /etc/ld.so.conf.d
+entry adds a library directory in a temporary or hidden path.
+.TP
+.B PERSIST_SYSTEMD_EXEC
+A systemd unit runs a program from a temporary or hidden path, or code it
+fetched.
+.TP
+.B PERSIST_CRON
+A cron job or boot script does the same.
+.TP
+.B PERSIST_SHELL_PROFILE
+A shell profile starts by running a temporary-path program, fetched code, or
+.BR LD_PRELOAD .
+.TP
+.B PERSIST_SSH_FORCED_COMMAND
+An
+.I authorized_keys
+entry forces a command that runs on every SSH login.
+.TP
+.B PERSIST_MODPROBE_INSTALL
+A modprobe
+.B install
+rule runs a program whenever a module loads.
+.TP
+.B PERSIST_UDEV_RUN
+A udev rule runs a shell or a temporary-path program as root on device
+events (the sedexp technique).
+.TP
+.BR IOC_JYNX2 ", " IOC_REPTILE ", " IOC_KINSING ", " IOC_EBURY_LIBNS2 ", " IOC_SUCKIT ", " IOC_T0RN ", " IOC_PHALANX2
+A file exists at a known install path of that rootkit (Jynx2, Reptile,
+Kinsing, Ebury, SucKIT, T0rn, Phalanx2). The paths are in
+.IR rootkit_file_iocs.json .
+.SH PACKAGE INTEGRITY
+Packaged files are hashed and compared with the package database. Each
+finding names the file, its package and the reason:
+.TP
+.B content differs from package
+The file was changed after install, for example a trojaned
+.BR sshd (8).
+A config file the admin edited can also show up here.
+.TP
+.B replaced by a symlink
+.TP
+.B no longer a regular file
+.PP
+Missing and unreadable files are counted in the log but are not findings.
+.SH FIRMWARE AUDIT
+Runs on the machine Booto booted on, in device mode. Each check is
+.BR ok ,
+.B issue
+or
+.BR unknown ;
+none changes the verdict.
+.TP
+.B Secure Boot on
+.TP
+.B Setup mode off
+In setup mode anyone can enroll keys.
+.TP
+.B Platform key
+A platform key is enrolled and well formed.
+.TP
+.B No test keys (PKfail)
+No key marked "DO NOT TRUST" or "DO NOT SHIP" (vendor test keys) in PK, KEK
+or db.
+.TP
+.B Revocation list (dbx)
+The dbx is not empty.
+.TP
+.B Shim MOK keys known
+Every machine-owner key belongs to a known distribution; binary hashes
+trusted without a signature are reported.
+.TP
+.B No pending BootNext
+No one-time boot entry is waiting to run.
+.TP
+.B IOMMU described (DMAR/IVRS)
+The firmware describes an IOMMU, so DMA attacks can be blocked. Needs root.
+.TP
+.B Thunderbolt DMA protection
+.TP
+.BR "SMM locked" ", " "SMRAM range protected" ", " "BIOS write protection"
+Chipset registers that stop code from writing firmware or SMM memory. Only
+read on confirmed chipsets; others report unknown.
+.TP
+.B Boot measurements (TPM)
+The TPM event log is read and the firmware measurements (PCR 0 to 7) are
+replayed, so changes to the boot chain can be detected.
+.PP
+With
+.BR \-x ,
+UEFI variables over 4 KiB with near-random contents are reported as possible
+hidden code, and the SPI flash is dumped read-only with
+.BR flashrom (8)
+for offline analysis.
+.SH SEE ALSO
+.BR booto (1)

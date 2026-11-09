@@ -1,0 +1,395 @@
+'\" t
+.TH BOOTO 1 2026-11-09 "Booto" "User Commands"
+.SH NAME
+booto \- live forensic scanner for Linux rootkits and bootkits
+.SH SYNOPSIS
+.B booto
+.RB [ \-c ]
+.RB [ \-t
+.IR dev ]
+.RB [ \-s
+.IR path ]
+.RB [ \-p
+.IR dir ]
+.RB [ \-q ]
+.RB [ \-x ]
+.RB [ \-V ]
+.br
+.B booto
+.RB [ \-d | \-m | \-u | \-v | \-h ]
+.SH DESCRIPTION
+.B booto
+inspects a suspect machine's disk from a separate, trusted live system.
+It never runs code from the target: block devices are mounted read-only,
+and every engine reads files and sectors as plain data.
+.PP
+Without
+.BR \-c ,
+.B booto
+starts the full-screen text interface (TUI). With
+.BR \-c ,
+it runs one headless scan and exits with a verdict code (see
+.BR "EXIT STATUS" ).
+.PP
+A scan runs six engines on the target. Each finding they can report is
+listed by ID in
+.BR booto-checks (7).
+.TP
+.B MBR/VBR
+Sector 0, the gap before the first partition, and each partition's volume
+boot record: signature, partition table, known bootkit byte patterns, and
+code hidden in the gap.
+.TP
+.B Kernel
+Every kernel module under
+.IR /lib/modules :
+rootkit symbol signatures, missing license, and unsigned modules on a kernel
+whose own modules are signed. Compressed modules are unpacked in memory.
+.TP
+.B UEFI
+Every EFI executable on the EFI System Partition: Secure Boot DBX revocation,
+Authenticode signature and image hash, SBAT revocation, packed code, and
+BlackLotus-style file layout.
+.TP
+.B Initramfs
+Each initramfs image, unpacked in memory: boot scripts that open reverse
+shells, fetch code, or load modules from temporary paths.
+.TP
+.B Preload/persistence
+.IR /etc/ld.so.preload ,
+.IR /etc/environment ,
+systemd units, cron, shell profiles, SSH authorized keys, modprobe and udev
+rules, and known rootkit install paths.
+.TP
+.B Package integrity
+Packaged system files are hashed and compared with the dpkg, rpm (4.16 and
+later, SQLite) or pacman database of the target.
+.PP
+When
+.B booto
+scans a device (not a directory), it also audits the firmware of the machine
+it is running on: Secure Boot state, keys, IOMMU, SMM and BIOS write
+protection. That audit is reported separately and does not change the verdict.
+.SH OPTIONS
+.TP
+.BR \-h ", " \-\-help
+Show the option summary and exit.
+.TP
+.BR \-v ", " \-\-version
+Show the version, git hash and build time, then exit.
+.TP
+.BR \-c ", " \-\-cli
+Run one headless scan instead of the TUI. Without
+.B \-t
+or
+.BR \-s ,
+it picks a target partition by itself and stops with
+.B No scan target
+when it finds none.
+.TP
+.BR \-d ", " \-\-dry\-run
+Print the planned scan (target, engines, rule files and report path) and exit
+without touching any disk.
+.TP
+.BR \-m ", " \-\-mock\-drives
+Show virtual drives in the TUI. For testing the interface without real disks.
+.TP
+.BR \-t ", " \-\-target " \fIdev\fR"
+Raw block device to scan, for example
+.IR /dev/sda .
+Its partitions are mounted read-only under a private directory, and the EFI
+System Partition is found and mounted automatically. A LUKS partition must be
+unlocked first (F3 in the TUI).
+.TP
+.BR \-s ", " \-\-scan\-dir " \fIpath\fR"
+Scan a root file system that is already mounted at
+.IR path .
+The MBR/VBR engine and the firmware audit are skipped.
+.TP
+.BR \-p ", " \-\-persistence\-dir " \fIdir\fR"
+Write the case report to
+.IR dir :
+.I CASE\-<date>\-<time>.json
+and
+.IR .md ,
+each with a
+.I .sha256
+seal file.
+.TP
+.BR \-u ", " \-\-update\-rules
+Regenerate the sealed rule files by running
+.IR scripts/update_rules.sh .
+Nothing is fetched from the network.
+.TP
+.BR \-x ", " \-\-expert\-firmware
+CLI mode, as root only. Also scan UEFI variables for large high-entropy blobs
+(hidden code) and dump the SPI flash read-only with
+.BR flashrom (8).
+Slower; off by default.
+.TP
+.BR \-q ", " \-\-quarantine
+CLI mode, with
+.BR \-p .
+Copy each flagged file into a ZIP under
+.IR dir/quarantine ,
+encrypted with the password
+.BR infected .
+Each file is stored as
+.I <path>.malware
+so it cannot run by accident when the ZIP is opened elsewhere.
+.TP
+.BR \-V ", " \-\-verbose
+Show debug messages.
+.SH TUI
+The TUI shows tiled panes: Storage, Scanner modules, Live logs, Threat
+inspector and Case report. The mouse works on the Linux console (through
+.BR gpm (8)
+or evdev) and in terminals with mouse reporting: click to focus a pane or
+select a row, click a bar button, drag a border to resize, and use the wheel
+to scroll.
+.SS Keys
+.TP
+.B F5
+Scan the drive selected in Storage.
+.TP
+.B F6
+Export the case report (JSON and Markdown, with SHA-256 seals) to report storage.
+.TP
+.B F7
+Toggle quarantine for the next scan (see
+.BR \-q ).
+.TP
+.B F3
+Unlock the selected LUKS drive with its passphrase.
+.TP
+.B F4
+Unlock the encrypted report partition on the Booto USB.
+.TP
+.BR F10 ", " q
+Open the exit menu:
+.B P
+power off,
+.B R
+reboot,
+.B S
+root shell (type
+.B exit
+to return to Booto),
+.B Q
+quit to the console,
+.B Esc
+back.
+.TP
+.B Tab
+Focus the next pane.
+.TP
+.BR Alt+arrow
+Focus the pane in that direction.
+.TP
+.B Alt+Z
+Zoom the focused pane to full screen, or back.
+.TP
+.B Alt+M
+Swap the focused pane with the next one.
+.TP
+.BR Alt+H ", " Alt+V
+Split the focused pane horizontally or vertically.
+.TP
+.BR Alt+[ ", " Alt+]
+Shrink or grow the focused split by 5%.
+.TP
+.B Ctrl+R
+Resize mode:
+.BR h / j / k / l
+or arrows move the focused border by one cell,
+.BR H / J / K / L
+by five;
+.BR Esc ,
+.B Enter
+or
+.B Ctrl+R
+leave it.
+.TP
+.BR Up / Down ", " j / k
+Move the selection or scroll a line.
+.BR PgUp / PgDn ,
+.BR Home / End
+scroll a page or to the ends.
+.TP
+.B Enter
+In the Threat inspector, open the Inspect view of the first flagged file.
+.SS Inspect view
+A read-only view of the flagged file's first bytes. The
+.B Map
+tab lists its hashes and its sections with offset, size and whether they hold
+code; the
+.B Hex
+tab shows the bytes.
+.BR 1 / 2
+or
+.B Tab
+switch tabs,
+.BR j / k ,
+.BR PgUp / PgDn
+and
+.BR g / G
+scroll,
+.B Esc
+or
+.B q
+close it.
+.SH EXIT STATUS
+In CLI mode:
+.TP
+.B 0
+CLEAN: every enabled engine ran and found nothing.
+.TP
+.B 1
+THREATS: at least one engine reported a threat.
+.TP
+.B 2
+INCOMPLETE: an engine failed, nothing ran, or the scan could not start.
+A clean result from the other engines does not prove the target clean.
+.PP
+.B \-u
+exits with the status of the rule generator. The other options exit 0, or 1
+on an unknown option.
+.SH DIAGNOSTICS
+Messages go to standard error as
+.BR INFO ,
+.BR WARN
+or
+.BR ERROR .
+An
+.B ERROR
+during a scan marks its engine
+.B FAILED
+and makes the verdict INCOMPLETE. The common ones:
+.TP
+.B Cannot open block device '\fIdev\fB'
+The device does not exist, or
+.B booto
+is not running as root.
+.TP
+.B Cannot mount \fIdev\fB read-only
+The partition has an unknown or damaged file system, is LUKS-locked, or is
+mounted elsewhere read-write. Unlock it, or mount it yourself and use
+.BR \-s .
+.TP
+.B Failed to open LUKS container '\fIdev\fB': invalid passphrase
+Wrong passphrase. Nothing on the drive changes; try again.
+.TP
+.B Decompressor '\fIname\fB' not available
+A module or initramfs is compressed with a format whose tool is missing. That
+part was not inspected. The live ISO ships gzip, xz, zstd, lz4 and bzip2.
+.TP
+.B Berkeley DB rpm database (rpm < 4.16) is not supported
+The target's rpm database is too old to read; package integrity was not
+verified.
+.TP
+.B Rules seal mismatch for '\fIfile\fB'
+A rule file does not match its
+.I .sha256
+seal, or the seal is missing. The engine that needs it fails closed instead of scanning with altered
+rules. Restore the file or run
+.BR "booto \-u" .
+.TP
+.B Rootkit file indicators unavailable
+The IOC rule file could not be loaded; known install paths were not checked.
+.TP
+.B Firmware: this chipset is not confirmed yet
+Some firmware checks read chipset registers whose layout is only verified on
+listed chipsets; those checks are reported as unknown.
+.TP
+.B Out of memory: quarantine export disabled
+The scan continues without copying files to the quarantine ZIP.
+.PP
+Internal error codes, shown as
+.BR "err: \fIn\fR" :
+.TS
+l l.
+0	OK
+\-1	generic failure
+\-2	invalid argument
+\-3	out of memory
+\-4	read or write error
+\-5	mount failed
+\-6	permission denied (run as root)
+\-7	not found
+\-8	corrupt or malformed data
+\-9	LUKS volume is locked
+\-10	cancelled
+.TE
+.SH ENVIRONMENT
+.TP
+.B BOOTO_RULES_DIR
+Look for rule files in this directory first.
+.TP
+.B BOOTO_RULES_DIR_ONLY
+When set to
+.BR 1 ,
+look only in
+.BR BOOTO_RULES_DIR .
+.TP
+.B BOOTO_ASCII
+When set to
+.BR 1 ,
+draw the banner with
+.B #
+instead of block characters.
+.TP
+.B NO_COLOR
+When set, print no colors.
+.TP
+.B USER
+Examiner name written into case reports.
+.SH FILES
+.TP
+.I /usr/share/booto/rules/
+Sealed rule files:
+.IR lkm_rootkit_signatures.json ,
+.IR mbr_bootkit_signatures.json ,
+.IR rootkit_file_iocs.json ,
+.IR uefi_dbx_revocations.json ,
+each with a
+.I .sha256
+seal. Searched after
+.B BOOTO_RULES_DIR
+and
+.IR /persistence/rules ,
+before
+.IR ./rules .
+Built-in copies are used when no file is found.
+.TP
+.I /persistence/
+Report partition on the Booto USB (label
+.BR BOOTO_DATA ,
+optionally LUKS-encrypted). It holds
+.I cases/
+(case reports and quarantine ZIPs),
+.I logs/
+and
+.IR rules/ .
+Without it, reports stay in RAM and are lost at power off.
+.SH EXAMPLES
+Scan a disk and save the report on the USB:
+.PP
+.RS
+.B booto \-c \-t /dev/nvme0n1 \-p /persistence/cases
+.RE
+.PP
+Same, also quarantining flagged files:
+.PP
+.RS
+.B booto \-c \-t /dev/sda \-p /persistence/cases \-q
+.RE
+.PP
+Scan a root file system you already mounted:
+.PP
+.RS
+.B booto \-c \-s /mnt/suspect
+.RE
+.SH SEE ALSO
+.BR booto-checks (7),
+.BR cryptsetup (8),
+.BR flashrom (8)
