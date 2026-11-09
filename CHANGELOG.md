@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Live mouse on the Linux console**: Booto reads real mice through evdev, the way it already read VM tablets, and draws its own pointer. Borders now follow the mouse while you drag (before, they jumped on release). The mouse goes back to gpm in the root shell. Desktop terminals and SSH sessions keep their own pointer; Booto grabs nothing there.
+- **Resize pointer**: over a pane border the pointer turns into `↔` or `↕`, and the border being dragged lights up. In terminals, hover is reported too (mode 1003).
+- **Easier border grab**: the cell on either side of a border grabs it, and a click next to a border no longer moves it.
 - **Man pages**: `man booto` covers every option, TUI key, exit code and error message; `man booto-checks` explains each finding ID, its severity and what to check. Both ship on the ISO (with `man-db`); `make test` fails when a rule ID or option has no entry.
 
 ### Changed

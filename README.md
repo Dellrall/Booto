@@ -135,6 +135,7 @@ On the live system, `man booto` lists every option, key and error, and `man boot
 | `Space` | **Toggle Target** | Toggle target disk flag / toggle scanner module |
 | `Enter` | **Mount / Unmount** | Mount target storage strictly READ-ONLY |
 | `Mouse Click` | **Click to Focus** | Focus a pane and select the row under the pointer; clicking a row's checkbox toggles it |
+| `Mouse Drag` | **Resize** | Drag a pane border (or the cell beside it); the pointer turns into `↔`/`↕` over one |
 | `Mouse Wheel` | **Scroll** | Scroll the pane under the pointer; `↑`/`↓` or `j`/`k` scroll the focused Findings and Reports panes |
 | `F3` | **Unlock LUKS** | Unlock an encrypted target partition read-only |
 | `F4` | **Unlock Storage** | Mount the report partition on the boot USB (asks for its passphrase if encrypted) |
