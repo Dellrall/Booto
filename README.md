@@ -119,6 +119,8 @@ The shipped DBX, LKM and MBR signatures are illustrative samples, not an authori
 
 ---
 
+On the live system, `man booto` lists every option, key and error, and `man booto-checks` explains each finding ID. Read them from the repo with `man -l man/booto.1`.
+
 ## TUI Window Navigation & Shortcuts
 
 | Shortcut | Action | Description |
