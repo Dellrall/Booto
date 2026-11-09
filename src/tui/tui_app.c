@@ -195,6 +195,60 @@ static void render_exit_modal(tui_app_state_t *app, int rows, int cols) {
     }
 }
 
+/* Right-click menu: the focused pane's own actions first, then layout. Each row acts as its key. */
+typedef struct {
+    const char *label, *key;
+    key_type_t type;
+    int ch;
+} menu_item_t;
+#define MENU_MAX 10
+
+static int menu_items(pane_type_t t, menu_item_t *out) {
+    int n = 0;
+    if (t == PANE_STORAGE_DEVICES) {
+        out[n++] = (menu_item_t){"Mount / unlock", "Enter", KEY_ENTER, 0};
+        out[n++] = (menu_item_t){"Toggle target", "Space", KEY_CHAR, ' '};
+        out[n++] = (menu_item_t){"Scan", "F5", KEY_F5, 0};
+    } else if (t == PANE_SCANNER_MODULES) {
+        out[n++] = (menu_item_t){"Toggle engine", "Space", KEY_CHAR, ' '};
+        out[n++] = (menu_item_t){"Scan", "F5", KEY_F5, 0};
+    } else if (t == PANE_THREAT_INSPECTOR) {
+        out[n++] = (menu_item_t){"Inspect", "Enter", KEY_ENTER, 0};
+        out[n++] = (menu_item_t){"Export report", "F6", KEY_F6, 0};
+    }
+    out[n++] = (menu_item_t){"Zoom", "Alt+Z", KEY_ALT_Z, 0};
+    out[n++] = (menu_item_t){"Split side by side", "Alt+V", KEY_ALT_V, 0};
+    out[n++] = (menu_item_t){"Split top / bottom", "Alt+H", KEY_ALT_H, 0};
+    out[n++] = (menu_item_t){"Swap with next", "Alt+M", KEY_ALT_M, 0};
+    out[n++] = (menu_item_t){"Resize", "^R", KEY_CHAR, CTRL_R};
+    return n;
+}
+
+/* Draws the menu with its corner at (*mx, *my), moved to fit the screen; row i clicks as KEY_CHAR -1 - i. */
+static void render_menu(const menu_item_t *it, int n, int cur, int *mx, int *my, int rows, int cols) {
+    int lw = 0, kw = 0;
+    for (int i = 0; i < n; i++) {
+        if ((int)strlen(it[i].label) > lw) lw = (int)strlen(it[i].label);
+        if ((int)strlen(it[i].key) > kw) kw = (int)strlen(it[i].key);
+    }
+    int w = lw + kw + 6, h = n + 2;
+    if (*mx + w > cols) *mx = cols - w;
+    if (*my + h > rows - 1) *my = rows - 1 - h; /* keep the bottom bar visible */
+    if (*mx < 0) *mx = 0;
+    if (*my < 1) *my = 1;
+    term_fill(*mx, *my, w, h, A_TEXT);
+    term_draw_box(*mx, *my, w, h, NULL, A_FRAME, A_STRONG);
+    for (int i = 0; i < n; i++) {
+        int y = *my + 1 + i, x = *mx + 2, end = *mx + w - 1;
+        uint32_t a = i == cur ? A_CURSOR : A_TEXT;
+        term_fill(*mx + 1, y, w - 2, 1, a);
+        put_clip(&x, y, end, it[i].label, a);
+        x = end - 1 - (int)strlen(it[i].key);
+        put_clip(&x, y, end, it[i].key, i == cur ? A_CURSOR : A_MUTED);
+        term_add_click_zone(*mx + 1, end, y, KEY_CHAR, -1 - i);
+    }
+}
+
 /* Lines of the Inspect tab: Map = facts, section table and entropy strip; Hex = 16 bytes per line. */
 static int inspect_lines(const inspect_sample_t *s, int tab, int width) {
     if (tab == 1) return (int)((s->len + 15) / 16);
@@ -653,6 +707,8 @@ int tui_app_run(booto_context_t *ctx) {
     wm_node_t *last_click_leaf = NULL; /* compared, never dereferenced: a double-click needs the same leaf and row */
     int last_click_y = -1;
     long last_click_ms = 0;
+    menu_item_t menu[MENU_MAX];
+    int menu_n = 0, menu_cur = 0, menu_x = 0, menu_y = 0; /* menu_n > 0 = right-click menu open */
     while (app.running) {
         if (atomic_load(&app.scan_done)) finish_forensic_scan(&app);
 
@@ -675,7 +731,7 @@ int tui_app_run(booto_context_t *ctx) {
         }
 
         // Border under the pointer: <-> or up-down arrow pointer; the dragged one also lights up.
-        bool modal = app.show_exit_modal || app.show_luks_modal || app.show_inspect;
+        bool modal = app.show_exit_modal || app.show_luks_modal || app.show_inspect || menu_n > 0;
         int px, py;
         wm_node_t *hover = drag_split;
         if (!hover && !modal && !app.wm->zoomed_leaf && term_get_pointer(&px, &py))
@@ -694,6 +750,8 @@ int tui_app_run(booto_context_t *ctx) {
             render_luks_modal(&app, rows, cols);
         } else if (app.show_inspect) {
             render_inspect_modal(&app, rows, cols);
+        } else if (menu_n > 0) {
+            render_menu(menu, menu_n, menu_cur, &menu_x, &menu_y, rows, cols);
         }
 
         // 4. Differential screen flush
@@ -791,6 +849,20 @@ int tui_app_run(booto_context_t *ctx) {
             if (app.show_inspect) {
                 inspect_input(&app, &event, rows);
                 continue;
+            }
+
+            if (menu_n > 0) {
+                /* Up/Down move, Enter or a click picks (then runs as its key); any other key or click closes it. */
+                int pick = event.type == KEY_ENTER ? menu_cur
+                         : event.type == KEY_CHAR && event.ch < 0 && -1 - event.ch < menu_n ? -1 - event.ch : -1;
+                if (event.type == KEY_UP || event.type == KEY_DOWN) {
+                    menu_cur = (menu_cur + (event.type == KEY_UP ? menu_n - 1 : 1)) % menu_n;
+                    continue;
+                }
+                if (event.type == KEY_NONE || event.type == KEY_MOUSE_DRAG || event.type == KEY_MOUSE_RELEASE) continue;
+                menu_n = 0;
+                if (pick < 0) continue;
+                event = (input_event_t){.type = menu[pick].type, .ch = menu[pick].ch};
             }
 
             bool mouse = event.type == KEY_MOUSE_CLICK || event.type == KEY_MOUSE_WHEEL_UP ||
@@ -909,6 +981,14 @@ int tui_app_run(booto_context_t *ctx) {
                     if (event.type != KEY_MOUSE_CLICK) {
                         input_event_t step = {.type = event.type == KEY_MOUSE_WHEEL_UP ? KEY_UP : KEY_DOWN};
                         pane_handle_input(hit, &step, &app);
+                    } else if (event.mouse_btn == 2) {
+                        /* Right-click selects the row (never its checkbox, never the Inspect hint) and opens the menu there. */
+                        if (hit->pane_type != PANE_THREAT_INSPECTOR)
+                            pane_handle_click(hit, event.mouse_x == hit->x + 2 ? hit->x + 3 : event.mouse_x, event.mouse_y, &app);
+                        menu_n = menu_items(hit->pane_type, menu);
+                        menu_cur = 0;
+                        menu_x = event.mouse_x;
+                        menu_y = event.mouse_y;
                     } else if (event.mouse_btn == 0) {
                         /* Double-click on a row's label acts on it: Enter on drives (mount / unlock), Space on engines. */
                         struct timespec ts;
