@@ -670,6 +670,19 @@ int tui_app_run(booto_context_t *ctx) {
             if (app.wm->focused_leaf) pane_render(app.wm->focused_leaf, true, &app);
         }
 
+        // Border under the pointer: <-> or up-down arrow pointer; the dragged one also lights up.
+        bool modal = app.show_exit_modal || app.show_luks_modal || app.show_inspect;
+        int px, py;
+        wm_node_t *hover = drag_split;
+        if (!hover && !modal && !app.wm->zoomed_leaf && term_get_pointer(&px, &py))
+            hover = wm_find_divider_at(app.wm->root, px, py);
+        if (drag_split) {
+            const wm_node_t *a = drag_split->left;
+            if (drag_split->split_dir == SPLIT_VERTICAL) term_vline(a->x + a->w - 1, drag_split->y, drag_split->h, A_DRAG);
+            else term_hline(drag_split->x, a->y + a->h - 1, drag_split->w, A_DRAG);
+        }
+        term_set_pointer_glyph(!hover ? 0 : hover->split_dir == SPLIT_VERTICAL ? TERM_G_ARROW_LR : TERM_G_ARROW_UD);
+
         // 3. Render Modal Overlays if active
         if (app.show_exit_modal) {
             render_exit_modal(&app, rows, cols);

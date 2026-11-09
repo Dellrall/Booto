@@ -32,6 +32,7 @@ extern "C" {
 #define A_OK     MAKE_ATTR(COLOR_GREEN, COLOR_DEFAULT, ATTR_NONE)
 #define A_WARN   MAKE_ATTR(COLOR_YELLOW, COLOR_DEFAULT, ATTR_NONE)
 #define A_BAD    MAKE_ATTR(COLOR_RED, COLOR_DEFAULT, ATTR_BOLD)
+#define A_DRAG   MAKE_ATTR(COLOR_CYAN, COLOR_DEFAULT, ATTR_BOLD) /* border being dragged */
 #define A_CURSOR MAKE_ATTR(COLOR_DEFAULT, COLOR_DEFAULT, ATTR_REVERSE)
 #define A_KEYCAP MAKE_ATTR(COLOR_BLACK, COLOR_CYAN, ATTR_NONE)
 /* Black text stays non-bold: bold black is dark grey on the Linux console and unreadable on the band. */
