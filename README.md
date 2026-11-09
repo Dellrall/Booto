@@ -3,7 +3,7 @@
 [![CI](https://github.com/Dellrall/Booto/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Dellrall/Booto/actions/workflows/ci.yml)
 [![Version](https://img.shields.io/github/v/tag/Dellrall/Booto?label=version&include_prereleases)](CHANGELOG.md)
 [![Standard](https://img.shields.io/badge/C-11-blue.svg)](https://en.wikipedia.org/wiki/C11_(C_standard_revision))
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
 
 **Booto** is an amnesic, Tails-inspired Live Linux forensic framework designed for **out-of-band offline rootkit and bootkit detection**. 
 
@@ -165,7 +165,7 @@ Set `NO_COLOR=1` (see [no-color.org](https://no-color.org)) for a monochrome TUI
 
 ## License
 
-This project is licensed under the MIT License.
+Copyright (c) 2026 Lye Wei Lun and Booto contributors. Booto is free software under the GNU General Public License, version 3 or (at your option) any later version; see [LICENSE](LICENSE). Releases up to and including 1.6.0-beta were published under MIT.
 
 The UEFI dbx rules (`rules/uefi_dbx_revocations.json`, `src/dbx_builtin.inc`) are generated from Microsoft's [secureboot_objects](https://github.com/microsoft/secureboot_objects) dbx list, © Microsoft Corporation, BSD-2-Clause-Patent; see `rules/sources/secureboot_objects-License.txt`. To update them, replace `rules/sources/dbx_info_msft_latest.json` with the latest `PreSignedObjects/DBX/dbx_info_msft_latest.json` and run `scripts/update_rules.sh rules`.
 

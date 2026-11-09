@@ -52,6 +52,7 @@ echo "[+] Step 3/6: Installing Booto binary into rootfs..."
 install -m 755 "${REPO_ROOT}/bin/booto" "${ROOTFS_DIR}/usr/local/bin/booto"
 install -d -m 755 "${ROOTFS_DIR}/usr/share/booto/rules"
 install -m 644 "${REPO_ROOT}"/rules/*.json "${REPO_ROOT}"/rules/*.json.sha256 "${ROOTFS_DIR}/usr/share/booto/rules/"
+install -m 644 "${REPO_ROOT}/LICENSE" "${ROOTFS_DIR}/usr/share/booto/LICENSE"
 # The dbx rules derive from Microsoft's secureboot_objects (BSD-2-Clause-Patent): ship its notice.
 install -m 644 "${REPO_ROOT}/rules/sources/secureboot_objects-License.txt" "${ROOTFS_DIR}/usr/share/booto/rules/"
 # The firmware audit reads SMM/SMRR lock bits through /dev/cpu/N/msr (read-only).

@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- License: GPL-3.0-or-later (was MIT). The ISO ships the license text at `/usr/share/booto/LICENSE`.
+
 ## [1.6.0-beta] - 2026-11-09
 
 ### Fixed
