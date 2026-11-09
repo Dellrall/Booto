@@ -11,7 +11,7 @@ Research date: 2026-11-03. Every claim below links its primary source. Three sur
 - **It scans offline.** Almost every Linux rootkit scanner (chkrootkit, rkhunter, unhide, Wazuh, Sandfly, LKRG) runs on the suspect kernel. A kernel rootkit can hide from those tools; it cannot hide from Booto, which never runs that kernel.
 - **Its verdicts are honest.** CLEAN is given only when every engine ran. Classic scanners report "nothing found" even when a check could not run.
 - **Its firmware checks overlap fwupd HSI and go further.** Booto also checks KEK/db test keys, setup mode, SMRAM D_LCK, SMRR, AMD TSEG and Thunderbolt DMA protection, with no Python or daemon.
-- **It is a single MIT-licensed C binary with sealed rules.** Most comparable tools are GPL, AGPL or closed.
+- **It is a single GPL-3.0-or-later C binary with sealed rules.** Most comparable tools are GPL, AGPL or closed.
 
 **Where Booto is behind (fix first)**
 1. **The dbx rules are not real revocation data.** None of the 5 hashes in `rules/uefi_dbx_revocations.json` appear in Microsoft's dbx. Two contain filler patterns (`…0123ef…`). The MoonBounce entry describes an SPI-flash implant as an ESP file. Replace them with hashes generated from [`microsoft/secureboot_objects`](https://github.com/microsoft/secureboot_objects) (BSD-2-Clause-Patent).
@@ -54,7 +54,7 @@ Research date: 2026-11-03. Every claim below links its primary source. Three sur
 
 Still to do from the per-section lists: a baseline/compare mode, YARA rules, the FwHunt rules, bodyfile/mactime output, and a guide to capturing memory with AVML.
 
-Licence note: CHIPSEC, rkhunter, unhide, Wazuh, LKRG, AIDE, Lynis, LiME (GPL), Velociraptor (AGPL) and Volatility 3 (non-MIT) are reference only. These can be used under their own licences: chkrootkit (BSD-2), UAC (Apache-2.0), AVML/sbctl (MIT), UEFITool (BSD-2), FwHunt rules (CC0) and `secureboot_objects` (BSD-2-Clause-Patent).
+Licence note (written while Booto was MIT; Booto is GPL-3.0-or-later since 2026-11-09, so GPL-3.0 and GPL-2.0-or-later code can now be reused, while GPL-2.0-only and AGPL code still cannot; check each project's exact terms before copying): CHIPSEC, rkhunter, unhide, Wazuh, LKRG, AIDE, Lynis, LiME (GPL), Velociraptor (AGPL) and Volatility 3 (non-MIT) are reference only. These can be used under their own licences: chkrootkit (BSD-2), UAC (Apache-2.0), AVML/sbctl (MIT), UEFITool (BSD-2), FwHunt rules (CC0) and `secureboot_objects` (BSD-2-Clause-Patent).
 
 ---
 
@@ -476,7 +476,7 @@ Researched 2026-11-03. Dates and licences come from vendor pages or the GitHub A
 - **Detection:** no rootkit engine. It is imaging plus triage tools.
 - **Maintenance:** current release **9.4.2**, with a Linux 6.17 kernel ([updates](https://sumuri.com/updates/), [notes](https://sumuri.com/updates/paladin-9-lts/)). `[INFERENCE]` The banner path suggests June 2026. It boots with Secure Boot on ([product](https://sumuri.com/paladin/)).
 - **Licence:** proprietary EULA, name-your-price. Corporate users pay at least $25 ([product](https://sumuri.com/paladin/), [EULA](https://sumuri.com/paladin-eula/)).
-- **Booto does better:** open MIT code, automated rootkit, bootkit and firmware verdicts, and no licence gate.
+- **Booto does better:** open GPL-3.0 code, automated rootkit, bootkit and firmware verdicts, and no licence gate.
 - **Booto could learn:** it has separate forensic and non-forensic boot entries, signed-shim Secure Boot support, and it tells users to verify the ISO hash before use.
 
 ## Kali Linux forensic mode
