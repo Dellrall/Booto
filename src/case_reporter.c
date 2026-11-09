@@ -132,9 +132,11 @@ booto_error_t case_report_generate_json(const forensic_case_summary_t *summary,
     fprintf(fp, "},\"findings_summary\":{\"total_threats\":%d,\"highest_severity\":", summary->total_threats);
     json_put_string(fp, summary->highest_severity);
     fprintf(fp, ",\"mbr_bootkit_threats\":%d,\"kernel_lkm_threats\":%d,\"uefi_bootkit_threats\":%d,"
-                "\"initramfs_script_threats\":%d,\"userland_preload_threats\":%d,\"package_integrity_threats\":%d},",
+                "\"initramfs_script_threats\":%d,\"userland_preload_threats\":%d,\"package_integrity_threats\":%d,"
+                "\"windows_boot_threats\":%d},",
             summary->mbr_threats_count, summary->kernel_threats_count, summary->uefi_threats_count,
-            summary->initramfs_threats_count, summary->preload_threats_count, summary->pkg_threats_count);
+            summary->initramfs_threats_count, summary->preload_threats_count, summary->pkg_threats_count,
+            summary->winboot_threats_count);
     fputs("\"verdict\":", fp); json_put_string(fp, summary->verdict);
     fputs(",\"module_status\":{", fp);
     for (int i = 0; i < SCAN_MOD_COUNT; i++) {
@@ -177,6 +179,7 @@ static int summary_module_threats(const forensic_case_summary_t *s, scan_module_
         case SCAN_MOD_INITRAMFS: return s->initramfs_threats_count;
         case SCAN_MOD_PRELOAD:   return s->preload_threats_count;
         case SCAN_MOD_PKG:       return s->pkg_threats_count;
+        case SCAN_MOD_WINBOOT:   return s->winboot_threats_count;
         default:                 return 0;
     }
 }

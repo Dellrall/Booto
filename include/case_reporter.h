@@ -27,8 +27,9 @@ typedef struct {
     int initramfs_threats_count;
     int preload_threats_count;
     int pkg_threats_count;
+    int winboot_threats_count;
     char verdict[16];                 /**< "CLEAN" / "THREATS" / "INCOMPLETE" */
-    char module_status[6][16];        /**< Per-module status, indexed by scan_module_id_t */
+    char module_status[7][16];        /**< Per-module status, indexed by scan_module_id_t */
     int total_threats;
     char highest_severity[16];
     bool firmware_ran;                /**< Host firmware audit ran (device mode only) */

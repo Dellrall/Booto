@@ -405,6 +405,7 @@ static scan_module_id_t pane_module_to_scan_id(const char *name) {
     if (strstr(name, "Initramfs")) return SCAN_MOD_INITRAMFS;
     if (strncmp(name, "LD_PRELOAD", 10) == 0) return SCAN_MOD_PRELOAD;
     if (strncmp(name, "Package", 7) == 0) return SCAN_MOD_PKG;
+    if (strncmp(name, "Windows", 7) == 0) return SCAN_MOD_WINBOOT;
     return SCAN_MOD_COUNT;
 }
 

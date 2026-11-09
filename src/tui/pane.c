@@ -29,6 +29,7 @@ static const struct {
     {"Initramfs scripts", "/boot/initrd.img*"},
     {"LD_PRELOAD & load hooks", "ld.so.preload, modprobe.d, udev"},
     {"Package integrity", "dpkg md5sums, pacman mtree"},
+    {"Windows boot files", "winload, ntoskrnl, drivers"},
 };
 
 void tui_app_state_init(tui_app_state_t *app, booto_context_t *ctx) {

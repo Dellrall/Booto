@@ -44,7 +44,8 @@ static const char *err_name(booto_error_t e) {
 }
 
 const char *forensic_scan_module_name(scan_module_id_t id) {
-    static const char *names[SCAN_MOD_COUNT] = {"MBR/VBR", "UEFI ESP", "Kernel LKM", "Initramfs", "LD_PRELOAD", "Packages"};
+    static const char *names[SCAN_MOD_COUNT] = {"MBR/VBR", "UEFI ESP", "Kernel LKM", "Initramfs", "LD_PRELOAD", "Packages",
+                                                     "Windows boot"};
     return ((unsigned)id < SCAN_MOD_COUNT) ? names[id] : "unknown";
 }
 
@@ -73,6 +74,7 @@ int forensic_scan_module_threats(const forensic_scan_report_t *r, scan_module_id
         case SCAN_MOD_INITRAMFS: return r->initramfs.threats_detected;
         case SCAN_MOD_PRELOAD:   return r->preload.threats_detected;
         case SCAN_MOD_PKG:       return r->pkg.threats_detected;
+        case SCAN_MOD_WINBOOT:   return r->winboot.threats_detected;
         default:                 return 0;
     }
 }
@@ -252,6 +254,8 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
     char rootfs_note[96];
     snprintf(rootfs_note, sizeof(rootfs_note), "rootfs not mounted: %s", err_name(out->mount_err));
     bool have_root = (out->mount_err == BOOTO_OK);
+    bool windows = have_root && winboot_is_windows_root(out->scan_root);
+    static const char WIN_NOTE[] = "Windows install: Linux engine does not apply";
     const char *root = out->scan_root;
     char path[512];
     quarantine_t *q = quarantine_dir ? quarantine_open(quarantine_dir) : NULL;
@@ -268,6 +272,8 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
     if (begin(out, SCAN_MOD_KERNEL, enabled, cb, user)) {
         if (!have_root) {
             set_status(out, SCAN_MOD_KERNEL, SCAN_STATUS_ERROR, out->mount_err, rootfs_note);
+        } else if (windows) {
+            set_status(out, SCAN_MOD_KERNEL, SCAN_STATUS_SKIPPED, BOOTO_OK, WIN_NOTE);
         } else {
             snprintf(path, sizeof(path), "%.256s/lib/modules", root);
             set_result(out, SCAN_MOD_KERNEL, kernel_inspect_directory(path, &out->kernel));
@@ -279,6 +285,8 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
     if (begin(out, SCAN_MOD_INITRAMFS, enabled, cb, user)) {
         if (!have_root) {
             set_status(out, SCAN_MOD_INITRAMFS, SCAN_STATUS_ERROR, out->mount_err, rootfs_note);
+        } else if (windows) {
+            set_status(out, SCAN_MOD_INITRAMFS, SCAN_STATUS_SKIPPED, BOOTO_OK, WIN_NOTE);
         } else if (!find_initramfs(root, path, sizeof(path))) {
             set_status(out, SCAN_MOD_INITRAMFS, SCAN_STATUS_SKIPPED, BOOTO_OK, "no initramfs found");
         } else {
@@ -289,6 +297,7 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
 
     if (begin(out, SCAN_MOD_PRELOAD, enabled, cb, user)) {
         if (!have_root) set_status(out, SCAN_MOD_PRELOAD, SCAN_STATUS_ERROR, out->mount_err, rootfs_note);
+        else if (windows) set_status(out, SCAN_MOD_PRELOAD, SCAN_STATUS_SKIPPED, BOOTO_OK, WIN_NOTE);
         else set_result(out, SCAN_MOD_PRELOAD, preload_scan_rootfs(root, &out->preload));
         for (int i = 0; i < out->preload.threats_detected && i < MAX_PRELOAD_THREATS; i++) {
             const char *lib = out->preload.findings[i].target_library;
@@ -300,6 +309,8 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
     if (begin(out, SCAN_MOD_PKG, enabled, cb, user)) {
         if (!have_root) {
             set_status(out, SCAN_MOD_PKG, SCAN_STATUS_ERROR, out->mount_err, rootfs_note);
+        } else if (windows) {
+            set_status(out, SCAN_MOD_PKG, SCAN_STATUS_SKIPPED, BOOTO_OK, WIN_NOTE);
         } else {
             booto_error_t e = pkg_integrity_scan_rootfs(root, &out->pkg);
             if (e == BOOTO_ERR_NOT_FOUND) {
@@ -315,6 +326,26 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
                 set_status(out, SCAN_MOD_PKG, SCAN_STATUS_OK, e, note);
             } else {
                 set_result(out, SCAN_MOD_PKG, e);
+            }
+        }
+    }
+
+    if (begin(out, SCAN_MOD_WINBOOT, enabled, cb, user)) {
+        if (!have_root) {
+            set_status(out, SCAN_MOD_WINBOOT, SCAN_STATUS_ERROR, out->mount_err, rootfs_note);
+        } else if (!windows) {
+            set_status(out, SCAN_MOD_WINBOOT, SCAN_STATUS_SKIPPED, BOOTO_OK, "not a Windows install");
+        } else {
+            booto_error_t e = winboot_scan_rootfs(root, &out->winboot);
+            for (int i = 0; i < out->winboot.threats_detected && i < MAX_WINBOOT_THREATS; i++)
+                export_file(out, q, "windows", root, out->winboot.findings[i].file_path, QUARANTINE_MAX_ITEM);
+            if (e == BOOTO_OK) {
+                char note[96];
+                snprintf(note, sizeof(note), "%d files; %d drivers catalog-signed, %d third-party",
+                         out->winboot.files_checked, out->winboot.drivers_unsigned, out->winboot.drivers_third_party);
+                set_status(out, SCAN_MOD_WINBOOT, SCAN_STATUS_OK, e, note);
+            } else {
+                set_result(out, SCAN_MOD_WINBOOT, e);
             }
         }
     }
@@ -358,6 +389,8 @@ static booto_severity_t highest_severity(const forensic_scan_report_t *r) {
         if (r->uefi.findings[i].severity > max) max = r->uefi.findings[i].severity;
     for (int i = 0; i < r->kernel.threats_detected; i++)
         if (r->kernel.findings[i].severity > max) max = r->kernel.findings[i].severity;
+    for (int i = 0; i < r->winboot.threats_detected && i < MAX_WINBOOT_THREATS; i++)
+        if (r->winboot.findings[i].severity > max) max = r->winboot.findings[i].severity;
     return max;
 }
 
@@ -384,6 +417,7 @@ void forensic_scan_fill_case_summary(const forensic_scan_report_t *r, const char
     sum->initramfs_threats_count = r->initramfs.threats_detected;
     sum->preload_threats_count = r->preload.threats_detected;
     sum->pkg_threats_count = r->pkg.threats_detected;
+    sum->winboot_threats_count = r->winboot.threats_detected;
     sum->total_threats = r->total_threats;
     snprintf(sum->highest_severity, sizeof(sum->highest_severity), "%s", r->total_threats > 0 ? booto_severity_str(highest_severity(r)) : "NONE");
     snprintf(sum->verdict, sizeof(sum->verdict), "%s", forensic_scan_verdict_str(r->verdict));
