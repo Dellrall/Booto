@@ -28,6 +28,9 @@ static void test_sgr_mouse(void) {
     e = parse("\033[<32;12;6M");
     ASSERT_TRUE(e.type == KEY_MOUSE_DRAG && e.mouse_x == 11 && e.mouse_y == 5, "Left-button motion is a drag at its cell");
     ASSERT_INT_EQ(parse("\033[<34;10;5M").type, KEY_NONE, "Right-button motion is ignored");
+    ASSERT_INT_EQ(parse("\033[<35;20;7M").type, KEY_NONE, "Button-less motion (mode 1003) is not an event");
+    int px, py;
+    ASSERT_TRUE(term_get_pointer(&px, &py) && px == 19 && py == 6, "Button-less motion moves the hover cell");
     ASSERT_INT_EQ(parse("\033[<0;x;5M").type, KEY_NONE, "Malformed sequence is ignored");
     TEST_PASS("test_sgr_mouse");
 }

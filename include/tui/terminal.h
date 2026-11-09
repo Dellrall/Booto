@@ -52,6 +52,8 @@ typedef enum {
 #define TERM_G_DOWN    0x25BCu
 #define TERM_G_SHADE   0x2591u
 #define TERM_G_BLOCK   0x2588u
+#define TERM_G_ARROW_LR 0x2194u /* pointer over a border that moves left/right */
+#define TERM_G_ARROW_UD 0x2195u /* pointer over a border that moves up/down */
 
 /* Key definitions */
 typedef enum {
@@ -131,6 +133,12 @@ void term_shutdown(void);
  * @brief Get current terminal dimensions.
  */
 void term_get_dimensions(int *rows, int *cols);
+
+/** Cell the mouse last pointed at; false while unknown. */
+bool term_get_pointer(int *x, int *y);
+
+/** Shape drawn in reverse video at the pointer cell by the next term_present(); 0 = the cell's own char. */
+void term_set_pointer_glyph(uint32_t cp);
 
 /**
  * @brief Poll for input event (non-blocking or timeout in ms).
