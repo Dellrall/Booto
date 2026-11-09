@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <linux/kd.h>
 #include <sys/ioctl.h>
 #include <sys/select.h>
 #include <termios.h>
@@ -49,7 +50,7 @@ static uint32_t *g_back_chars = NULL;
 static uint32_t *g_back_attrs = NULL;
 static bool g_ascii_only = false;
 
-/* Absolute pointers (VM tablets, touchscreens) read straight from evdev: gpm only handles relative mice. */
+/* Mice and absolute pointers read straight from evdev: through gpm the console reports clicks but never motion. */
 #define MAX_ABS_PTRS 4
 static term_abs_ptr_t g_abs[MAX_ABS_PTRS];
 static int g_abs_count = 0;
@@ -137,6 +138,7 @@ static bool read_abs_pointer(term_abs_ptr_t *p, input_event_t *event) {
     switch (a) {
         case PTR_CLICK_LEFT:  event->type = KEY_MOUSE_CLICK; event->mouse_btn = 0; break;
         case PTR_CLICK_RIGHT: event->type = KEY_MOUSE_CLICK; event->mouse_btn = 2; break; /* X10/SGR button numbers */
+        case PTR_CLICK_MIDDLE: event->type = KEY_MOUSE_CLICK; event->mouse_btn = 1; break;
         case PTR_WHEEL_UP:    event->type = KEY_MOUSE_WHEEL_UP; break;
         case PTR_WHEEL_DOWN:  event->type = KEY_MOUSE_WHEEL_DOWN; break;
         case PTR_DRAG:        event->type = KEY_MOUSE_DRAG; event->mouse_btn = 0; break;
@@ -194,7 +196,9 @@ int term_init(void) {
     (void)w;
 
     update_dimensions();
-    g_abs_count = evdev_ptr_open_all(g_abs, MAX_ABS_PTRS);
+    /* Only on a Linux console: grabbing in a desktop terminal or over SSH would steal the machine's own pointer. */
+    char kb;
+    g_abs_count = ioctl(STDIN_FILENO, KDGKBTYPE, &kb) == 0 ? evdev_ptr_open_all(g_abs, MAX_ABS_PTRS) : 0;
     return 0;
 }
 
