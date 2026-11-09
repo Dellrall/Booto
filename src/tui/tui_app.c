@@ -31,6 +31,7 @@
 static tui_app_state_t *g_current_app = NULL;
 
 #define CTRL_R 18 /* raw-mode byte for Ctrl+R */
+#define DOUBLE_CLICK_MS 400
 
 static void tui_logger_hook(log_level_t level, const char *timestamp, const char *msg, void *user_data) {
     (void)user_data;
@@ -649,6 +650,9 @@ int tui_app_run(booto_context_t *ctx) {
     bool resize_mode = false;
     wm_node_t *drag_split = NULL; /* split whose border the mouse is dragging */
     int drag_dx = 0, drag_dy = 0; /* border minus grab cell: a grab beside the border must not jump it */
+    wm_node_t *last_click_leaf = NULL; /* compared, never dereferenced: a double-click needs the same leaf and row */
+    int last_click_y = -1;
+    long last_click_ms = 0;
     while (app.running) {
         if (atomic_load(&app.scan_done)) finish_forensic_scan(&app);
 
@@ -906,7 +910,23 @@ int tui_app_run(booto_context_t *ctx) {
                         input_event_t step = {.type = event.type == KEY_MOUSE_WHEEL_UP ? KEY_UP : KEY_DOWN};
                         pane_handle_input(hit, &step, &app);
                     } else if (event.mouse_btn == 0) {
-                        pane_handle_click(hit, event.mouse_x, event.mouse_y, &app);
+                        /* Double-click on a row's label acts on it: Enter on drives (mount / unlock), Space on engines. */
+                        struct timespec ts;
+                        clock_gettime(CLOCK_MONOTONIC, &ts);
+                        long now_ms = (long)ts.tv_sec * 1000L + ts.tv_nsec / 1000000L;
+                        bool row = pane_handle_click(hit, event.mouse_x, event.mouse_y, &app);
+                        bool dbl = row && event.mouse_x != hit->x + 2 && hit == last_click_leaf &&
+                                   event.mouse_y == last_click_y && now_ms - last_click_ms <= DOUBLE_CLICK_MS;
+                        last_click_leaf = row && !dbl ? hit : NULL; /* a third click starts over */
+                        last_click_y = event.mouse_y;
+                        last_click_ms = now_ms;
+                        if (dbl && hit->pane_type == PANE_SCANNER_MODULES) {
+                            pane_handle_input(hit, &(input_event_t){.type = KEY_CHAR, .ch = ' '}, &app);
+                        } else if (dbl && atomic_load(&app.scan_active)) {
+                            snprintf(app.status_msg, sizeof(app.status_msg), "Mount and LUKS unlock are disabled while a scan runs.");
+                        } else if (dbl) {
+                            pane_handle_input(hit, &(input_event_t){.type = KEY_ENTER}, &app);
+                        }
                     }
                 }
             } else if (atomic_load(&app.scan_active) && event.type == KEY_ENTER && app.wm->focused_leaf &&

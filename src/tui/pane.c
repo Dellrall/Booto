@@ -511,23 +511,26 @@ void pane_render(wm_node_t *node, bool is_focused, tui_app_state_t *app) {
     }
 }
 
-void pane_handle_click(wm_node_t *node, int x, int y, tui_app_state_t *app) {
-    if (!node || !app) return;
+bool pane_handle_click(wm_node_t *node, int x, int y, tui_app_state_t *app) {
+    if (!node || !app) return false;
     bool on_glyph = x == node->x + 2;
     /* Row maths mirror render_*_pane: drives list starts below its header, modules list at the first inner row. */
     if (node->pane_type == PANE_STORAGE_DEVICES) {
         int vis = node->h - 3, i = list_first(app->drive_cursor, vis) + y - (node->y + 2);
-        if (vis <= 0 || y < node->y + 2 || i >= app->drive_count) return;
+        if (vis <= 0 || y < node->y + 2 || i >= app->drive_count) return false;
         app->drive_cursor = i;
         if (on_glyph) pane_handle_input(node, &(input_event_t){.type = KEY_CHAR, .ch = ' '}, app);
+        return true;
     } else if (node->pane_type == PANE_SCANNER_MODULES) {
         int vis = node->h - 2, i = list_first(app->module_cursor, vis) + y - (node->y + 1);
-        if (vis <= 0 || y < node->y + 1 || i >= app->module_count) return;
+        if (vis <= 0 || y < node->y + 1 || i >= app->module_count) return false;
         app->module_cursor = i;
         if (on_glyph) pane_handle_input(node, &(input_event_t){.type = KEY_CHAR, .ch = ' '}, app);
+        return true;
     } else if (node->pane_type == PANE_THREAT_INSPECTOR && y == app->inspect_hint_y) {
         pane_handle_input(node, &(input_event_t){.type = KEY_ENTER}, app);
     }
+    return false;
 }
 
 bool pane_handle_input(wm_node_t *node, const input_event_t *event, tui_app_state_t *app) {

@@ -149,8 +149,9 @@ void pane_render(wm_node_t *node, bool is_focused, tui_app_state_t *app);
  * @brief Handle user input for the focused pane.
  */
 bool pane_handle_input(wm_node_t *node, const input_event_t *event, tui_app_state_t *app);
-/** Left click at (x, y) inside node: selects the list row there; a click on its checkbox glyph also toggles it. */
-void pane_handle_click(wm_node_t *node, int x, int y, tui_app_state_t *app);
+/** Left click at (x, y) inside node: selects the list row there; a click on its checkbox glyph also toggles it.
+ *  Returns true when a list row was selected. */
+bool pane_handle_click(wm_node_t *node, int x, int y, tui_app_state_t *app);
 
 #ifdef __cplusplus
 }
