@@ -57,6 +57,7 @@ static int g_abs_count = 0;
 static int g_ptr_x = -1, g_ptr_y = -1; /* last cell any mouse report named; -1 = unknown */
 static bool g_ptr_drawn = false;        /* evdev pointer: Booto draws it (reverse video); a terminal or gpm draws its own */
 static uint32_t g_ptr_glyph = 0;        /* shape drawn at the pointer instead of the cell's char; 0 = none */
+static bool g_ptr_moves = false;        /* pointer reports motion (evdev or mode 1003), so hover highlights track it */
 
 /* Unparsed input bytes left over from a read that returned several keys. */
 static unsigned char g_pending[64];
@@ -137,6 +138,7 @@ static bool read_abs_pointer(term_abs_ptr_t *p, input_event_t *event) {
         g_ptr_x = p->x;
         g_ptr_y = p->y;
         g_ptr_drawn = true;
+        g_ptr_moves = true;
     }
     switch (a) {
         case PTR_CLICK_LEFT:  event->type = KEY_MOUSE_CLICK; event->mouse_btn = 0; break;
@@ -212,6 +214,7 @@ void term_shutdown(void) {
     g_abs_count = 0;
     g_ptr_x = g_ptr_y = -1;
     g_ptr_drawn = false;
+    g_ptr_moves = false;
 
     restore_tty(TCSAFLUSH);
     g_raw_active = false;
@@ -262,15 +265,19 @@ void term_add_click_zone(int x0, int x1, int y, key_type_t type, int ch) {
     if (g_zone_count < MAX_CLICK_ZONES && x0 < x1) g_zones[g_zone_count++] = (click_zone_t){x0, x1, y, type, ch};
 }
 
+/* Topmost zone holding (x, y), -1 if none; later zones (modals) cover earlier ones. */
+static int zone_at(int x, int y) {
+    for (int i = g_zone_count - 1; i >= 0; i--)
+        if (y == g_zones[i].y && x >= g_zones[i].x0 && x < g_zones[i].x1) return i;
+    return -1;
+}
+
 bool term_apply_click_zone(input_event_t *event) {
     if (event->type != KEY_MOUSE_CLICK || event->mouse_btn != 0) return false;
-    for (int i = g_zone_count - 1; i >= 0; i--) {
-        if (event->mouse_y == g_zones[i].y && event->mouse_x >= g_zones[i].x0 && event->mouse_x < g_zones[i].x1) {
-            *event = (input_event_t){.type = g_zones[i].type, .ch = g_zones[i].ch};
-            return true;
-        }
-    }
-    return false;
+    int i = zone_at(event->mouse_x, event->mouse_y);
+    if (i < 0) return false;
+    *event = (input_event_t){.type = g_zones[i].type, .ch = g_zones[i].ch};
+    return true;
 }
 
 void term_clear(void) {
@@ -494,6 +501,8 @@ void term_present(void) {
     uint32_t current_attr = 0xFFFFFFFF;
     int cursor_y = -1;
     int cursor_x = -1;
+    /* Underline the clickable zone under the pointer; gpm-only clicks carry no motion, so they never leave one lit. */
+    int hz = g_ptr_moves ? zone_at(g_ptr_x, g_ptr_y) : -1;
 
     for (int y = 0; y < g_rows; y++) {
         for (int x = 0; x < g_cols; x++) {
@@ -501,6 +510,7 @@ void term_present(void) {
             bool at_ptr = x == g_ptr_x && y == g_ptr_y && (g_ptr_drawn || g_ptr_glyph);
             uint32_t ch = at_ptr && g_ptr_glyph ? g_ptr_glyph : g_back_chars[idx];
             uint32_t attr = g_back_attrs[idx] ^ (at_ptr ? ATTR_REVERSE : 0);
+            if (hz >= 0 && y == g_zones[hz].y && x >= g_zones[hz].x0 && x < g_zones[hz].x1) attr |= ATTR_UNDERLINE;
             if (ch != g_front_chars[idx] || attr != g_front_attrs[idx]) {
                 if (cursor_y != y || cursor_x != x) {
                     int w = snprintf(ptr, rem, "\033[%d;%dH", y + 1, x + 1);
@@ -541,6 +551,7 @@ void term_present(void) {
 static void mouse_event(int btn, bool release, int x, int y, input_event_t *event) {
     g_ptr_x = x; /* every report moves the hover cell, including button-less motion (mode 1003) */
     g_ptr_y = y;
+    if (btn & 32) g_ptr_moves = true;
     if (btn & 64) {
         if (release) return;
         event->type = (btn & 1) ? KEY_MOUSE_WHEEL_DOWN : KEY_MOUSE_WHEEL_UP;
