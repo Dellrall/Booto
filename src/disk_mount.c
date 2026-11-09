@@ -526,6 +526,8 @@ booto_error_t disk_discover_partitions(disk_discovery_result_t *result, bool inc
                         snprintf(p->label, sizeof(p->label), "Linux Rootfs");
                     } else if (strcmp(probed_fs, "crypto_LUKS") == 0) {
                         snprintf(p->label, sizeof(p->label), "Encrypted Volume (LUKS)");
+                    } else if (strcmp(probed_fs, "ntfs") == 0) {
+                        snprintf(p->label, sizeof(p->label), "Windows (NTFS)");
                     } else if (strcmp(probed_fs, "xfs") == 0 || strcmp(probed_fs, "btrfs") == 0) {
                         snprintf(p->label, sizeof(p->label), "Linux Filesystem");
                     } else {
@@ -533,8 +535,8 @@ booto_error_t disk_discover_partitions(disk_discovery_result_t *result, bool inc
                     }
                 }
 
-                if (strcmp(probed_fs, "ext4") == 0 || strcmp(probed_fs, "xfs") == 0 ||
-                    strcmp(probed_fs, "btrfs") == 0 || strcmp(probed_fs, "crypto_LUKS") == 0) {
+                if (strcmp(probed_fs, "ext4") == 0 || strcmp(probed_fs, "xfs") == 0 || strcmp(probed_fs, "btrfs") == 0 ||
+                    strcmp(probed_fs, "crypto_LUKS") == 0 || strcmp(probed_fs, "ntfs") == 0) {
                     p->is_target = true;
                 }
             } else {
@@ -640,7 +642,8 @@ booto_error_t disk_mount_ro(const char *dev_path, const char *mount_point, const
     }
 
     // Try common filesystems for unknown/auto detection
-    const char *candidate_fs[] = {"ext4", "vfat", "ntfs", "iso9660", "btrfs", "xfs"};
+    // ntfs3 is the in-kernel NTFS driver; "ntfs" only names it on Linux 6.9 and later.
+    const char *candidate_fs[] = {"ext4", "vfat", "ntfs3", "ntfs", "iso9660", "btrfs", "xfs"};
     size_t num_fs = sizeof(candidate_fs) / sizeof(candidate_fs[0]);
 
     for (size_t i = 0; i < num_fs; i++) {
