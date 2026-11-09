@@ -289,15 +289,21 @@ bool wm_close_focused(wm_tree_t *tree) {
     return true;
 }
 
-wm_node_t *wm_find_divider_at(wm_node_t *node, int x, int y) {
+static wm_node_t *divider_within(wm_node_t *node, int x, int y, int slack) {
     if (!node || node->type != NODE_SPLIT || !node->left) return NULL;
     const wm_node_t *a = node->left;
     bool hit = node->split_dir == SPLIT_VERTICAL
-                   ? x == a->x + a->w - 1 && y >= node->y && y < node->y + node->h
-                   : y == a->y + a->h - 1 && x >= node->x && x < node->x + node->w;
+                   ? abs(x - (a->x + a->w - 1)) <= slack && y >= node->y && y < node->y + node->h
+                   : abs(y - (a->y + a->h - 1)) <= slack && x >= node->x && x < node->x + node->w;
     if (hit) return node;
-    wm_node_t *d = wm_find_divider_at(node->left, x, y);
-    return d ? d : wm_find_divider_at(node->right, x, y);
+    wm_node_t *d = divider_within(node->left, x, y, slack);
+    return d ? d : divider_within(node->right, x, y, slack);
+}
+
+/* A 1-cell line is hard to hit with a mouse: the cells either side count too, unless another border runs through (x, y). */
+wm_node_t *wm_find_divider_at(wm_node_t *node, int x, int y) {
+    wm_node_t *d = divider_within(node, x, y, 0);
+    return d ? d : divider_within(node, x, y, 1);
 }
 
 void wm_move_divider(wm_tree_t *tree, wm_node_t *split, int x, int y) {

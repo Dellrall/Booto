@@ -648,6 +648,7 @@ int tui_app_run(booto_context_t *ctx) {
 
     bool resize_mode = false;
     wm_node_t *drag_split = NULL; /* split whose border the mouse is dragging */
+    int drag_dx = 0, drag_dy = 0; /* border minus grab cell: a grab beside the border must not jump it */
     while (app.running) {
         if (atomic_load(&app.scan_done)) finish_forensic_scan(&app);
 
@@ -873,13 +874,19 @@ int tui_app_run(booto_context_t *ctx) {
                 }
             } else if (event.type == KEY_MOUSE_DRAG || event.type == KEY_MOUSE_RELEASE) {
                 /* Live drag where the terminal reports motion; the Linux console sends only the release, which still lands it. */
-                if (drag_split) wm_move_divider(app.wm, drag_split, event.mouse_x, event.mouse_y);
+                if (drag_split) wm_move_divider(app.wm, drag_split, event.mouse_x + drag_dx, event.mouse_y + drag_dy);
                 if (event.type == KEY_MOUSE_RELEASE) drag_split = NULL;
             } else if (mouse) {
                 wm_node_t *border = event.type == KEY_MOUSE_CLICK && event.mouse_btn == 0 && !app.wm->zoomed_leaf
                                         ? wm_find_divider_at(app.wm->root, event.mouse_x, event.mouse_y) : NULL;
                 wm_node_t *hit = border ? NULL : wm_find_leaf_at(app.wm->root, event.mouse_x, event.mouse_y);
                 drag_split = border;
+                if (border) {
+                    const wm_node_t *a = border->left;
+                    bool vert = border->split_dir == SPLIT_VERTICAL;
+                    drag_dx = vert ? a->x + a->w - 1 - event.mouse_x : 0;
+                    drag_dy = vert ? 0 : a->y + a->h - 1 - event.mouse_y;
+                }
                 if (hit) {
                     app.wm->focused_leaf = hit;
                     if (event.type != KEY_MOUSE_CLICK) {

@@ -127,8 +127,14 @@ static void test_wm_resize(void) {
     wm_node_t *root_split = wm_find_divider_at(tree->root, border, 10);
     ASSERT_TRUE(root_split == tree->root, "Column border belongs to the root split");
     ASSERT_TRUE(wm_find_divider_at(tree->root, border - 3, 10) == NULL, "Inside a pane is not a border");
+    ASSERT_TRUE(wm_find_divider_at(tree->root, border - 1, 10) == root_split, "The cell left of a border grabs it");
+    ASSERT_TRUE(wm_find_divider_at(tree->root, border + 1, 10) == root_split, "The cell right of a border grabs it");
     wm_node_t *row_split = wm_find_divider_at(tree->root, 5, storage->y + storage->h - 1);
     ASSERT_TRUE(row_split == storage->parent, "Row border belongs to the left column split");
+    ASSERT_TRUE(wm_find_divider_at(tree->root, border, storage->y + storage->h - 1) == root_split,
+                "On a junction the exact border wins over a near one");
+    ASSERT_TRUE(wm_find_divider_at(tree->root, border - 1, storage->y + storage->h - 1) == row_split,
+                "Exactly on the row border beats near the column border");
 
     wm_move_divider(tree, root_split, 30, 10);
     ASSERT_INT_EQ(storage->x + storage->w - 1, 30, "Border lands on the dragged column");
