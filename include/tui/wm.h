@@ -105,7 +105,7 @@ void wm_adjust_split_ratio(wm_tree_t *tree, float delta);
  */
 bool wm_close_focused(wm_tree_t *tree);
 
-/** The split whose shared border passes through (x, y), or NULL (for dragging a border with the mouse). */
+/** The split whose shared border passes through or next to (x, y), or NULL (for dragging a border with the mouse). */
 wm_node_t *wm_find_divider_at(wm_node_t *node, int x, int y);
 
 /** Moves split's border to column x (left/right split) or row y (top/bottom split), within the minimum pane sizes. */
