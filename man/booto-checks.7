@@ -300,6 +300,42 @@ A config file the admin edited can also show up here.
 .B no longer a regular file
 .PP
 Missing and unreadable files are counted in the log but are not findings.
+.SH WINDOWS BOOT CHAIN
+Runs when the target root holds
+.IR Windows/System32/ntoskrnl.exe ;
+the Linux engines skip such a root. NTFS is mounted read-only with
+.BR ntfs3 .
+BitLocker volumes cannot be read. The embedded Authenticode signature of
+.BR winload ,
+.BR winresume ,
+.BR ntoskrnl.exe ,
+.B hal.dll
+and
+.B ci.dll
+is checked against Microsoft's roots. Each finding names the file:
+.TP
+.BR "was changed after it was signed" " (CRITICAL)"
+The signature is intact but the file's hash no longer matches it: a patched
+loader or kernel, as FinSpy and ESPecter do.
+.TP
+.BR "is signed, but not by Microsoft" " (CRITICAL)"
+A core boot file signed by someone else is a replacement.
+.TP
+.BR "has a signature that does not verify" " (HIGH)"
+.TP
+.BR "has no embedded signature" " (HIGH)"
+Core boot files always carry one.
+.TP
+.BR "is not a valid PE image" " (HIGH)"
+.PP
+Every
+.I .sys
+file in
+.I System32/drivers
+is checked the same way. A tampered or invalid driver is a finding; a driver
+without an embedded signature (Windows signs many through catalog files) or
+signed by a third party is only counted in the engine's note. Boot
+configuration (BCD) and registry boot-start entries are not read yet.
 .SH FIRMWARE AUDIT
 Runs on the machine Booto booted on, in device mode. Each check is
 .BR ok ,
