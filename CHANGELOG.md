@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0-beta] - 2026-11-09
+
 ### Added
 - **Right-click menu**: right-click a pane for its actions (mount, toggle, scan, inspect, export) and the layout ones (zoom, split, swap, resize). Each row shows its key. Pick with the mouse or Up/Down and Enter; Esc or a click elsewhere closes it.
 - **Double-click**: on a drive it mounts or unlocks it (Enter); on an engine it switches it on or off.
