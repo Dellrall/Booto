@@ -25,8 +25,8 @@
 #include <unistd.h>
 
 /* Disable mouse tracking, reset attributes, show cursor, leave alternate screen. */
-static const char RESTORE_SEQ[] = "\033[?1006l\033[?1002l\033[?1000l\033[0m\033[?25h\033[?1049l";
-static const char ENTER_SEQ[] = "\033[?1049h\033[?25l\033[?1000h\033[?1002h\033[?1006h";
+static const char RESTORE_SEQ[] = "\033[?1006l\033[?1003l\033[?1002l\033[?1000l\033[0m\033[?25h\033[?1049l";
+static const char ENTER_SEQ[] = "\033[?1049h\033[?25l\033[?1000h\033[?1002h\033[?1003h\033[?1006h"; /* 1003: hover motion too */
 
 static struct termios g_orig_termios;
 static bool g_raw_active = false;
@@ -54,7 +54,9 @@ static bool g_ascii_only = false;
 #define MAX_ABS_PTRS 4
 static term_abs_ptr_t g_abs[MAX_ABS_PTRS];
 static int g_abs_count = 0;
-static int g_ptr_x = -1, g_ptr_y = -1; /* cell drawn in reverse video as the pointer; -1 = hidden */
+static int g_ptr_x = -1, g_ptr_y = -1; /* last cell any mouse report named; -1 = unknown */
+static bool g_ptr_drawn = false;        /* evdev pointer: Booto draws it (reverse video); a terminal or gpm draws its own */
+static uint32_t g_ptr_glyph = 0;        /* shape drawn at the pointer instead of the cell's char; 0 = none */
 
 /* Unparsed input bytes left over from a read that returned several keys. */
 static unsigned char g_pending[64];
@@ -134,6 +136,7 @@ static bool read_abs_pointer(term_abs_ptr_t *p, input_event_t *event) {
     if (p->x >= 0 && p->y >= 0) {
         g_ptr_x = p->x;
         g_ptr_y = p->y;
+        g_ptr_drawn = true;
     }
     switch (a) {
         case PTR_CLICK_LEFT:  event->type = KEY_MOUSE_CLICK; event->mouse_btn = 0; break;
@@ -208,6 +211,7 @@ void term_shutdown(void) {
     for (int i = 0; i < g_abs_count; i++) close(g_abs[i].fd); /* closing also drops the grab */
     g_abs_count = 0;
     g_ptr_x = g_ptr_y = -1;
+    g_ptr_drawn = false;
 
     restore_tty(TCSAFLUSH);
     g_raw_active = false;
@@ -227,6 +231,14 @@ void term_shutdown(void) {
     g_back_attrs = NULL;
     g_pending_len = 0;
 }
+
+bool term_get_pointer(int *x, int *y) {
+    *x = g_ptr_x;
+    *y = g_ptr_y;
+    return g_ptr_x >= 0 && g_ptr_y >= 0 && g_ptr_x < g_cols && g_ptr_y < g_rows;
+}
+
+void term_set_pointer_glyph(uint32_t cp) { g_ptr_glyph = cp; }
 
 void term_get_dimensions(int *rows, int *cols) {
     if (g_resized) {
@@ -409,6 +421,8 @@ static char ascii_for(uint32_t cp) {
         case TERM_G_BLOCK: return '#';
         case TERM_G_SHADE: return ':';
         case TERM_G_DOT: return '.';
+        case TERM_G_ARROW_LR: return '-';
+        case TERM_G_ARROW_UD: return '|';
         default: return '?';
     }
 }
@@ -484,8 +498,10 @@ void term_present(void) {
     for (int y = 0; y < g_rows; y++) {
         for (int x = 0; x < g_cols; x++) {
             size_t idx = (size_t)y * (size_t)g_cols + (size_t)x;
-            uint32_t attr = g_back_attrs[idx] ^ ((x == g_ptr_x && y == g_ptr_y) ? ATTR_REVERSE : 0);
-            if (g_back_chars[idx] != g_front_chars[idx] || attr != g_front_attrs[idx]) {
+            bool at_ptr = x == g_ptr_x && y == g_ptr_y && (g_ptr_drawn || g_ptr_glyph);
+            uint32_t ch = at_ptr && g_ptr_glyph ? g_ptr_glyph : g_back_chars[idx];
+            uint32_t attr = g_back_attrs[idx] ^ (at_ptr ? ATTR_REVERSE : 0);
+            if (ch != g_front_chars[idx] || attr != g_front_attrs[idx]) {
                 if (cursor_y != y || cursor_x != x) {
                     int w = snprintf(ptr, rem, "\033[%d;%dH", y + 1, x + 1);
                     if (w > 0 && (size_t)w < rem) { ptr += w; rem -= (size_t)w; }
@@ -498,12 +514,12 @@ void term_present(void) {
                     current_attr = attr;
                 }
 
-                size_t n = encode_cell(g_back_chars[idx], ptr);
+                size_t n = encode_cell(ch, ptr);
                 ptr += n;
                 rem -= n;
                 cursor_x++;
 
-                g_front_chars[idx] = g_back_chars[idx];
+                g_front_chars[idx] = ch;
                 g_front_attrs[idx] = attr;
 
                 if (rem < 256) {
@@ -521,8 +537,10 @@ void term_present(void) {
 }
 
 /* Decodes a complete CSI sequence s[0..len) (ESC '[' params final, len >= 3); leaves KEY_NONE if unknown. */
-/* Mouse button code (+32 motion, +64 wheel, bit 0 of a wheel = down) -> event; motion counts only with the left button held. */
+/* Mouse button code (+32 motion, +64 wheel, bit 0 of a wheel = down) -> event; motion is a drag only with the left button held. */
 static void mouse_event(int btn, bool release, int x, int y, input_event_t *event) {
+    g_ptr_x = x; /* every report moves the hover cell, including button-less motion (mode 1003) */
+    g_ptr_y = y;
     if (btn & 64) {
         if (release) return;
         event->type = (btn & 1) ? KEY_MOUSE_WHEEL_DOWN : KEY_MOUSE_WHEEL_UP;
