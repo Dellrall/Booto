@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.4-beta] - 2026-11-10
+
 ### Added
 - **Create report storage from inside Booto, like Tails.** On a USB written raw from the ISO (`dd`, Rufus DD mode, caligula), `F4` now runs `booto-storage create`, which adds the `BOOTO_DATA` partition in the stick's free space (size and passphrase asked first) and mounts it. `booto-storage delete` erases it.
 
