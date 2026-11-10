@@ -60,6 +60,7 @@ Option A, download the release (recommended):
 
 1. Download `booto-v1.4.0-amd64.iso` and `booto-v1.4.0-amd64.iso.sha256` from <https://github.com/Dellrall/Booto/releases/latest>.
 2. Check the download: `sha256sum -c booto-v1.4.0-amd64.iso.sha256`. It must print `OK`.
+3. Optional, proves GitHub's CI built it from this repository (releases from v1.7.0 on): `gh attestation verify booto-v1.4.0-amd64.iso --repo Dellrall/Booto`. It must print `Verification succeeded`.
 
 Option B, build it yourself (about 10 minutes):
 

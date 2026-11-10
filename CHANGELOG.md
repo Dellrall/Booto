@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Detection zoo (`make zoo`)**: generates 9 planted cases (at least one per engine) and 3 clean installs (Debian, Arch, Fedora), scans each, and fails on a miss or a false alarm. CI runs it; the README states the measured rates. `scripts/gen_mock_disk.sh --zoo` builds the cases.
 - **Windows boot chain check**: NTFS partitions are now scan targets, mounted read-only. On a Windows install, a new engine verifies the Authenticode signatures of winload, winresume, ntoskrnl, hal, ci and the boot drivers against Microsoft's roots, and flags a file patched after signing or signed by someone else. Flagged files go to the quarantine export. The Linux engines skip Windows roots.
+- **ISO build provenance**: the ISO workflow attaches a GitHub build provenance attestation to every ISO. Check one with `gh attestation verify <iso> --repo Dellrall/Booto`.
 
 ### Changed
 - **Rule files are signed (Ed25519).** Each `rules/*.json` now needs a `*.json.sig` that verifies against a public key built into `booto`; the old `*.json.sha256` seals are gone, since anyone who could edit a rule could also redo its seal. An unsigned or altered file is refused and its engine fails closed, as before. `scripts/update_rules.sh` signs when `BOOTO_RULES_SIGNING_KEY` names the private key.
