@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.0-beta] - 2026-11-10
+
 ### Added
 - **Detection zoo (`make zoo`)**: generates 9 planted cases (at least one per engine) and 3 clean installs (Debian, Arch, Fedora), scans each, and fails on a miss or a false alarm. CI runs it; the README states the measured rates. `scripts/gen_mock_disk.sh --zoo` builds the cases.
 - **Windows boot chain check**: NTFS partitions are now scan targets, mounted read-only. On a Windows install, a new engine verifies the Authenticode signatures of winload, winresume, ntoskrnl, hal, ci and the boot drivers against Microsoft's roots, and flags a file patched after signing or signed by someone else. Flagged files go to the quarantine export. The Linux engines skip Windows roots.
