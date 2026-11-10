@@ -47,6 +47,7 @@
 #define SMRAM_MCH_OFFSET        0x9Du   /* host bridge, Core 2-era memory controller hubs (319970 §5.1.28) */
 #define SMRAMC_D_LCK            0x10u
 #define BIOS_CNTL_OFFSET        0xDCu   /* SPI 00:1f.5 (100-series+) or LPC 00:1f.0 (ICH6 to 9-series) */
+#define BC_BIOSWE               0x01u
 #define BC_BLE                  0x02u
 #define BC_SMM_BWP              0x20u
 
@@ -735,7 +736,10 @@ static bool check_intel_bios_wp(fw_check_t *c, const char *pci_dir) {
     uint8_t bc;
     if (pci_cfg_byte(c, cfg, len, BIOS_CNTL_OFFSET, &bc)) {
         bool ble = (bc & BC_BLE) != 0, bwp = (bc & BC_SMM_BWP) != 0;
-        if (legacy && !legacy->smm_bwp) {
+        if (bc & BC_BIOSWE) {
+            /* Firmware clears BIOSWE before the OS runs; set now means the flash is writable at this moment. */
+            set_check(c, FW_RESULT_FAIL, "The firmware flash is writable right now: BIOS write enable (BIOSWE) is set.");
+        } else if (legacy && !legacy->smm_bwp) {
             set_check(c, FW_RESULT_FAIL, ble
                       ? "BIOS lock on, but this chipset has no SMM write protection: the lock can be raced (CVE-2014-8273)."
                       : "The OS can rewrite the firmware: BIOS lock off, and this chipset has no SMM write protection.");

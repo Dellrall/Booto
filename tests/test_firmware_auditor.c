@@ -620,6 +620,13 @@ static void test_intel_silicon_unlocked(void) {
     ASSERT_TRUE(strstr(r.checks[FW_CHECK_BIOS_WP].detail, "BIOS lock on, SMM write protection off") != NULL,
                 "names the missing bit");
 
+    /* Both locks on but BIOSWE still set: the flash is writable now. */
+    build_intel_silicon(false, 0x23);
+    firmware_audit(&g_paths, &r);
+    ASSERT_INT_EQ(r.checks[FW_CHECK_BIOS_WP].result, FW_RESULT_FAIL, "BIOSWE set fails");
+    ASSERT_TRUE(strstr(r.checks[FW_CHECK_BIOS_WP].detail, "BIOSWE") != NULL, "names BIOSWE");
+    build_intel_silicon(false, 0x02);
+
     /* A CPU without SMRR support fails before the mask is consulted. */
     write_msr(0, 0xFE, 0);
     firmware_audit(&g_paths, &r);
