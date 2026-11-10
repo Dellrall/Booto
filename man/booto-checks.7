@@ -206,6 +206,25 @@ the BlackLotus payload layout.
 .BR UEFI_ESP_SHADOW_LOADER " (MEDIUM)"
 A copy of a boot loader renamed aside, how a replacement loader chainloads
 the original.
+.SS YARA rules
+Every PE image read by the UEFI and Windows boot checks is matched against
+.IR rules/bootkits.yar ,
+which must carry a valid Ed25519
+.I bootkits.yar.sig
+like the other rule files; an unsigned, altered or uncompilable file fails both
+engines closed. Each rule needs string metas
+.B severity
+and
+.BR description .
+A match on an image with a valid Microsoft signature is not reported.
+.TP
+.BR BOOTO_YARA_EMBEDDED_PE " (MEDIUM)"
+A second DOS-stub executable inside a boot image, as droppers and bootkit
+installers carry their payload.
+.TP
+.BR BOOTO_YARA_EFIGUARD " (HIGH)"
+An image naming EfiGuard, a public tool that disables PatchGuard and driver
+signature checks at boot.
 .SH INITRAMFS
 Each initramfs image is unpacked in memory and its scripts are searched.
 These findings are reported by title:

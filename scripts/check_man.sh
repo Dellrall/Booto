@@ -6,7 +6,8 @@ cd "$(dirname "$0")/.."
 missing=0
 # Finding IDs: quoted ENGINE_NAME strings in the engines, plus every rule_id in the rule files.
 ids=$( { grep -ohE '"(MBR|VBR|LKM|UEFI|PRELOAD|PERSIST|IOC)_[A-Z0-9_]+"' src/*.c | tr -d '"'
-         grep -ohE '"rule_id": *"[A-Z0-9_]+"' rules/*.json | grep -oE '[A-Z0-9_]+"$' | tr -d '"'; } | sort -u)
+         grep -ohE '"rule_id": *"[A-Z0-9_]+"' rules/*.json | grep -oE '[A-Z0-9_]+"$' | tr -d '"'
+         grep -ohE '^rule +[A-Za-z0-9_]+' rules/*.yar | awk '{print $2}'; } | sort -u)
 for id in $ids; do
     grep -q "$id" man/booto-checks.7 || { echo "man/booto-checks.7: no entry for $id"; missing=1; }
 done

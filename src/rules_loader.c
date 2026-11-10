@@ -12,6 +12,7 @@
 #include "rules_loader.h"
 #include "crypto_utils.h"
 #include "logger.h"
+#include "yara_scan.h"
 
 #include <errno.h>
 #include <openssl/evp.h>
@@ -760,6 +761,28 @@ static bool locate_rules_file(const char *file, char *path, size_t cap) {
     return false;
 }
 
+booto_error_t rules_read_signed(const char *file, char **buf, size_t *len, char *path, size_t path_cap) {
+    if (!file || !buf || !len || !path || path_cap == 0) return BOOTO_ERR_INVALID_ARG;
+    *buf = NULL;
+    *len = 0;
+    if (!locate_rules_file(file, path, path_cap)) {
+        path[0] = '\0';
+        return BOOTO_ERR_NOT_FOUND;
+    }
+    booto_error_t err = read_whole_file(path, RULES_MAX_FILE_BYTES, buf, len);
+    if (err != BOOTO_OK) {
+        LOG_ERROR("Cannot read rules file '%s' (err: %d)", path, err);
+        return err == BOOTO_ERR_NOT_FOUND ? BOOTO_ERR_IO : err;
+    }
+    (*buf)[*len] = '\0'; // read_whole_file allocates max + 1 bytes
+    err = verify_signature(path, *buf, *len);
+    if (err != BOOTO_OK) {
+        free(*buf);
+        *buf = NULL;
+    }
+    return err;
+}
+
 static booto_error_t load_rules(const char *file, const char *array_key, entry_parser_t parse_entry, void *set,
                                 rules_source_t *source, char *path, size_t path_cap, int *count) {
     if (!locate_rules_file(file, path, path_cap)) {
@@ -830,6 +853,7 @@ booto_error_t rules_get_ioc(const rules_ioc_set_t **out) {
 }
 
 void rules_reset_cache(void) {
+    yara_scan_reset();
     g_ioc_cache.loaded = false;
     g_dbx_cache.loaded = false;
     g_lkm_cache.loaded = false;
