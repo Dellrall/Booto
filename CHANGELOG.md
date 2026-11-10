@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.1-beta] - 2026-11-10
+
+Fixes from 1.9.x, backported. No new features.
+
+### Fixed
+- **Booto's own USB is no longer the default scan target.** Partitions on the stick Booto booted from are labelled "Booto USB" and never picked automatically; `-t` can still name one.
+- **"LUKS locked" in the top bar** now shows only when the machine has an encrypted drive.
+- **`--update-rules` on the live USB** now explains that it needs the source tree and where to put new rule files, instead of failing with "not found".
+- **A faked module signature no longer passes.** A kernel module ending in the text `~Module signature appended~` used to count as signed; Booto now also requires the signature block `sign-file` writes before it.
+- **`run_qemu_vm.sh` fallback disk is formatted.** It passed `status=none` to `mkfs.ext4`, which failed and was ignored.
+- **Builds on glibc before 2.38** (Debian 12): `memmem` was used without `_GNU_SOURCE`.
+- **`booto` is compiled inside the ISO's own Debian 12 rootfs**, and the build fails if the binary needs a library the live system lacks.
+- **The ISO now carries Debian's security updates** (`bookworm-security`, `bookworm-updates`), kernel included.
+
 ## [1.8.0-beta] - 2026-11-09
 
 ### Added
