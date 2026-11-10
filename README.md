@@ -160,7 +160,7 @@ These numbers cover synthetic look-alikes only: one or two cases per engine, no 
 | `Mouse Wheel` | **Scroll** | Scroll the pane under the pointer; `↑`/`↓` or `j`/`k` scroll the focused Findings and Reports panes |
 | `1`-`4` / `Esc` | **Pages** | Panes, Findings (every finding with its rule, hash and detail), Firmware, Evidence (before/after hash, quarantine, what each engine read); click a tab too; `Esc` back to the panes |
 | `F3` | **Unlock LUKS** | Unlock an encrypted target partition read-only |
-| `F4` | **Unlock Storage** | Mount the report partition on the boot USB (asks for its passphrase if encrypted) |
+| `F4` | **Unlock Storage** | Mount the report partition on the boot USB (asks for its passphrase if encrypted); on a USB without one, create it in the free space |
 | `F5` | **Start Scan** | Trigger forensic scanning sequence |
 | `F6` | **Export Report** | Export JSON & Markdown case reports with SHA-256 checksums |
 | `F7` | **Quarantine** | Toggle export of flagged files to an encrypted ZIP (password `infected`) on report storage |

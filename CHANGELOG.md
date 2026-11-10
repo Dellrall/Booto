@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Create report storage from inside Booto, like Tails.** On a USB written raw from the ISO (`dd`, Rufus DD mode, caligula), `F4` now runs `booto-storage create`, which adds the `BOOTO_DATA` partition in the stick's free space (size and passphrase asked first) and mounts it. `booto-storage delete` erases it.
+
+### Fixed
+- **The ISO had no partition table.** A raw-written USB carried an empty MBR and no GPT, so it booted only on firmware that reads El Torito from a disk, and nothing could be added to it. The ISO now has a GPT with the ISO9660 data and the ESP as partitions.
+
 ## [1.9.3-beta] - 2026-11-10
 
 ### Fixed

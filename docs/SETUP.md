@@ -105,6 +105,17 @@ Booto finds the `BOOTO_DATA` partition on the USB stick it booted from (never on
 
 - **With a passphrase:** a box asks for it when the TUI starts. Type it and press `Enter`. Press `Esc` to skip; reports then go to RAM and are lost at power-off. Press `F4` to unlock later.
 - **Without a passphrase:** it is mounted at start; nothing to do.
+- **No report partition** (the ISO was written with `dd`, Rufus DD mode or caligula): press `F4` to create one, as below. This needs an ISO from 1.9.4-beta on; older ISOs have no partition table to add to.
+
+#### Create, unlock, change or remove report storage
+
+1. **Create:** press `F4` (or run `booto-storage create` in the root shell, `F10` then `S`). It shows the free space on the stick and asks:
+   - `Report partition size in MiB [N]:` type a size from 64 to N, or press `Enter` to use all of it. The rest of the stick stays unallocated.
+   - `Protect the reports with a passphrase? [Y/n]`: `Enter` encrypts it with LUKS2; `n` makes a plain ext4 partition anyone can read.
+   - It confirms before writing, then asks for your passphrase twice and once more to format. There is no default passphrase and no recovery: a lost passphrase means lost reports.
+2. **Unlock at the next boot:** the passphrase box appears when Booto starts; `Esc` skips it and `F4` asks again later. On another Linux computer, `cryptsetup open /dev/sdXN booto` then `mount -o ro /dev/mapper/booto /mnt` reads the reports.
+3. **Change the passphrase:** in the root shell, `cryptsetup luksChangeKey /dev/sdXN`, where `sdXN` is the partition labelled `BOOTO_DATA` in `lsblk -o NAME,PARTLABEL` (partition 4 after `dd`, 2 with booto-writer). It works while the storage is unlocked; only the key slot changes, not the reports.
+4. **Resize or remove encryption:** `booto-storage delete` (it erases every report; copy them off first), then create it again with the new size or answer `n`.
 
 The Reports pane shows `Storage on USB, N MiB free` when reports will be saved to the stick.
 
