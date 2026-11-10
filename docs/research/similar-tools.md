@@ -39,20 +39,22 @@ Research date: 2026-11-03. Every claim below links its primary source. Three sur
 | 7 | Block every disk read-only at boot; before/after hashes; case metadata flags | ~1 day |
 | 8 | Close cheap HSI gaps: BIOSWE, 2023 Microsoft certificate in db, dbx freshness | ~half day |
 
-**Status on 2026-11-09** (what has shipped from the ideas in this document)
+**Status on 2026-11-10** (what has shipped from the ideas in this document, checked against the code)
 
 | # | Idea | State |
 |---|---|---|
 | 1 | dbx rules from Microsoft's JSON | done: `scripts/gen_dbx_rules.py`, built-in table plus sealed `rules/uefi_dbx_revocations.json` |
-| 2 | Harden ISO boot | done: GRUB looks for a marker file unique to each build, plus `live-media=removable systemd.swap=no`. Still to do: `verify-checksums` |
+| 2 | Harden ISO boot | done: GRUB looks for a marker file unique to each build, plus `live-media=removable systemd.swap=no verify-checksums` (live-boot checks `live/` against `sha256sum.txt`) |
 | 3 | Offline package integrity | done: dpkg `md5sums`, RPM `rpmdb.sqlite` digests, pacman `mtree` |
-| 4 | Known-rootkit path and string rules | paths done (`rules/rootkit_file_iocs.json`, `IOC_*`); string rules still to do |
-| 5 | Boot-chain anomaly checks | done: shadow loaders, BlackLotus ESP layout, MOK list, SBAT level, Authenticode hash. Still to do: judging whether the signer is trusted |
-| 6 | Persistence sweep | done: systemd, cron, rc.local, udev, modprobe.d, shell profiles, `authorized_keys`. Still to do: `modules-load.d` |
-| 7 | Read-only disks, before/after hashes, case metadata | case metadata (examiner) done. Still to do: read-only for every disk at boot, before/after hashes |
-| 8 | Cheap HSI gaps | still to do: BIOSWE, 2023 Microsoft CA in db, dbx freshness |
+| 4 | Known-rootkit path and string rules | paths done (`rules/rootkit_file_iocs.json`). YARA engine done, but it only scans EFI binaries with 2 rules (`rules/bootkits.yar`). Still to do: YARA over `.ko`, ELF binaries and the initramfs, with Linux rootkit string rules |
+| 5 | Boot-chain anomaly checks | done: shadow loaders, BlackLotus ESP layout, MOK list, SBAT level, Authenticode hash, Microsoft signer check, Windows boot files (`winload`, `ntoskrnl`, drivers). Still to do: judging non-Microsoft signers (distro shim and GRUB) |
+| 6 | Persistence sweep | done: systemd, cron, rc.local, udev, modprobe.d, shell profiles, `authorized_keys`. `modules-load.d` not needed: modprobe only loads from `/lib/modules`, which the LKM scan walks in full |
+| 7 | Read-only disks, before/after hashes, case metadata | case metadata (examiner) done; a disk is set read-only (`BLKROSET`) when Booto mounts it. Still to do: read-only for every disk at boot, before/after hashes |
+| 8 | Cheap HSI gaps | BIOSWE, BLE and SMM_BWP checked. Still to do: 2023 Microsoft CA in db, dbx freshness |
 
-Still to do from the per-section lists: a baseline/compare mode, YARA rules, the FwHunt rules, bodyfile/mactime output, and a guide to capturing memory with AVML.
+Also shipped since: a boot chain baseline (`baseline.h`), BitLocker volume detection (reported as encrypted, not scanned), LUKS unlock, LVM in LUKS (branch `fix/luks-lvm-fs`).
+
+Still to do from the per-section lists: the FwHunt rules, bodyfile/mactime output, and a guide to capturing memory with AVML.
 
 Licence note (written while Booto was MIT; Booto is GPL-3.0-or-later since 2026-11-09, so GPL-3.0 and GPL-2.0-or-later code can now be reused, while GPL-2.0-only and AGPL code still cannot; check each project's exact terms before copying): CHIPSEC, rkhunter, unhide, Wazuh, LKRG, AIDE, Lynis, LiME (GPL), Velociraptor (AGPL) and Volatility 3 (non-MIT) are reference only. These can be used under their own licences: chkrootkit (BSD-2), UAC (Apache-2.0), AVML/sbctl (MIT), UEFITool (BSD-2), FwHunt rules (CC0) and `secureboot_objects` (BSD-2-Clause-Patent).
 
