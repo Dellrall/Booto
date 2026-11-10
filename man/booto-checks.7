@@ -100,7 +100,9 @@ signature rules match symbol names the module imports or defines.
 .TP
 .BR LKM_UNSIGNED " (HIGH)"
 The module has no signature although the kernel's own modules are signed: it
-was added after the system was installed. DKMS drivers (NVIDIA, VirtualBox,
+was added after the system was installed. A module that ends in the
+signature marker but has no signature block before it counts as unsigned.
+The signature itself is not verified against the kernel's keys. DKMS drivers (NVIDIA, VirtualBox,
 ZFS) also show up here; compare with what the owner installed.
 .TP
 .BR LKM_MISSING_LICENSE " (LOW)"
@@ -175,6 +177,13 @@ it.
 .TP
 .BR UEFI_AUTHENTICODE_INVALID " (HIGH)"
 The signature table is malformed or its PKCS#7 signature does not verify.
+.TP
+.BR UEFI_FIRST_STAGE_NOT_MICROSOFT " (HIGH)"
+A first-stage loader (a file named boot* or shim*) carries a valid signature
+that does not chain to a Microsoft root. The firmware of a stock machine
+trusts only Microsoft there. Expected only if the owner enrolled their own
+Secure Boot keys (sbctl, a self-signed systemd-boot). GRUB and kernels are
+signed by the distro and are not checked this way.
 .TP
 .BR UEFI_SBAT_REVOKED " (MEDIUM)"
 The loader's SBAT generation is below the current revocation level: a

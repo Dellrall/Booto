@@ -31,9 +31,11 @@
 /* The signer chains to a Microsoft root. Expiry is ignored: boot files outlive their signing certificates. */
 static bool signer_is_microsoft(PKCS7 *p7) {
     static const unsigned char *const roots[] = { MicRooCerAut_2010_06_23_crt, MicRooCerAut2011_2011_03_22_crt,
-                                                  MicrosoftRootCert_crt };
+                                                  MicrosoftRootCert_crt, MicCorThiParMarRoo_2010_10_05_crt,
+                                                  MicRSADevicesRootCA2021_crt };
     const unsigned int lens[] = { MicRooCerAut_2010_06_23_crt_len, MicRooCerAut2011_2011_03_22_crt_len,
-                                  MicrosoftRootCert_crt_len };
+                                  MicrosoftRootCert_crt_len, MicCorThiParMarRoo_2010_10_05_crt_len,
+                                  MicRSADevicesRootCA2021_crt_len };
     STACK_OF(X509) *signers = PKCS7_get0_signers(p7, NULL, 0);
     X509_STORE *store = X509_STORE_new();
     X509_STORE_CTX *ctx = X509_STORE_CTX_new();

@@ -118,12 +118,14 @@ PY
 new_case() {
     CASE="${ZOO}/$1"
     ROOT="${CASE}/root"
-    mkdir -p "${ROOT}/boot/efi/EFI/BOOT"
+    mkdir -p "${ROOT}/boot/efi/EFI/BOOT" "${ROOT}/boot/efi/EFI/debian"
     echo "$2" > "${CASE}/expect"
     dd if=/dev/zero of="${CASE}/disk.img" bs=1M count=0 seek=5 status=none   # sparse; holds the partition's VBR
     plant_mbr "${CASE}/disk.img"
     [ "${3:-}" = none ] && return
-    pe signed "${ROOT}/boot/efi/EFI/BOOT/BOOTX64.EFI"
+    # The test key stands for a distro key, so the clean loader is a second stage. A first stage must chain to
+    # Microsoft, which no fixture can; checked by hand against Debian's shim-signed 1.51+16.1-2.
+    pe signed "${ROOT}/boot/efi/EFI/debian/grubx64.efi"
     module "${ROOT}" e1000
     module "${ROOT}" loop
     plant_initramfs "${ROOT}"
@@ -144,6 +146,9 @@ build_zoo() {
 
     new_case esp-tampered-loader "UEFI ESP"
     pe tampered "${ROOT}/boot/efi/EFI/BOOT/BOOTX64.EFI"
+
+    new_case esp-selfsigned-loader "UEFI ESP"
+    pe signed "${ROOT}/boot/efi/EFI/BOOT/BOOTX64.EFI"
 
     new_case lkm-unsigned "Kernel LKM"
     module "${ROOT}" rootkit unsigned

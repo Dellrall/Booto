@@ -8,10 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Detection zoo (`make zoo`)**: generates 7 planted cases (one per engine) and 3 clean installs (Debian, Arch, Fedora), scans each, and fails on a miss or a false alarm. CI runs it; the README states the measured rates. `scripts/gen_mock_disk.sh --zoo` builds the cases.
+- **Detection zoo (`make zoo`)**: generates 9 planted cases (at least one per engine) and 3 clean installs (Debian, Arch, Fedora), scans each, and fails on a miss or a false alarm. CI runs it; the README states the measured rates. `scripts/gen_mock_disk.sh --zoo` builds the cases.
 - **Windows boot chain check**: NTFS partitions are now scan targets, mounted read-only. On a Windows install, a new engine verifies the Authenticode signatures of winload, winresume, ntoskrnl, hal, ci and the boot drivers against Microsoft's roots, and flags a file patched after signing or signed by someone else. Flagged files go to the quarantine export. The Linux engines skip Windows roots.
 
 ### Fixed
+- **A faked module signature no longer passes.** A kernel module ending in the text `~Module signature appended~` used to count as signed. Booto now also requires the signature block the kernel's `sign-file` writes before it. The signature is still not verified against the kernel's keys.
+- **A self-signed first-stage boot loader is now flagged** (`UEFI_FIRST_STAGE_NOT_MICROSOFT`, HIGH). Before, any valid signature on `BOOTX64.EFI`, shim or `bootmgfw.efi` passed, whoever signed it. GRUB and kernels, which distros sign with their own keys, are not affected. A machine whose owner enrolled their own Secure Boot keys will show this finding.
+- **Shim is recognised as Microsoft-signed.** The trusted roots now include the two above Microsoft's UEFI CAs (2011 and 2023), checked against Debian's `shim-signed`.
 - **Booto's own USB is no longer the default scan target.** Partitions on the stick Booto booted from are labelled "Booto USB" and never picked automatically; `-t` can still name one.
 - **"LUKS locked" in the top bar** now shows only when the machine has an encrypted drive. Before, it showed on every machine and read as if the report storage were locked.
 - **`--update-rules` on the live USB** now explains that it needs the source tree and where to put new rule files, instead of failing with "not found".
