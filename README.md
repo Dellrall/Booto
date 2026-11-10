@@ -22,8 +22,8 @@ Built with **C11**, Booto runs from a trusted Debian Live USB environment so the
 - **Safe Forensic Storage Discovery & Mounter**: Automatic enumeration of NVMe/SATA/USB block devices via `/proc/partitions` and `sysfs`, enforcing strict read-only mounts (`MS_RDONLY | MS_NODEV | MS_NOEXEC | MS_NOSUID` with `noload`).
 - **Low-Level Forensic Detection Modules**:
   - **MBR & VBR Boot Sector Auditor**: Raw sector-level parser for the Master Boot Record (sector 0), the track-0 gap, and partition Volume Boot Records, matched against MBR byte-pattern signatures.
-  - **UEFI & ESP Bootkit Analyzer**: PE32+ (PE/COFF) parser that finds every PE on the ESP by its `MZ` header (not its name), computes each one's Authenticode hash and matches it against the Secure Boot DBX revocation rules, and verifies the embedded Authenticode signature so a signed loader patched after signing is flagged. If the root filesystem's `/boot/efi` is empty, the EFI System Partition is found in the disk's GPT (or MBR type `0xEF`) and mounted read-only for the scan.
-  - **Kernel Image & LKM Hook Scanner**: 64-bit ELF parser and symbol-table audit against LKM rootkit signature rules. When the kernel's own modules are signed, a module without a signature is flagged (`LKM_UNSIGNED`); a self-built kernel that signs nothing is left alone.
+  - **UEFI & ESP Bootkit Analyzer**: PE32+ (PE/COFF) parser that finds every PE on the ESP by its `MZ` header (not its name), computes each one's Authenticode hash and matches it against the Secure Boot DBX revocation rules, and verifies the embedded Authenticode signature so a signed loader patched after signing is flagged. A first-stage loader (`boot*`, `shim*`) with a valid signature that does not chain to a Microsoft root is flagged too (`UEFI_FIRST_STAGE_NOT_MICROSOFT`). If the root filesystem's `/boot/efi` is empty, the EFI System Partition is found in the disk's GPT (or MBR type `0xEF`) and mounted read-only for the scan.
+  - **Kernel Image & LKM Hook Scanner**: 64-bit ELF parser and symbol-table audit against LKM rootkit signature rules. When the kernel's own modules are signed, a module without a signature block is flagged (`LKM_UNSIGNED`; the marker text alone does not count, and the signature is not verified against the kernel's keys); a self-built kernel that signs nothing is left alone.
   - **Initramfs Auditor**: Decompresses gzip/xz/zstd/lz4/bzip2 initramfs images (and compressed `.ko` modules) via the system tools, parses the CPIO archive, and audits early-boot scripts.
   - **Userland Preload Scanner**: Checks `/etc/ld.so.preload` and `LD_PRELOAD` in `/etc/environment`. PAM modules are not scanned.
   - **Package Integrity Engine**: Re-hashes packaged system binaries and libraries against the target's dpkg `md5sums` lists, pacman `mtree` SHA-256 digests and the RPM `rpmdb.sqlite` file digests (debsums / `pacman -Qkk`-style, offline), flagging files whose content no longer matches the package. Debian-, Arch- and RPM-based roots. It trusts the database on the target disk.
@@ -128,10 +128,10 @@ On the live system, `man booto` lists every option, key and error, and `man boot
 
 | Set | Cases | Result |
 |---|---|---|
-| Planted | Rovnix MBR hook bytes, ESP loader patched after signing, unsigned module beside signed ones, reverse shell in the initramfs, `ld.so.preload` hook, changed packaged binary, patched `winload.efi` | 7 of 7 caught |
+| Planted | Rovnix MBR hook bytes, ESP loader patched after signing, self-signed first-stage ESP loader, unsigned module beside signed ones, module with a faked signature marker, reverse shell in the initramfs, `ld.so.preload` hook, changed packaged binary, patched `winload.efi` | 9 of 9 caught |
 | Clean | minimal Debian (dpkg), Arch (pacman) and Fedora (rpm) installs | 0 of 3 false alarms |
 
-These numbers cover synthetic look-alikes only: one case per engine, no real malware samples and no real distro images. There is no clean Windows case yet, because that needs a Microsoft-signed `ntoskrnl.exe`, which the zoo cannot generate.
+These numbers cover synthetic look-alikes only: one or two cases per engine, no real malware samples and no real distro images. There is no clean Windows case yet, because that needs a Microsoft-signed `ntoskrnl.exe`, which the zoo cannot generate.
 
 ## TUI Window Navigation & Shortcuts
 

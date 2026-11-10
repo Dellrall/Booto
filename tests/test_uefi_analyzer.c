@@ -342,6 +342,25 @@ static void test_esp_layout_and_sbat(void) {
     TEST_PASS("test_esp_layout_and_sbat");
 }
 
+static void test_first_stage_signer(void) {
+    TEST_START("test_first_stage_signer");
+    static uint8_t b[0x1000];
+    size_t len = sign_pe(b, sizeof(b));
+    char dir[] = "/tmp/booto_stage_XXXXXX", cmd[64];
+    ASSERT_TRUE(len > 0 && mkdtemp(dir) != NULL, "signed image and mkdtemp");
+    write_pe(dir, "EFI/BOOT/BOOTX64.EFI", b, len);
+    write_pe(dir, "EFI/debian/shimx64.efi", b, len);
+    write_pe(dir, "EFI/debian/grubx64.efi", b, len);
+    uefi_scan_result_t res;
+    memset(&res, 0, sizeof(res));
+    uefi_inspect_esp_directory(dir, &res);
+    snprintf(cmd, sizeof(cmd), "rm -rf '%s'", dir);
+    if (system(cmd) != 0) perror("rm");
+    ASSERT_INT_EQ(count_rule(&res, "UEFI_FIRST_STAGE_NOT_MICROSOFT"), 2,
+                  "Self-signed BOOTX64 and shim flagged; distro-signed grub is not");
+    TEST_PASS("test_first_stage_signer");
+}
+
 int main(void) {
     printf("\n--- Running UEFI & ESP Bootkit Analyzer Tests ---\n");
     test_synthetic_pe32_plus_parser();
@@ -354,6 +373,7 @@ int main(void) {
     test_authenticode_signature();
     test_esp_scan_by_magic();
     test_esp_layout_and_sbat();
+    test_first_stage_signer();
     TEST_SUMMARY();
     return 0;
 }

@@ -321,6 +321,21 @@ booto_error_t uefi_inspect_efi_file(const char *efi_path, uefi_scan_result_t *re
                         "Certificate table is malformed or its PKCS#7 signature does not verify");
     }
 
+    // First-stage loaders (BOOTX64.EFI, shim, bootmgfw) are what the firmware itself runs, and on a stock machine
+    // only Microsoft's keys are trusted there. Later stages (grub, kernels) are signed by the distro: not checked.
+    const char *base = strrchr(efi_path, '/');
+    base = base ? base + 1 : efi_path;
+    if (pe.authenticode_state == AUTHENTICODE_VALID && !pe.authenticode_microsoft &&
+        (strncasecmp(base, "boot", 4) == 0 || strncasecmp(base, "shim", 4) == 0)) {
+        add_uefi_threat(result,
+                        "First-Stage Loader Not Signed By Microsoft",
+                        efi_path,
+                        pe.sha256,
+                        "UEFI_FIRST_STAGE_NOT_MICROSOFT",
+                        SEVERITY_HIGH,
+                        "Validly signed, but not by a Microsoft key: expected only if the owner enrolled their own Secure Boot keys");
+    }
+
     // 3. Heuristic: compressed or encrypted code (packer / loader stub). Normal x86-64 code is about 6 bits/byte.
     if (pe.exec_size >= UEFI_PACKED_MIN_BYTES && pe.exec_entropy >= UEFI_PACKED_ENTROPY_BITS) {
         add_uefi_threat(result,
