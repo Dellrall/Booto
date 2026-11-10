@@ -5,6 +5,8 @@
 #include "test_framework.h"
 #include "disk_mount.h"
 #include "initramfs_auditor.h"
+#include "rules_fixture.h"
+#include "yara_scan.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -244,6 +246,44 @@ static void test_exec_capture_escape_attempts(void) {
     TEST_PASS("test_exec_capture_escape_attempts");
 }
 
+/* An ELF file inside the archive goes through the signed YARA rules. */
+static void test_yara_on_elf_entry(void) {
+    TEST_START("test_yara_on_elf_entry");
+    char dir[] = "/tmp/booto_initrd_yara_XXXXXX";
+    ASSERT_TRUE(mkdtemp(dir) != NULL, "temp rules dir");
+    char path[96];
+    snprintf(path, sizeof(path), "%s/%s", dir, YARA_RULES_FILE);
+    static const char rule[] = "rule T_ELF { meta: severity = \"HIGH\" description = \"marked ELF\" "
+                               "strings: $a = \"EVILMARK\" condition: uint32(0) == 0x464C457F and $a }";
+    FILE *f = fopen(path, "wb");
+    ASSERT_TRUE(f != NULL, "write rules");
+    fwrite(rule, 1, sizeof(rule) - 1, f);
+    fclose(f);
+    rules_fixture_sign(path, rule, sizeof(rule) - 1);
+    setenv("BOOTO_RULES_DIR", dir, 1);
+    setenv("BOOTO_RULES_DIR_ONLY", "1", 1);
+    rules_reset_cache();
+
+    static uint8_t cpio_buf[CPIO_BUF_CAP];
+    static const char elf[] = "\x7f" "ELF....EVILMARK";
+    size_t len = cpio_build(cpio_buf, "usr/bin/x", elf, sizeof(elf) - 1);
+    initramfs_scan_result_t res;
+    ASSERT_INT_EQ(initramfs_audit_buffer(cpio_buf, len, &res), BOOTO_OK, "audit ok");
+    ASSERT_INT_EQ(res.threats_detected, 1, "ELF entry flagged");
+    ASSERT_STR_EQ(res.findings[0].matched_pattern, "T_ELF", "rule id recorded");
+
+    unsetenv("BOOTO_RULES_DIR");
+    unsetenv("BOOTO_RULES_DIR_ONLY");
+    rules_fixture_done();
+    rules_reset_cache();
+    char sig[110];
+    snprintf(sig, sizeof(sig), "%s.sig", path);
+    unlink(sig);
+    unlink(path);
+    rmdir(dir);
+    TEST_PASS("test_yara_on_elf_entry");
+}
+
 int main(void) {
     printf("\n--- Running Initramfs CPIO Auditor Tests ---\n");
     test_cpio_archive_and_script_audit();
@@ -251,6 +291,7 @@ int main(void) {
     test_microcode_plus_zstd_initramfs();
     test_truncated_and_garbage_rejected();
     test_padded_line_detected();
+    test_yara_on_elf_entry();
     test_exec_capture_output_cap();
     test_exec_capture_sandboxed();
     test_exec_capture_escape_attempts();

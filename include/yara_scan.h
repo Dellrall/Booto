@@ -26,6 +26,8 @@ typedef struct {
 /* Match buf against the rules (loaded once and cached, including a failed load). Writes at most `max` matches.
  * BOOTO_ERR_CORRUPT_DATA when the rules file is unsigned, altered or does not compile. */
 booto_error_t yara_scan_buffer(const uint8_t *buf, size_t len, yara_match_t *out, int max, int *count);
+/* The same for a file on disk, read by libyara. */
+booto_error_t yara_scan_file(const char *path, yara_match_t *out, int max, int *count);
 
 /* Load the rules if needed: BOOTO_OK when they loaded or no rules file exists. Engines call it first so refused
  * rules fail the engine instead of silently matching nothing. */
