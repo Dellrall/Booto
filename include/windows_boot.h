@@ -36,6 +36,11 @@ bool winboot_is_windows_root(const char *root);
  * a driver in System32/drivers is flagged when its embedded signature is broken. */
 booto_error_t winboot_scan_rootfs(const char *root, winboot_scan_result_t *res);
 /* Calls fn with the path of each core file present (winload, winresume, ntoskrnl, hal, ci). */
+/* Newest TCG log Windows saved at boot under <root>/Windows/Logs/MeasuredBoot: *found = the Authenticode hash
+ * (hex) is among the EFI applications that boot loaded. log_name gets the log's name. BOOTO_ERR_NOT_FOUND: no
+ * log; BOOTO_ERR_CORRUPT_DATA: malformed log. */
+booto_error_t winboot_measured_has(const char *root, const char *authenticode_hex, bool *found, char *log_name,
+                                   size_t n);
 void winboot_each_core_file(const char *root, void (*fn)(const char *path, void *user), void *user);
 
 #ifdef __cplusplus

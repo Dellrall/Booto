@@ -12,9 +12,11 @@
 #include "windows_boot.h"
 #include "uefi_analyzer.h"
 #include "logger.h"
+#include "firmware_auditor.h"
 
 #include <dirent.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
@@ -116,5 +118,54 @@ booto_error_t winboot_scan_rootfs(const char *root, winboot_scan_result_t *res) 
     closedir(d);
     LOG_INFO("Windows boot: %d files, %d finding(s), %d driver(s) without embedded signature", res->files_checked,
              res->threats_detected, res->drivers_unsigned);
+    return BOOTO_OK;
+}
+
+#define MEASURED_LOG_CAP (4u << 20)
+#define MEASURED_MAX_APPS 64
+
+booto_error_t winboot_measured_has(const char *root, const char *authenticode_hex, bool *found, char *log_name,
+                                   size_t n) {
+    if (!root || !authenticode_hex || !found) return BOOTO_ERR_INVALID_ARG;
+    *found = false;
+    char win[512], logs[512], mb[512];
+    if (!ci_child(root, "Windows", win, sizeof(win)) || !ci_child(win, "Logs", logs, sizeof(logs)) ||
+        !ci_child(logs, "MeasuredBoot", mb, sizeof(mb)))
+        return BOOTO_ERR_NOT_FOUND;
+    // Names are <boot count>-<resume count>.log, zero-padded, so the largest name is the newest boot.
+    DIR *d = opendir(mb);
+    if (!d) return BOOTO_ERR_NOT_FOUND;
+    char newest[256] = "";
+    struct dirent *de;
+    while ((de = readdir(d)) != NULL) {
+        size_t len = strlen(de->d_name);
+        if (len > 4 && len < sizeof(newest) && strcasecmp(de->d_name + len - 4, ".log") == 0 &&
+            strcmp(de->d_name, newest) > 0)
+            snprintf(newest, sizeof(newest), "%s", de->d_name);
+    }
+    closedir(d);
+    if (!newest[0]) return BOOTO_ERR_NOT_FOUND;
+    if (log_name) snprintf(log_name, n, "%s", newest);
+
+    char path[800];
+    snprintf(path, sizeof(path), "%s/%s", mb, newest);
+    FILE *fp = fopen(path, "rb");
+    if (!fp) return BOOTO_ERR_IO;
+    uint8_t *buf = malloc(MEASURED_LOG_CAP);
+    if (!buf) {
+        fclose(fp);
+        return BOOTO_ERR_OUT_OF_MEMORY;
+    }
+    size_t len = fread(buf, 1, MEASURED_LOG_CAP, fp);
+    fclose(fp);
+    uint8_t apps[MEASURED_MAX_APPS][32];
+    int napps = firmware_tpm_log_apps(buf, len, apps, MEASURED_MAX_APPS);
+    free(buf);
+    if (napps < 0) return BOOTO_ERR_CORRUPT_DATA;
+    for (int i = 0; i < napps && !*found; i++) {
+        char hex[65];
+        for (int j = 0; j < 32; j++) snprintf(hex + 2 * j, 3, "%02x", apps[i][j]);
+        *found = strcasecmp(hex, authenticode_hex) == 0;
+    }
     return BOOTO_OK;
 }

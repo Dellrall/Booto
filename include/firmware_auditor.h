@@ -75,6 +75,11 @@ typedef struct {
  */
 booto_error_t firmware_audit(const firmware_paths_t *paths, firmware_report_t *out);
 
+/* Crypto-agile TCG event log (untrusted bytes): copies the SHA-256 digest of each EFI application the firmware
+ * loaded (EV_EFI_BOOT_SERVICES_APPLICATION, the image's Authenticode hash) into apps, at most max_apps.
+ * Returns how many, or -1 when the log is malformed or has no SHA-256 bank. */
+int firmware_tpm_log_apps(const uint8_t *log, size_t len, uint8_t (*apps)[32], int max_apps);
+
 /* Expert mode (--expert-firmware, off by default): deeper reads that need root and take longer. */
 #define FW_NVRAM_MAX_FINDINGS 32
 typedef struct {

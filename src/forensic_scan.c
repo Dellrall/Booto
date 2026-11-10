@@ -169,6 +169,25 @@ static void export_uefi(forensic_scan_report_t *out, quarantine_t *q, const uefi
         export_file(out, q, "uefi", esp_root, u->findings[i].file_path, QUARANTINE_MAX_ITEM);
 }
 
+/* The boot manager on the ESP against the newest boot log Windows saved: report only, never the verdict. */
+static void check_measured(forensic_scan_report_t *out, const char *esp) {
+    char path[512], log[64] = "";
+    snprintf(path, sizeof(path), "%s/EFI/Microsoft/Boot/bootmgfw.efi", esp);
+    pe_efi_info_t pe;
+    memset(&pe, 0, sizeof(pe));
+    if (uefi_parse_pe_file(path, &pe) != BOOTO_OK || !pe.authenticode_sha256[0]) return;
+    bool found = false;
+    booto_error_t e = winboot_measured_has(out->scan_root, pe.authenticode_sha256, &found, log, sizeof(log));
+    char *m = out->measured_note;
+    size_t n = sizeof(out->measured_note);
+    if (e == BOOTO_ERR_NOT_FOUND) snprintf(m, n, "no saved Windows boot log to compare bootmgfw.efi with");
+    else if (e == BOOTO_ERR_CORRUPT_DATA) snprintf(m, n, "Windows boot log %s is malformed", log);
+    else if (e != BOOTO_OK) snprintf(m, n, "Windows boot log %s unreadable: %s", log, err_name(e));
+    else if (found) snprintf(m, n, "bootmgfw.efi is what the last Windows boot (%s) ran", log);
+    else snprintf(m, n, "bootmgfw.efi is NOT what the last Windows boot (%s) ran: changed since, by an update or tampering", log);
+    LOG_INFO("Measured boot: %s", m);
+}
+
 /* UEFI engine: <root>/boot/efi if it holds EFI files, else the ESP(s) on target_dev's disk, mounted read-only. */
 static void run_uefi(forensic_scan_report_t *out, const char *target_dev, bool have_root, quarantine_t *q) {
     char note[96];
@@ -233,6 +252,7 @@ static void run_uefi(forensic_scan_report_t *out, const char *target_dev, bool h
         e = uefi_inspect_esp_directory(ESP_MOUNT_POINT, &out->uefi);
         if (e == BOOTO_OK) export_uefi(out, q, &out->uefi, ESP_MOUNT_POINT);
         if (g_baseline) baseline_add_tree(g_baseline, "esp", ESP_MOUNT_POINT);
+        if (have_root && winboot_is_windows_root(out->scan_root)) check_measured(out, ESP_MOUNT_POINT);
         booto_error_t ue = disk_unmount(ESP_MOUNT_POINT);
         if (ue != BOOTO_OK) LOG_WARN("Failed to unmount %s: %s", ESP_MOUNT_POINT, err_name(ue));
         snprintf(out->esp_dev, sizeof(out->esp_dev), "%.127s", esp);
