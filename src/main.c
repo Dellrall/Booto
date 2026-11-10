@@ -68,7 +68,7 @@ static void print_help(const char *prog_name) {
     printf("  -t, --target <dev>         Raw block device to scan (mounted read-only)\n");
     printf("  -s, --scan-dir <path>      Specify local rootfs path to inspect\n");
     printf("  -p, --persistence-dir <dir>Write JSON+Markdown case reports to <dir>\n");
-    printf("  -u, --update-rules         Regenerate sealed rule files (scripts/update_rules.sh)\n");
+    printf("  -u, --update-rules         Regenerate rule files (scripts/update_rules.sh)\n");
     printf("  -x, --expert-firmware      CLI, as root: also scan UEFI variables for hidden code and\n");
     printf("                             dump the SPI flash read-only with flashrom (slower; off by default)\n");
     printf("  -q, --quarantine           CLI, with -p: copy flagged files into an encrypted ZIP (password\n");
@@ -277,7 +277,7 @@ int main(int argc, char *argv[]) {
                 /* The generator and its sources live in the source tree, not on the live USB. */
                 if (access("./scripts/update_rules.sh", X_OK) != 0) {
                     fprintf(stderr, "booto: --update-rules needs the Booto source tree: run it from the repository root.\n"
-                                    "On the live USB, copy new rule files and their .sha256 seals to /persistence/rules instead.\n");
+                                    "On the live USB, copy new rule files and their .sig signatures to /persistence/rules instead.\n");
                     logger_shutdown();
                     return 1;
                 }

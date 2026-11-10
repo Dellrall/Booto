@@ -31,7 +31,7 @@ Built with **C11**, Booto runs from a trusted Debian Live USB environment so the
   - **Host Firmware Audit** (device mode only, not part of the disk verdict): Secure Boot and setup mode, enrolled platform key, PKfail test keys in `PK`/`KEK`/`db`, `dbx` revocation count, shim's MOK list (keys not shipped by a known distro, or bare binary hashes, fail), a pending one-shot `BootNext` override (fails; the first boot entry and its loader path are shown), ACPI DMAR/IVRS IOMMU tables, Thunderbolt DMA protection, silicon locks (SMM lock, SMRR/TSEG, Intel BIOS write protection), and TPM boot measurements (the firmware's event log is replayed and must reproduce the TPM's PCR 0-7; the PCR0 firmware digest is shown so scans of the same machine can be compared). Read-only; ACPI tables, PCI config space, CPU registers and the TPM event log need root (otherwise reported as `unknown`), and virtual machines report the silicon checks as `unknown`.
     On an older or unrecognised Intel chipset, `booto -c -t <disk>` prints three commands whose output helps confirm the chipset's register layout; paste it in a [GitHub issue](https://github.com/Dellrall/Booto/issues).
 - **Verdicts**: Every scan ends as `CLEAN`, `THREATS`, or `INCOMPLETE`, with a per-module status; an engine that errors makes the scan `INCOMPLETE` instead of silently passing.
-- **Sealed Detection Rules**: Signatures live in `rules/*.json`, each with a SHA-256 seal (`*.json.sha256`); a file whose seal does not match is refused.
+- **Signed Detection Rules**: Signatures live in `rules/*.json`, each with an Ed25519 signature (`*.json.sig`) checked against a public key built into the binary; an unsigned or altered file is refused.
 - **Defensive Fuzzing, ASan & Multi-Compiler CI**: Deterministic 1,500-iteration-per-parser mutation fuzzing of the ELF, PE, MBR/VBR/gap and initramfs parsers, AddressSanitizer/UBSan builds, and a GCC/Clang matrix.
 - **Case Reporting**: Export of a one-line JSON report and a compact Markdown report (about 1.3 KB together per case), each with a SHA-256 side file (`sha256sum -c` works from the cases directory). The side file is an integrity checksum, not a cryptographic signature.
 - **Automated ISO Generation (`make iso`)**: Standalone live bootable ISO output ready for USB deployment.
@@ -70,7 +70,7 @@ make coverage
 # Launch Interactive Zellij-Style Movable TUI
 ./bin/booto
 
-# Regenerate the sealed rule files locally (no network fetch)
+# Regenerate the rule files locally (no network fetch)
 ./bin/booto --update-rules
 
 # Build Debian Live ISO
@@ -104,7 +104,7 @@ sudo ./bin/booto -c -s /mnt/evidence                      # scan an already-moun
 | `-p`, `--persistence-dir <dir>` | Write JSON + Markdown case reports to `<dir>` |
 | `-d`, `--dry-run` | Print the planned scan and exit without touching any disk |
 | `-m`, `--mock-drives` | Inject virtual mock drives for TUI testing |
-| `-u`, `--update-rules` | Regenerate sealed rule files (`scripts/update_rules.sh`) |
+| `-u`, `--update-rules` | Regenerate rule files (`scripts/update_rules.sh`) |
 | `-V`, `--verbose` | Verbose/debug logging |
 | `-x`, `--expert-firmware` | Off by default. After a CLI scan, as root: flag UEFI variables that hide a PE/ELF image or a large packed blob, and dump the SPI flash read-only with `flashrom` (saved as `spi_flash.bin` in `-p <dir>`, else `/tmp`, with its SHA-256), then walk the image: LZMA sections are inflated by the sandboxed `xz` and a Windows executable hidden in the firmware is flagged. Slower; reported like the host firmware audit, never part of the verdict |
 | `-q`, `--quarantine` | Off by default; CLI with `-p <dir>`. Copies every flagged file (kernel module, EFI binary, initrd image, preloaded library, modified package file; first 1 MiB of the raw device for MBR findings) into `<dir>/quarantine/booto-quarantine-<time>.zip`: stored entries, ZipCrypto, password `infected`, names ending in `.malware`, mode 0400. Nothing in it can run when the USB is plugged in elsewhere; unpack only on an isolated analysis machine. The report partition is also mounted `noexec` |
@@ -114,7 +114,7 @@ Exit codes: `0` CLEAN (every enabled engine ran, nothing found), `1` THREATS, `2
 
 ### Detection Rules
 
-Rule files are searched in order: `$BOOTO_RULES_DIR`, `/persistence/rules`, `/usr/share/booto/rules`, `./rules` (set `BOOTO_RULES_DIR_ONLY=1` to use only `$BOOTO_RULES_DIR`). Each `*.json` must match its `*.json.sha256` seal or it is refused. `--update-rules` runs `scripts/update_rules.sh`, which regenerates and reseals the files; it does not download anything.
+Rule files are searched in order: `$BOOTO_RULES_DIR`, `/persistence/rules`, `/usr/share/booto/rules`, `./rules` (set `BOOTO_RULES_DIR_ONLY=1` to use only `$BOOTO_RULES_DIR`). Each `*.json` needs a valid `*.json.sig` (Ed25519, over the file's exact bytes) or it is refused, so an attacker who can edit the rules cannot re-sign them. `--update-rules` runs `scripts/update_rules.sh`, which regenerates the files and, when `BOOTO_RULES_SIGNING_KEY=<private key PEM>` is set, signs them; it does not download anything.
 
 The shipped DBX, LKM and MBR signatures are illustrative samples, not an authoritative threat feed. DBX entries are placeholders until real Authenticode revocation hashes are imported.
 

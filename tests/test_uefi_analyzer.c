@@ -5,7 +5,7 @@
 #include "test_framework.h"
 #include "uefi_analyzer.h"
 #include "crypto_utils.h"
-#include "rules_loader.h"
+#include "rules_fixture.h"
 #include "pe_fixture.h"
 
 #include <openssl/evp.h>
@@ -157,20 +157,16 @@ static void test_dbx_revocation_matching(void) {
 
     char dir[] = "/tmp/booto_dbx_XXXXXX";
     ASSERT_TRUE(mkdtemp(dir) != NULL, "mkdtemp");
-    char json_path[256], seal_path[256], json[512], seal[512], digest[65];
+    char json_path[256], sig_path[300], json[512];
     snprintf(json_path, sizeof(json_path), "%s/uefi_dbx_revocations.json", dir);
-    snprintf(seal_path, sizeof(seal_path), "%s/uefi_dbx_revocations.json.sha256", dir);
+    snprintf(sig_path, sizeof(sig_path), "%s.sig", json_path);
     int n = snprintf(json, sizeof(json),
                      "{\"revocations\":[{\"threat\":\"Test Bootkit\",\"cve\":\"CVE-0000-0000\","
                      "\"sha256\":\"%s\",\"severity\":\"HIGH\",\"description\":\"test\"}]}\n", hash);
     FILE *fp = fopen(json_path, "wb");
     ASSERT_TRUE(fp != NULL, "open json");
     if (fp) { fwrite(json, 1, (size_t)n, fp); fclose(fp); }
-    sha256_buffer_hex((const uint8_t *)json, (size_t)n, digest);
-    int m = snprintf(seal, sizeof(seal), "%s  %s\n", digest, json_path);
-    fp = fopen(seal_path, "wb");
-    ASSERT_TRUE(fp != NULL, "open seal");
-    if (fp) { fwrite(seal, 1, (size_t)m, fp); fclose(fp); }
+    rules_fixture_sign(json_path, json, (size_t)n);
 
     setenv("BOOTO_RULES_DIR", dir, 1);
     setenv("BOOTO_RULES_DIR_ONLY", "1", 1);
@@ -181,11 +177,11 @@ static void test_dbx_revocation_matching(void) {
     ASSERT_INT_EQ(info.matched_severity, SEVERITY_HIGH, "Severity mapped");
 
     unlink(json_path);
-    unlink(seal_path);
+    unlink(sig_path);
     rmdir(dir);
     unsetenv("BOOTO_RULES_DIR");
     unsetenv("BOOTO_RULES_DIR_ONLY");
-    rules_reset_cache();
+    rules_fixture_done();
     TEST_PASS("test_dbx_revocation_matching");
 }
 

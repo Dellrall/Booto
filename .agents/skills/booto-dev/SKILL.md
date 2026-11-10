@@ -57,9 +57,9 @@ graph LR
    - Log critical alerts using `LOG_CRITICAL("[MODULE ALERT] ...")` and audit info using `LOG_INFO(...)`.
 
 3. **Threat Signatures (`rules/<module>_*.json`, loaded by `src/rules_loader.c`)**:
-   - Signatures live in sealed runtime rule files searched in `$BOOTO_RULES_DIR`, `/persistence/rules`, `/usr/share/booto/rules`, `./rules`; a seal mismatch makes the loader refuse the file.
+   - Signatures live in signed runtime rule files searched in `$BOOTO_RULES_DIR`, `/persistence/rules`, `/usr/share/booto/rules`, `./rules`; a bad or missing `.sig` makes the loader refuse the file.
    - Follow the schema of the existing rules files and add a parser for the new file in `src/rules_loader.c`.
-   - Generate the file and its SHA-256 seal (`.json.sha256`) from `scripts/update_rules.sh`; never hand-edit a sealed file.
+   - Generate the file and its Ed25519 signature (`.json.sig`) from `scripts/update_rules.sh` with `BOOTO_RULES_SIGNING_KEY` set; never hand-edit a signed file.
 
 4. **Standalone Unit Test Suite (`tests/test_<module>.c`)**:
    - Test clean baseline scenarios (e.g., standard GRUB, clean kernel modules).
@@ -79,7 +79,7 @@ graph LR
 
 8. **Synthetic Disk & Rules Generator (`scripts/gen_mock_disk.sh` & `scripts/update_rules.sh`)**:
    - In `scripts/gen_mock_disk.sh`: Inject a synthetic sample into the loopback image.
-   - In `scripts/update_rules.sh`: Add rule generation and SHA-256 sealing for the new module (it generates locally; no network fetch).
+   - In `scripts/update_rules.sh`: Add rule generation and signing for the new module (it generates locally; no network fetch).
 
 ---
 

@@ -117,9 +117,11 @@ each with a
 seal file.
 .TP
 .BR \-u ", " \-\-update\-rules
-Regenerate the sealed rule files by running
+Regenerate the rule files by running
 .IR scripts/update_rules.sh .
-Nothing is fetched from the network. It works only from the root of the
+Nothing is fetched from the network. The script signs the files only when
+.B BOOTO_RULES_SIGNING_KEY
+names the release key. It works only from the root of the
 Booto source tree; on the live USB it exits 1 and tells you to copy new rule
 files to
 .I /persistence/rules
@@ -307,10 +309,16 @@ part was not inspected. The live ISO ships gzip, xz, zstd, lz4 and bzip2.
 The target's rpm database is too old to read; package integrity was not
 verified.
 .TP
-.B Rules seal mismatch for '\fIfile\fB'
-A rule file does not match its
-.I .sha256
-seal, or the seal is missing. The engine that needs it fails closed instead of scanning with altered
+.B Rules signature invalid for '\fIfile\fB'
+.PD 0
+.TP
+.B Rules signature '\fIfile\fB.sig' missing or malformed
+.PD
+A rule file has no
+.I .sig
+file, or its Ed25519 signature does not verify against the public key built into
+.BR booto .
+The file was changed or not signed by the Booto release key. The engine that needs it fails closed instead of scanning with altered
 rules. Restore the file or run
 .BR "booto \-u" .
 .TP
@@ -366,14 +374,14 @@ Examiner name written into case reports.
 .SH FILES
 .TP
 .I /usr/share/booto/rules/
-Sealed rule files:
+Signed rule files:
 .IR lkm_rootkit_signatures.json ,
 .IR mbr_bootkit_signatures.json ,
 .IR rootkit_file_iocs.json ,
 .IR uefi_dbx_revocations.json ,
 each with a
-.I .sha256
-seal. Searched after
+.I .sig
+Ed25519 signature. Searched after
 .B BOOTO_RULES_DIR
 and
 .IR /persistence/rules ,

@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # Booto Detection Rules Generator
-# Generates the sealed JSON rules files plus their "<file>.sha256" seals. Nothing is
-# fetched from the network.
+# Generates the JSON rules files. Nothing is fetched from the network.
+# With BOOTO_RULES_SIGNING_KEY=<Ed25519 PEM file> it writes each "<file>.sig" (raw 64-byte
+# signature that booto checks against its built-in public key); without it the existing .sig
+# files are kept, and booto refuses any file whose bytes changed.
 # - UEFI DBX revocations: from the vendored Microsoft dbx list (rules/sources/) via
 #   scripts/gen_dbx_rules.py, which also writes src/dbx_builtin.inc when run from the repo.
 # - LKM rootkit, MBR/VBR bootkit and rootkit file IOC rules: kept in sync by hand with the built-in
@@ -288,10 +290,15 @@ cat << 'EOF_IOC' > "${RULES_DIR}/rootkit_file_iocs.json"
 }
 EOF_IOC
 
-echo "[+] Sealing rules files (sha256sum)..."
-for f in uefi_dbx_revocations lkm_rootkit_signatures mbr_bootkit_signatures rootkit_file_iocs; do
-    sha256sum "${RULES_DIR}/${f}.json" > "${RULES_DIR}/${f}.json.sha256"
-done
+if [ -n "${BOOTO_RULES_SIGNING_KEY:-}" ]; then
+    echo "[+] Signing rules files (Ed25519)..."
+    for f in uefi_dbx_revocations lkm_rootkit_signatures mbr_bootkit_signatures rootkit_file_iocs; do
+        openssl pkeyutl -sign -rawin -inkey "${BOOTO_RULES_SIGNING_KEY}" \
+            -in "${RULES_DIR}/${f}.json" -out "${RULES_DIR}/${f}.json.sig"
+    done
+else
+    echo "[!] BOOTO_RULES_SIGNING_KEY not set: existing .sig files kept; changed rules will be refused."
+fi
 
 echo "=== Rules Generated Successfully ==="
 echo "Total DBX Rules: ${DBX_COUNT}"

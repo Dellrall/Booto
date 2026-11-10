@@ -1,10 +1,10 @@
 /**
  * @file test_rules_loader.c
- * @brief Unit tests for sealed JSON rules loading and built-in fallback.
+ * @brief Unit tests for signed JSON rules loading and built-in fallback.
  */
 #include "test_framework.h"
 #include "rules_loader.h"
-#include "crypto_utils.h"
+#include "rules_fixture.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,15 +24,13 @@ static void write_file(const char *dir, const char *name, const char *data, size
     fclose(f);
 }
 
-/* Write <name> and, when seal is true, its sha256sum-format seal over the given bytes. */
-static void write_rules(const char *dir, const char *name, const char *json, bool seal) {
+/* Write <name> and, when sign is true, its Ed25519 signature over the given bytes. */
+static void write_rules(const char *dir, const char *name, const char *json, bool sign) {
     write_file(dir, name, json, strlen(json));
-    if (!seal) return;
-    char hex[65], line[700], seal_name[128];
-    sha256_buffer_hex((const uint8_t *)json, strlen(json), hex);
-    int n = snprintf(line, sizeof(line), "%s  %s/%s\n", hex, dir, name);
-    snprintf(seal_name, sizeof(seal_name), "%s.sha256", name);
-    write_file(dir, seal_name, line, (size_t)n);
+    if (!sign) return;
+    char path[512];
+    snprintf(path, sizeof(path), "%s/%s", dir, name);
+    rules_fixture_sign(path, json, strlen(json));
 }
 
 /* Fresh temp dir as the only rules search location. */
@@ -48,11 +46,11 @@ static void cleanup_dir(const char *dir) {
     for (size_t i = 0; i < sizeof(RULE_FILES) / sizeof(RULE_FILES[0]); i++) {
         snprintf(path, sizeof(path), "%s/%s", dir, RULE_FILES[i]);
         unlink(path);
-        snprintf(path, sizeof(path), "%s/%s.sha256", dir, RULE_FILES[i]);
+        snprintf(path, sizeof(path), "%s/%s.sig", dir, RULE_FILES[i]);
         unlink(path);
     }
     rmdir(dir);
-    rules_reset_cache();
+    rules_fixture_done();
 }
 
 static const char *VALID_LKM =
@@ -68,8 +66,8 @@ static const char *VALID_MBR =
     "{\"signatures\": [{\"name\": \"T\", \"rule_id\": \"MBR_T\", \"target\": \"vbr_sector\", \"severity\": \"CRITICAL\",\n"
     "  \"unknown_bootloader_only\": true, \"description\": \"d\", \"patterns_hex\": [\"DEad\", \"00ff10\"]}]}";
 
-static void test_valid_sealed_file(void) {
-    TEST_START("test_valid_sealed_file");
+static void test_valid_signed_file(void) {
+    TEST_START("test_valid_signed_file");
     char dir[] = "/tmp/booto_rules_XXXXXX";
     use_temp_dir(dir);
     write_rules(dir, "lkm_rootkit_signatures.json", VALID_LKM, true);
@@ -99,36 +97,36 @@ static void test_valid_sealed_file(void) {
     ASSERT_INT_EQ(mbr->entries[0].pattern_count, 2, "Two patterns");
     ASSERT_INT_EQ((int)mbr->entries[0].pattern_len[1], 3, "Pattern length");
     ASSERT_TRUE(mbr->entries[0].patterns[0][0] == 0xDE && mbr->entries[0].patterns[0][1] == 0xAD, "Hex decoded");
-    TEST_PASS("test_valid_sealed_file");
+    TEST_PASS("test_valid_signed_file");
 }
 
-static void test_missing_seal(void) {
-    TEST_START("test_missing_seal");
+static void test_missing_signature(void) {
+    TEST_START("test_missing_signature");
     char dir[] = "/tmp/booto_rules_XXXXXX";
     use_temp_dir(dir);
     write_rules(dir, "lkm_rootkit_signatures.json", VALID_LKM, false);
     const rules_lkm_set_t *lkm = NULL;
     booto_error_t err = rules_get_lkm(&lkm);
     cleanup_dir(dir);
-    ASSERT_INT_EQ(err, BOOTO_ERR_CORRUPT_DATA, "Unsealed rules must be refused");
+    ASSERT_INT_EQ(err, BOOTO_ERR_CORRUPT_DATA, "Unsigned rules must be refused");
     ASSERT_TRUE(lkm == NULL, "No set on failure");
-    TEST_PASS("test_missing_seal");
+    TEST_PASS("test_missing_signature");
 }
 
-static void test_seal_mismatch(void) {
-    TEST_START("test_seal_mismatch");
+static void test_signature_mismatch(void) {
+    TEST_START("test_signature_mismatch");
     char dir[] = "/tmp/booto_rules_XXXXXX";
     use_temp_dir(dir);
     write_rules(dir, "lkm_rootkit_signatures.json", VALID_LKM, true);
     char tampered[1024];
     snprintf(tampered, sizeof(tampered), "%s", VALID_LKM);
-    tampered[strlen(tampered) - 3] = ' '; /* flip one byte after sealing */
+    tampered[strlen(tampered) - 3] = ' '; /* flip one byte after signing */
     write_file(dir, "lkm_rootkit_signatures.json", tampered, strlen(tampered));
     const rules_lkm_set_t *lkm = NULL;
     booto_error_t err = rules_get_lkm(&lkm);
     cleanup_dir(dir);
     ASSERT_INT_EQ(err, BOOTO_ERR_CORRUPT_DATA, "Tampered rules must be refused");
-    TEST_PASS("test_seal_mismatch");
+    TEST_PASS("test_signature_mismatch");
 }
 
 static void test_malformed_json(void) {
@@ -196,7 +194,7 @@ static void test_absent_uses_builtin(void) {
     TEST_PASS("test_absent_uses_builtin");
 }
 
-/* Committed rules/ must load with their seals and equal the built-in tables exactly. */
+/* Committed rules/ must verify against the release key and equal the built-in tables exactly. */
 static void test_repo_rules_match_builtin(void) {
     TEST_START("test_repo_rules_match_builtin");
     static rules_dbx_set_t file_dbx;
@@ -249,12 +247,12 @@ static void test_repo_rules_match_builtin(void) {
 
 int main(void) {
     printf("\n--- Running Rules Loader Tests ---\n");
-    test_valid_sealed_file();
-    test_missing_seal();
-    test_seal_mismatch();
+    test_repo_rules_match_builtin(); /* first: the other tests swap in a throwaway key */
+    test_valid_signed_file();
+    test_missing_signature();
+    test_signature_mismatch();
     test_malformed_json();
     test_absent_uses_builtin();
-    test_repo_rules_match_builtin();
     unsetenv("BOOTO_RULES_DIR");
     unsetenv("BOOTO_RULES_DIR_ONLY");
     TEST_SUMMARY();
