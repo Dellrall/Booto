@@ -30,6 +30,7 @@ SOURCES = $(SRCDIR)/logger.c \
           $(SRCDIR)/firmware_auditor.c \
           $(SRCDIR)/quarantine.c \
           $(SRCDIR)/inspect.c \
+          $(SRCDIR)/reg_hive.c \
           $(SRCDIR)/windows_boot.c \
           $(SRCDIR)/baseline.c \
           $(SRCDIR)/tui/terminal.c \
