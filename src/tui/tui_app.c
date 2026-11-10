@@ -56,8 +56,9 @@ static void render_top_bar(tui_app_state_t *app, int cols) {
     /* Only a machine with an encrypted drive has anything to unlock: say nothing otherwise. */
     const char *luks = app->luks_unlocked ? "LUKS unlocked" : "";
     for (int i = 0; i < app->drive_count && !luks[0]; i++)
-        if (strcmp(app->drives[i].fs_type, "crypto_LUKS") == 0) luks = "LUKS locked";
-    const char *ram = "RAM only";
+        if (strcmp(app->drives[i].fs_type, "crypto_LUKS") == 0 && strcmp(app->drives[i].name, app->persist.dev_path) != 0)
+            luks = "LUKS locked"; /* the boot USB's report partition is not a target */
+    const char *ram = persistence_is_unlocked(&app->persist) ? "Reports on USB" : "RAM only";
 
     /* Right side: scan status, "RAM only", LUKS state, two spaces apart. Drop items until "Booto" still fits. */
     int min_left = 1 + 5 + 2;
