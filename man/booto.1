@@ -232,6 +232,9 @@ Unlock the selected LUKS drive with its passphrase.
 .TP
 .B F4
 Unlock the encrypted report partition on the Booto USB.
+When the USB has none, run
+.B booto\-storage create
+to make one in its free space.
 .TP
 .BR F10 ", " q
 Open the exit menu:
@@ -448,6 +451,13 @@ A signed rule pack copied into
 .I rules/
 replaces the ISO's rules at the next start; an unsigned or altered file there is refused.
 Without it, reports stay in RAM and are lost at power off.
+On a USB written raw from the ISO (dd, Rufus DD mode, caligula),
+.B booto\-storage create
+(or
+.B F4
+in the TUI) adds it in the free space after the live system, asking for size and passphrase first;
+.B booto\-storage delete
+erases it.
 .SH EXAMPLES
 Scan a disk and save the report on the USB:
 .PP
