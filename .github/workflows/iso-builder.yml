@@ -43,7 +43,8 @@ jobs:
             libblkid-dev \
             libudev-dev \
             libssl-dev \
-            libsqlite3-dev
+            libsqlite3-dev \
+            libyara-dev
 
       - name: Build Standalone Debian Live ISO
         run: |

@@ -45,13 +45,14 @@ make -C "${REPO_ROOT}" clean all
 echo "[+] Step 2/6: Bootstrapping Debian 12 (Bookworm) minimal rootfs..."
 debootstrap --arch=amd64 \
             --variant=minbase \
-            --include=linux-image-amd64,live-boot,systemd,systemd-sysv,libncurses6,libblkid1,libudev1,libssl3,libsqlite3-0,cryptsetup,util-linux,gzip,xz-utils,zstd,lz4,bzip2,flashrom,gpm,plymouth,plymouth-label,console-setup-linux,vim-tiny,nano,man-db \
+            --include=linux-image-amd64,live-boot,systemd,systemd-sysv,libncurses6,libblkid1,libudev1,libssl3,libsqlite3-0,libyara9,cryptsetup,util-linux,gzip,xz-utils,zstd,lz4,bzip2,flashrom,gpm,plymouth,plymouth-label,console-setup-linux,vim-tiny,nano,man-db \
             "${DEBIAN_VERSION}" "${ROOTFS_DIR}" "${DEBIAN_MIRROR}"
 
 echo "[+] Step 3/6: Installing Booto binary into rootfs..."
 install -m 755 "${REPO_ROOT}/bin/booto" "${ROOTFS_DIR}/usr/local/bin/booto"
 install -d -m 755 "${ROOTFS_DIR}/usr/share/booto/rules"
-install -m 644 "${REPO_ROOT}"/rules/*.json "${REPO_ROOT}"/rules/*.json.sig "${ROOTFS_DIR}/usr/share/booto/rules/"
+install -m 644 "${REPO_ROOT}"/rules/*.json "${REPO_ROOT}"/rules/*.json.sig \
+    "${REPO_ROOT}"/rules/*.yar "${REPO_ROOT}"/rules/*.yar.sig "${ROOTFS_DIR}/usr/share/booto/rules/"
 install -m 644 "${REPO_ROOT}/LICENSE" "${ROOTFS_DIR}/usr/share/booto/LICENSE"
 install -D -m 644 "${REPO_ROOT}/man/booto.1" "${ROOTFS_DIR}/usr/share/man/man1/booto.1"
 install -D -m 644 "${REPO_ROOT}/man/booto-checks.7" "${ROOTFS_DIR}/usr/share/man/man7/booto-checks.7"
