@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Write blocker at boot.** A udev rule sets every disk and partition except the Booto USB read-only as soon as it appears (`blockdev --setro`), not only the one Booto mounts. Undo for one device with `blockdev --setrw`.
+- **Before/after proof.** Reports record the SHA-256 of the target's first 1 MiB before mounting and after unmounting, and the Markdown report says `unchanged` or `CHANGED`.
+- **YARA for Linux.** The signed rules now also run over every kernel module and every ELF file in the initramfs, with four new rules: rootkit module info, named public rootkits (Diamorphine, Reptile, KoviD, Azazel, Jynx, BEURK, bdvl, Vlany), getdents64/kill syscall hooks, and Bootkitty.
+- **Secure Boot.** The ISO boots through Debian's Microsoft-signed shim and Debian's signed GRUB and kernel, so Secure Boot can stay on. It still boots with Secure Boot off.
+
 ## [1.9.1-beta] - 2026-11-10
 
 ### Fixed
