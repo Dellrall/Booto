@@ -44,7 +44,7 @@ TEST_BINS = $(patsubst $(TESTDIR)/%.c, $(BUILDDIR)/%, $(TEST_SOURCES))
 
 TARGET = $(BINDIR)/booto
 
-.PHONY: all clean test run version iso dry-run asan fuzz coverage
+.PHONY: all clean test run version iso dry-run asan fuzz coverage zoo
 
 all: version $(TARGET)
 
@@ -90,6 +90,14 @@ test: version $(TARGET) $(TEST_BINS)
 	done
 	@scripts/check_man.sh
 	@echo "All tests passed successfully!"
+
+$(BUILDDIR)/zoo_mkpe: $(TESTDIR)/zoo/mkpe.c $(TESTDIR)/pe_fixture.h $(OBJECTS) | $(BUILDDIR)
+	$(CC) $(CFLAGS) $(INCLUDES) $< $(OBJECTS) $(LDFLAGS) $(LDLIBS) -o $@
+
+# Detection proof: builds the planted and clean cases, scans each, fails on a miss or a false alarm.
+zoo: version $(TARGET) $(BUILDDIR)/zoo_mkpe
+	@CC="$(CC)" scripts/gen_mock_disk.sh --zoo $(BUILDDIR)/zoo $(BUILDDIR)/zoo_mkpe
+	@$(TESTDIR)/zoo/run.sh $(TARGET) $(BUILDDIR)/zoo
 
 asan: clean
 	@echo "--- Compiling with AddressSanitizer & UndefinedBehaviorSanitizer ---"
