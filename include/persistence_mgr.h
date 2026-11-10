@@ -47,6 +47,13 @@ typedef struct {
  * @return BOOTO_OK; BOOTO_ERR_NOT_FOUND when not booted from a live medium or no such partition;
  *         BOOTO_ERR_IO if mountinfo is unreadable.
  */
+/**
+ * @brief Find the sysfs directory of the disk Booto booted from (the one mounted at /run/live/medium).
+ * @param disk Receives the resolved sysfs path; len must be at least PATH_MAX.
+ * @return BOOTO_OK, or BOOTO_ERR_NOT_FOUND when not booted from a live medium.
+ */
+booto_error_t persistence_find_boot_disk(const char *mountinfo_path, const char *sysfs_root, char *disk, size_t len);
+
 booto_error_t persistence_find_data_partition(const char *mountinfo_path, const char *sysfs_root,
                                               char *out_dev, size_t out_len);
 
