@@ -16,8 +16,8 @@ Built with **C11**, Booto runs from a trusted Debian Live USB environment so the
 ## Key Features
 
 - **Amnesic Live OS (Debian 12 Base)**: Runs 100% in RAM (`SquashFS` + `OverlayFS`) with zero host disk tampering. Boots with Secure Boot on (Debian's signed shim, GRUB and kernel) or off, and carries Debian's security updates.
-- **Report Storage on the USB (`BOOTO_DATA`)**: reports, logs and custom rules persist on the stick's second partition, LUKS2-encrypted (passphrase asked when the TUI starts) or plain ext4 (mounted without asking). Booto only uses the partition on the stick it booted from.
-- **Dual-Partition USB Setup Utility (`scripts/setup_usb.sh`)**: One-command installer creating the Amnesic Live bootloader partition and the report partition, with or without a passphrase.
+- **Report Storage on the USB (`BOOTO_DATA`)**: reports, logs and custom rules persist on a partition of the stick, LUKS2-encrypted (passphrase asked when the TUI starts) or plain ext4 (mounted without asking). Booto only uses the partition on the stick it booted from.
+- **Dual-Partition USB Setup Utility (`scripts/setup_usb.sh`)**: One-command installer creating the Amnesic Live bootloader partition and the report partition, with or without a passphrase. Written raw instead (`dd`, Rufus DD mode, caligula, Etcher)? `F4` in Booto runs `booto-storage create` to add the report partition from inside the live system, like Tails.
 - **Zellij-Inspired Movable TUI**: Raw termios/ANSI terminal interface (no ncurses) with a Binary Space Partitioning (BSP) window manager supporting movable, resizable, and zoomable panes.
 - **Safe Forensic Storage Discovery & Mounter**: Automatic enumeration of NVMe/SATA/USB block devices via `/proc/partitions` and `sysfs` (ext4, xfs, btrfs, NTFS, LUKS and LVM, including LVM inside LUKS, activated read-only), enforcing strict read-only mounts (`MS_RDONLY | MS_NODEV | MS_NOEXEC | MS_NOSUID` with `noload`).
 - **Low-Level Forensic Detection Modules**:
@@ -83,6 +83,8 @@ sudo make iso
 sudo ./scripts/setup_usb.sh /dev/sdb
 # Cap the reports/persistence partition (default: rest of the drive); --no-encrypt skips the passphrase:
 sudo ./scripts/setup_usb.sh --data-size=512M --no-encrypt /dev/sdb
+# Or write the ISO raw with any tool and press F4 in Booto to create the report partition:
+sudo dd if=dist/booto-live-amd64.iso of=/dev/sdb bs=4M conv=fsync status=progress
 # The live system loads only from removable media (USB stick, CD/DVD); a USB SSD that
 # reports itself as non-removable needs the "USB not detected" GRUB entry, which finds this
 # build's ISO by UUID. The default keeps a /live tree planted on the suspect disk from

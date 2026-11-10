@@ -58,7 +58,7 @@ sudo apt-get install -y qemu-system-x86 ovmf
 
 Option A, download the release (recommended):
 
-1. Download `booto-<version>-amd64.iso` and `booto-<version>-amd64.iso.sha256` from <https://github.com/Dellrall/Booto/releases> (e.g. `booto-v1.9.2-beta-amd64.iso`; beta releases are marked pre-release, so `latest` may not show them).
+1. Download `booto-<version>-amd64.iso` and `booto-<version>-amd64.iso.sha256` from <https://github.com/Dellrall/Booto/releases> (e.g. `booto-v1.9.4-beta-amd64.iso`; beta releases are marked pre-release, so `latest` may not show them).
 2. Check the download: `sha256sum -c booto-<version>-amd64.iso.sha256`. It must print `OK`.
 3. Optional, proves GitHub's CI built it from this repository (releases from v1.7.0 on): `gh attestation verify booto-<version>-amd64.iso --repo Dellrall/Booto`. It must print `Verification succeeded`.
 
@@ -74,6 +74,8 @@ Optional check in a VM: `./scripts/run_qemu_vm.sh`.
 ### Step 2: Write the USB stick
 
 Alternative on Windows or Linux without these scripts: [booto-writer](https://github.com/Dellrall/booto-writer) downloads, verifies and writes the ISO with the same layout.
+
+Alternative with any raw writer (`dd`, caligula, balenaEtcher, Rufus in **DD mode**): write the ISO, boot it, and press `F4` to add the report partition in the free space ([Step 4](#create-unlock-change-or-remove-report-storage)). Needs an ISO from 1.9.4-beta on. Rufus's default ISO mode does not work: it fills the stick with one FAT partition and leaves no free space.
 
 1. Plug in the stick and find its device name. The `TRAN` column must say `usb`:
    ```bash
