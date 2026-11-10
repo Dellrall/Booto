@@ -74,6 +74,11 @@ rm -rf "${ROOTFS_DIR}/tmp/booto-src"
 in_chroot apt-get -y purge ${BUILD_DEPS}
 in_chroot apt-get -y --purge autoremove
 in_chroot apt-get clean
+# Secure Boot: Debian's shim (signed by Microsoft) loads Debian's signed GRUB, which checks Debian's signed kernel.
+# With Secure Boot off shim runs the same GRUB unchecked, so one chain boots both ways.
+SIGNED_DIR="${WORK_DIR}/signed"
+in_chroot sh -c 'cd /tmp && apt-get download shim-signed grub-efi-amd64-signed && for d in ./*.deb; do dpkg-deb -x "$d" /tmp/signed; done && rm -f ./*.deb'
+mv "${ROOTFS_DIR}/tmp/signed" "${SIGNED_DIR}"
 if in_chroot ldd /usr/local/bin/booto | grep -q "not found"; then
     in_chroot ldd /usr/local/bin/booto
     echo "[-] Error: booto needs a library the live system does not ship."
@@ -190,22 +195,19 @@ menuentry "Booto - Live Rootkit & Bootkit Forensic System (Debug Verbose)" {
 }
 EOF_GRUB
 
-# Create EFI Bootloader and FAT efiboot.img
+# EFI loaders: shim as the removable-media path, GRUB beside it where shim looks for it.
 mkdir -p "${CD_DIR}/EFI/BOOT" "${CD_DIR}/boot/grub"
-grub-mkstandalone \
-    --format=x86_64-efi \
-    --output="${CD_DIR}/EFI/BOOT/BOOTX64.EFI" \
-    --install-modules="part_gpt part_msdos fat iso9660 search search_fs_file search_label linux normal font gfxterm all_video" \
-    --modules="part_gpt part_msdos fat iso9660 search search_fs_file search_label linux normal font gfxterm all_video" \
-    --locales="" \
-    --fonts="" \
-    "boot/grub/grub.cfg=${CD_DIR}/boot/grub/grub.cfg"
+install -m 644 "${SIGNED_DIR}/usr/lib/shim/shimx64.efi.signed" "${CD_DIR}/EFI/BOOT/BOOTX64.EFI"
+install -m 644 "${SIGNED_DIR}/usr/lib/grub/x86_64-efi-signed/gcdx64.efi.signed" "${CD_DIR}/EFI/BOOT/grubx64.efi"
 
-# Create proper FAT filesystem image containing the EFI bootloader
+# FAT efiboot.img. The signed GRUB reads (boot device)/boot/grub/grub.cfg first; a copy here keeps it from
+# searching every disk for /.disk/info, which a suspect disk could plant. That grub.cfg then finds BOOT_MARKER.
 dd if=/dev/zero of="${WORK_DIR}/efiboot.img" bs=1M count=16
 mkfs.vfat -F 12 -n "BOOT_EFI" "${WORK_DIR}/efiboot.img"
-mmd -i "${WORK_DIR}/efiboot.img" ::/EFI ::/EFI/BOOT
+mmd -i "${WORK_DIR}/efiboot.img" ::/EFI ::/EFI/BOOT ::/boot ::/boot/grub
 mcopy -i "${WORK_DIR}/efiboot.img" "${CD_DIR}/EFI/BOOT/BOOTX64.EFI" ::/EFI/BOOT/BOOTX64.EFI
+mcopy -i "${WORK_DIR}/efiboot.img" "${CD_DIR}/EFI/BOOT/grubx64.efi" ::/EFI/BOOT/grubx64.efi
+mcopy -i "${WORK_DIR}/efiboot.img" "${CD_DIR}/boot/grub/grub.cfg" ::/boot/grub/grub.cfg
 cp "${WORK_DIR}/efiboot.img" "${CD_DIR}/boot/grub/efiboot.img"
 
 # Create BIOS GRUB bootloader if i386-pc is available

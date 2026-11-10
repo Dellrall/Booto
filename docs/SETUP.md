@@ -10,7 +10,7 @@ How to put Booto on a USB stick, boot a suspect machine from it, scan the machin
 | :--- | :--- |
 | CPU | 64-bit x86 (amd64). ARM machines and Apple Silicon Macs cannot boot it. |
 | Firmware | UEFI or legacy BIOS; the ISO boots in both modes. |
-| Secure Boot | **Must be turned off** in the firmware setup. Booto's bootloader is not signed. The firmware audit then reports Secure Boot as off; that is expected for this boot. |
+| Secure Boot | On or off. The stick boots through Debian's signed shim, GRUB and kernel, so machines with Microsoft's standard keys accept it. With Secure Boot on the kernel locks down `/dev/mem`, so the expert SPI flash dump (`-x`) needs Secure Boot off. A machine with only its owner's own keys refuses the stick: turn Secure Boot off for that boot. |
 | RAM | 2 GiB minimum (the QEMU test VM uses 2048 MiB). The live system runs from RAM and never writes to the internal disks. |
 | Boot source | Must allow booting from USB. The live system only loads from removable media (USB stick, CD/DVD). A USB SSD that reports itself as non-removable boots only via the "USB not detected" GRUB entry (finds this build's ISO by UUID). |
 | Disk being scanned | Any disk Linux can mount read-only. The package check needs a Debian-based system (Debian, Ubuntu, Mint, Kali); other systems show it as `SKIPPED`. Encrypted (LUKS) disks can be unlocked read-only from the TUI (`F3`). |
@@ -92,7 +92,7 @@ Optional check in a VM: `./scripts/run_qemu_vm.sh`.
 ### Step 3: Boot the suspect machine
 
 1. Shut the machine down completely (not sleep or hibernate).
-2. Plug in the stick, open the boot menu (often `F12`, `F8`, `Esc` or `Option` on Macs) and choose the USB stick. Turn off Secure Boot first if the stick is refused.
+2. Plug in the stick, open the boot menu (often `F12`, `F8`, `Esc` or `Option` on Macs) and choose the USB stick. If the firmware refuses it (owner-enrolled keys only), turn Secure Boot off for this boot.
 3. Choose **Booto - Live Rootkit & Bootkit Forensic System** in the menu. The Booto TUI starts by itself on the first console.
 
 ### Step 4: Unlock the report partition
