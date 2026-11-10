@@ -345,6 +345,16 @@ is checked the same way. A tampered or invalid driver is a finding; a driver
 without an embedded signature (Windows signs many through catalog files) or
 signed by a third party is only counted in the engine's note. Boot
 configuration (BCD) and registry boot-start entries are not read yet.
+.SS Measured boot (report only)
+When the ESP was found on the target's disk, the Authenticode hash of
+.I EFI/Microsoft/Boot/bootmgfw.efi
+is looked up among the EFI applications in the newest boot log Windows saved under
+.IR Windows/Logs/MeasuredBoot .
+"is NOT what the last Windows boot ran" means the boot manager changed after that boot:
+a Windows update does this, and so does a bootkit that swaps it.
+The line is printed as
+.B Measured boot
+and never changes the verdict. The live TPM log is not used: it describes Booto's own boot.
 .SH FIRMWARE AUDIT
 Runs on the machine Booto booted on, in device mode. Each check is
 .BR ok ,

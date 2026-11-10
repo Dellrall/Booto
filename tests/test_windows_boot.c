@@ -97,6 +97,51 @@ static void test_scan(void) {
     TEST_PASS("test_scan");
 }
 
+/* Crypto-agile TCG log: Spec ID (SHA-256 only), then one EFI application event whose digest is `fill`. */
+static size_t build_log(uint8_t *b, uint8_t fill) {
+    memset(b, 0, 256);
+    b[4] = 3;                                         // EV_NO_ACTION
+    b[28] = 32;                                       // Spec ID event size
+    memcpy(b + 32, "Spec ID Event03", 16);
+    b[56] = 1;                                        // one algorithm
+    b[60] = 0x0B; b[62] = 32;                         // SHA-256, 32 bytes
+    size_t off = 64;
+    b[off + 0] = 4;                                   // PCR 4
+    b[off + 4] = 0x03; b[off + 7] = 0x80;             // EV_EFI_BOOT_SERVICES_APPLICATION
+    b[off + 8] = 1;                                   // one digest
+    b[off + 12] = 0x0B;
+    memset(b + off + 14, fill, 32);
+    return off + 14 + 32 + 4;                         // empty event data
+}
+
+static void test_measured_boot(void) {
+    TEST_START("test_measured_boot");
+    bool found = true;
+    char name[64];
+    ASSERT_INT_EQ(winboot_measured_has(g_root, "ab", &found, name, sizeof(name)), BOOTO_ERR_NOT_FOUND, "No log dir");
+    mk("WINDOWS/Logs");
+    mk("WINDOWS/Logs/MeasuredBoot");
+    uint8_t b[256];
+    size_t len = build_log(b, 0x11);
+    put("WINDOWS/Logs/MeasuredBoot/0000000001-0000000000.log", b, len);
+    len = build_log(b, 0xAB);
+    put("WINDOWS/Logs/MeasuredBoot/0000000002-0000000000.log", b, len);
+
+    char hex[65];
+    for (int i = 0; i < 32; i++) snprintf(hex + 2 * i, 3, "ab");
+    ASSERT_INT_EQ(winboot_measured_has(g_root, hex, &found, name, sizeof(name)), BOOTO_OK, "Newest log parses");
+    ASSERT_TRUE(found, "Hash measured by the last boot is found");
+    ASSERT_STR_EQ(name, "0000000002-0000000000.log", "Newest log is used");
+    for (int i = 0; i < 32; i++) snprintf(hex + 2 * i, 3, "11");
+    ASSERT_INT_EQ(winboot_measured_has(g_root, hex, &found, name, sizeof(name)), BOOTO_OK, "Newest log parses");
+    ASSERT_TRUE(!found, "Hash from an older boot only is not found");
+
+    put("WINDOWS/Logs/MeasuredBoot/0000000003-0000000000.log", b, 40);
+    ASSERT_INT_EQ(winboot_measured_has(g_root, hex, &found, name, sizeof(name)), BOOTO_ERR_CORRUPT_DATA,
+                  "Truncated log is malformed");
+    TEST_PASS("test_measured_boot");
+}
+
 static void test_orchestrator(void) {
     TEST_START("test_orchestrator");
     forensic_scan_report_t *r = calloc(1, sizeof(*r));
@@ -119,6 +164,7 @@ int main(void) {
     test_windows_root();
     test_scan();
     test_orchestrator();
+    test_measured_boot();
     char cmd[128];
     snprintf(cmd, sizeof(cmd), "rm -rf '%s'", g_root);
     if (system(cmd) != 0) fprintf(stderr, "warning: cleanup of %s failed\n", g_root);

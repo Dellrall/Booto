@@ -810,6 +810,7 @@ static void check_silicon(fw_check_t *ck, bool *unconfirmed, const char *cpuinfo
 /* ---- TPM event log (TCG PC Client Platform Firmware Profile, crypto-agile format) ---------- */
 
 #define EV_NO_ACTION        3u
+#define EV_EFI_BOOT_SERVICES_APPLICATION 0x80000003u
 #define TPM_ALG_SHA256      0x000Bu
 #define TPM_REPLAY_PCRS     8   /* firmware PCRs 0-7 */
 #define TPM_MAX_ALGS        8
@@ -828,8 +829,10 @@ static int hex_nibble(char ch) {
 }
 
 /* Replays the SHA-256 bank of the log into pcr[0..7]. Every length is checked against the
- * bytes left before it is used; the log is firmware-written, so any inconsistency is MALFORMED. */
-static replay_result_t tpm_replay(const uint8_t *d, size_t len, uint8_t pcr[TPM_REPLAY_PCRS][32]) {
+ * bytes left before it is used; the log is firmware-written, so any inconsistency is MALFORMED.
+ * apps non-NULL: also collects up to max_apps EFI application digests into apps, count in *n_apps. */
+static replay_result_t tpm_replay(const uint8_t *d, size_t len, uint8_t pcr[TPM_REPLAY_PCRS][32],
+                                  uint8_t (*apps)[32], int max_apps, int *n_apps) {
     memset(pcr, 0, TPM_REPLAY_PCRS * 32);
     /* First entry: legacy TCG_PCR_EVENT (pcr, type, sha1[20], size) holding the Spec ID event:
      * signature[16], platformClass, versions[4], numberOfAlgorithms, {algId, digestSize}[]. */
@@ -887,8 +890,10 @@ static replay_result_t tpm_replay(const uint8_t *d, size_t len, uint8_t pcr[TPM_
                 pcr[0][31] = ev[16];
             continue;
         }
-        if (idx >= TPM_REPLAY_PCRS) continue;
         if (!digest256) return REPLAY_MALFORMED;
+        if (apps && type == EV_EFI_BOOT_SERVICES_APPLICATION && *n_apps < max_apps)
+            memcpy(apps[(*n_apps)++], digest256, 32);
+        if (idx >= TPM_REPLAY_PCRS) continue;
         sha256_ctx_t ctx;
         sha256_init(&ctx);
         sha256_update(&ctx, pcr[idx], 32);
@@ -938,7 +943,7 @@ static void check_tpm_log(fw_check_t *c, const char *tpm_dir, const char *log_pa
         return;
     }
     uint8_t replay[TPM_REPLAY_PCRS][32];
-    replay_result_t r = tpm_replay(log, len, replay);
+    replay_result_t r = tpm_replay(log, len, replay, NULL, 0, NULL);
     free(log);
     if (r == REPLAY_MALFORMED) {
         set_check(c, FW_RESULT_FAIL, "TPM event log is malformed: boot measurements cannot be verified.");
@@ -975,6 +980,13 @@ static void check_tpm_log(fw_check_t *c, const char *tpm_dir, const char *log_pa
     snprintf(c->detail, sizeof(c->detail),
              "Event log matches PCR 0-7; firmware digest (PCR0) %02x%02x%02x%02x%02x%02x%02x%02x...",
              pcr0[0], pcr0[1], pcr0[2], pcr0[3], pcr0[4], pcr0[5], pcr0[6], pcr0[7]);
+}
+
+int firmware_tpm_log_apps(const uint8_t *log, size_t len, uint8_t (*apps)[32], int max_apps) {
+    if (!log || !apps || max_apps < 0) return -1;
+    uint8_t pcr[TPM_REPLAY_PCRS][32];
+    int n = 0;
+    return tpm_replay(log, len, pcr, apps, max_apps, &n) == REPLAY_OK ? n : -1;
 }
 
 booto_error_t firmware_audit(const firmware_paths_t *paths, firmware_report_t *out) {

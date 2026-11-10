@@ -12,6 +12,7 @@
 #include "initramfs_auditor.h"
 #include "mbr_auditor.h"
 #include "baseline.h"
+#include "firmware_auditor.h"
 #include "logger.h"
 
 #include <stdint.h>
@@ -355,6 +356,11 @@ static void target_baseline(const uint8_t *buf, size_t len) {
     (void)baseline_parse((const char *)buf, len, &g_baseline);
 }
 
+static void target_tpm_log(const uint8_t *buf, size_t len) {
+    uint8_t apps[8][32];
+    (void)firmware_tpm_log_apps(buf, len, apps, 8);
+}
+
 static uint8_t g_seed_a[FUZZ_MAX_LEN];
 static uint8_t g_seed_b[FUZZ_MAX_LEN];
 
@@ -470,6 +476,33 @@ static void test_fuzz_baseline_parser(void) {
     TEST_PASS("test_fuzz_baseline_parser");
 }
 
+static void test_fuzz_tpm_log(void) {
+    TEST_START("test_fuzz_tpm_log");
+    uint8_t *b = g_seed_a;
+    memset(b, 0, 256);
+    b[4] = 3;
+    b[28] = 32;
+    memcpy(b + 32, "Spec ID Event03", 16);
+    b[56] = 1;
+    b[60] = 0x0B; b[62] = 32;
+    for (size_t e = 0; e < 2; e++) {
+        size_t off = 64 + e * 50;
+        b[off] = 4;
+        b[off + 4] = 0x03; b[off + 7] = 0x80;
+        b[off + 8] = 1;
+        b[off + 12] = 0x0B;
+        memset(b + off + 14, 0x5A, 32);
+    }
+    size_t len = 64 + 2 * 50;
+    uint8_t apps[8][32];
+    ASSERT_INT_EQ(firmware_tpm_log_apps(b, len, apps, 8), 2, "TCG seed has two applications");
+
+    static const fuzz_region_t hot[] = {{0, 64}, {64, 16}, {114, 16}};
+    fuzz_seed_t seed = {g_seed_a, len, hot, 3};
+    ASSERT_TRUE(fuzz_run(target_tpm_log, &seed, 1, 0xE7037ED1A0B428DBULL), "TCG log fuzz run");
+    TEST_PASS("test_fuzz_tpm_log");
+}
+
 int main(void) {
     logger_init(LOG_LEVEL_CRITICAL, NULL); // parsers log per call; keep 9k iterations quiet and fast
     printf("\n--- Running Deterministic Parser Mutation Fuzzer (%d iterations/parser) ---\n", FUZZ_ITERATIONS);
@@ -480,6 +513,7 @@ int main(void) {
     test_fuzz_gap_auditor();
     test_fuzz_initramfs_parser();
     test_fuzz_baseline_parser();
+    test_fuzz_tpm_log();
     TEST_SUMMARY();
     return 0;
 }

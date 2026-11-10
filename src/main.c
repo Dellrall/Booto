@@ -226,6 +226,8 @@ static int run_cli(booto_context_t *ctx) {
         if (rep->firmware.chipset_unconfirmed) printf("\n%s", FW_CHIPSET_HELP);
     }
 
+    if (rep->measured_note[0]) printf("\nMeasured boot (not part of the verdict): %s\n", rep->measured_note);
+
     if (rep->quarantine_zip[0])
         printf("\nQuarantine: %d file(s) in %s\n  Password \"infected\". Unpack only on an isolated analysis machine.\n",
                rep->quarantined, rep->quarantine_zip);
