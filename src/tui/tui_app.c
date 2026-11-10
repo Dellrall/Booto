@@ -53,7 +53,10 @@ static void render_top_bar(tui_app_state_t *app, int cols) {
         snprintf(scan, sizeof(scan), "%c Scanning %d/%d", "|/-\\"[(ts.tv_nsec / 125000000L) % 4],
                  atomic_load(&app->scan_step), (int)SCAN_MOD_COUNT);
     }
-    const char *luks = app->luks_unlocked ? "LUKS unlocked" : "LUKS locked";
+    /* Only a machine with an encrypted drive has anything to unlock: say nothing otherwise. */
+    const char *luks = app->luks_unlocked ? "LUKS unlocked" : "";
+    for (int i = 0; i < app->drive_count && !luks[0]; i++)
+        if (strcmp(app->drives[i].fs_type, "crypto_LUKS") == 0) luks = "LUKS locked";
     const char *ram = "RAM only";
 
     /* Right side: scan status, "RAM only", LUKS state, two spaces apart. Drop items until "Booto" still fits. */
