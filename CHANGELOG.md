@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Windows boot chain check**: NTFS partitions are now scan targets, mounted read-only. On a Windows install, a new engine verifies the Authenticode signatures of winload, winresume, ntoskrnl, hal, ci and the boot drivers against Microsoft's roots, and flags a file patched after signing or signed by someone else. Flagged files go to the quarantine export. The Linux engines skip Windows roots.
 - **Boot chain baseline (`--baseline`, `--compare`)**: the CLI writes the SHA-256 of the first 1 MiB of the device, every file under `/boot`, the ESP and the Windows core boot files, and on a later scan lists what changed, went missing or is new. Catches tampering no signature knows.
 - **Measured boot cross-check (Windows)**: the ESP's `bootmgfw.efi` is compared with the newest boot log Windows saved under `Windows/Logs/MeasuredBoot`. A boot manager that is not what the last boot ran is printed as a note (an update or a swap); it does not change the verdict.
+- **Windows BCD and boot-start drivers**: a read-only registry hive reader (fuzzed) reads the ESP's BCD store and flags testsigning, nointegritychecks, the boot and kernel debuggers, and a Windows loader that is not winload. The SYSTEM hive's boot-start drivers outside `System32/drivers` get the same signature check.
 - **ISO build provenance**: the ISO workflow attaches a GitHub build provenance attestation to every ISO. Check one with `gh attestation verify <iso> --repo Dellrall/Booto`.
 
 ### Changed

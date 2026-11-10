@@ -343,8 +343,38 @@ file in
 .I System32/drivers
 is checked the same way. A tampered or invalid driver is a finding; a driver
 without an embedded signature (Windows signs many through catalog files) or
-signed by a third party is only counted in the engine's note. Boot
-configuration (BCD) and registry boot-start entries are not read yet.
+signed by a third party is only counted in the engine's note.
+.PP
+The SYSTEM hive
+.RI ( Windows/System32/config/SYSTEM )
+lists the boot-start services
+.RB ( Start " = 0)"
+of the current control set. Each one's
+.B ImagePath
+outside
+.I System32/drivers
+is checked the same way. A path with
+.B ..
+or through a symlink is not followed. Changes still in the hive's transaction logs are not seen.
+.SS Boot configuration (BCD)
+When the ESP was found, its
+.I EFI/Microsoft/Boot/BCD
+store is read. Each finding names the store:
+.TP
+.BR "BCD: testsigning is on" " (HIGH)"
+Drivers load without a trusted signature.
+.TP
+.BR "BCD: nointegritychecks is on" " (HIGH)"
+.TP
+.BR "BCD: the boot debugger is on" " (MEDIUM)"
+.TP
+.BR "BCD: the kernel debugger is on" " (MEDIUM)"
+.TP
+.BR "BCD: Windows loads <path>, not winload" " (CRITICAL)"
+A Windows loader entry starts something other than
+.IR \eWindows\esystem32\ewinload.efi .
+.TP
+.BR "BCD store is not a valid registry hive" " (HIGH)"
 .SS Measured boot (report only)
 When the ESP was found on the target's disk, the Authenticode hash of
 .I EFI/Microsoft/Boot/bootmgfw.efi

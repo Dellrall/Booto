@@ -24,7 +24,8 @@ typedef struct {
     int files_checked;
     int drivers_unsigned;         /* no embedded signature: usually catalog-signed, not verified yet */
     int drivers_third_party;      /* intact signature, signer not under a Microsoft root */
-    int not_checked;              /* SHA-1/SHA-384 signed, or too large to read */
+    int not_checked;              /* SHA-1/SHA-384 signed, too large to read, or a boot-start file not found */
+    int boot_start;               /* services with Start = 0 in the SYSTEM hive */
     int threats_detected;
     winboot_finding_t findings[MAX_WINBOOT_THREATS];
 } winboot_scan_result_t;
@@ -33,8 +34,12 @@ typedef struct {
 bool winboot_is_windows_root(const char *root);
 
 /* Core files (winload, winresume, ntoskrnl, hal, ci) must carry an intact signature chaining to Microsoft;
- * a driver in System32/drivers is flagged when its embedded signature is broken. */
+ * a driver in System32/drivers, or a boot-start driver (SYSTEM hive) elsewhere, is flagged when its embedded
+ * signature is broken. */
 booto_error_t winboot_scan_rootfs(const char *root, winboot_scan_result_t *res);
+/* <esp>/EFI/Microsoft/Boot/BCD: flags testsigning, nointegritychecks, the boot and kernel debuggers, and a Windows
+ * loader entry whose path is not winload. Findings are appended to res. BOOTO_ERR_NOT_FOUND: no BCD store. */
+booto_error_t winboot_check_bcd(const char *esp, winboot_scan_result_t *res);
 /* Calls fn with the path of each core file present (winload, winresume, ntoskrnl, hal, ci). */
 /* Newest TCG log Windows saved at boot under <root>/Windows/Logs/MeasuredBoot: *found = the Authenticode hash
  * (hex) is among the EFI applications that boot loaded. log_name gets the log's name. BOOTO_ERR_NOT_FOUND: no
