@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.2-beta] - 2026-11-10
+
 ### Added
 - **Write blocker at boot.** A udev rule sets every disk and partition except the Booto USB read-only as soon as it appears (`blockdev --setro`), not only the one Booto mounts. Undo for one device with `blockdev --setrw`.
 - **Before/after proof.** Reports record the SHA-256 of the target's first 1 MiB before mounting and after unmounting, and the Markdown report says `unchanged` or `CHANGED`.
