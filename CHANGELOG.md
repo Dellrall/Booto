@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **ISO build provenance**: the ISO workflow attaches a GitHub build provenance attestation to every ISO. Check one with `gh attestation verify <iso> --repo Dellrall/Booto`.
 
 ### Changed
-- **Rule files are signed (Ed25519).** Each `rules/*.json` now needs a `*.json.sig` that verifies against a public key built into `booto`; the old `*.json.sha256` seals are gone, since anyone who could edit a rule could also redo its seal. An unsigned or altered file is refused and its engine fails closed, as before. `scripts/update_rules.sh` signs when `BOOTO_RULES_SIGNING_KEY` names the private key.
+- **Rule files are signed (Ed25519).** Each `rules/*.json` now needs a `*.json.sig` that verifies against a public key built into `booto`; the old `*.json.sha256` seals are gone, since anyone who could edit a rule could also redo its seal. An unsigned or altered file is refused and its engine fails closed, as before. `scripts/update_rules.sh` signs when `BOOTO_RULES_SIGNING_KEY` names the private key. To update rules offline, copy a signed pack into `rules/` on the report partition (README, Detection Rules).
 
 ### Fixed
 - **A faked module signature no longer passes.** A kernel module ending in the text `~Module signature appended~` used to count as signed. Booto now also requires the signature block the kernel's `sign-file` writes before it. The signature is still not verified against the kernel's keys.
