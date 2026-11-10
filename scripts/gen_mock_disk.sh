@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # Booto Synthetic Forensic Test Disk Generator
-#   gen_mock_disk.sh [image]            one disk image plus a staged tree of planted samples
+#   gen_mock_disk.sh [image] [size MB]  one disk image whose ext4 partition holds the planted samples
 #   gen_mock_disk.sh --zoo <dir> <mkpe> the detection zoo: one case per folder under <dir>
 # Every sample is a harmless look-alike (the bytes or layout a rule matches), never live malware.
 # ==============================================================================
@@ -13,9 +13,10 @@ done
 
 KVER=6.5.0-generic
 
-# plant_mbr <image> [rovnix]: 512-byte MBR with one Linux partition; "rovnix" adds the bootkit's hook bytes.
+# plant_mbr <image> [rovnix] [sectors]: 512-byte MBR with one Linux partition at LBA 2048 (default 8192 sectors);
+# "rovnix" adds the bootkit's hook bytes.
 plant_mbr() {
-    python3 - "$1" "${2:-}" <<'PY'
+    python3 - "$1" "${2:-}" "${3:-8192}" <<'PY'
 import sys
 mbr = bytearray(512)
 if sys.argv[2] == 'rovnix':
@@ -24,7 +25,7 @@ if sys.argv[2] == 'rovnix':
 mbr[446] = 0x80                                   # active
 mbr[450] = 0x83                                   # Linux
 mbr[454:458] = (2048).to_bytes(4, 'little')       # first LBA
-mbr[458:462] = (8192).to_bytes(4, 'little')       # sector count
+mbr[458:462] = int(sys.argv[3]).to_bytes(4, 'little')  # sector count
 mbr[510:512] = b'\x55\xaa'
 with open(sys.argv[1], 'r+b') as f:
     f.write(mbr)
@@ -181,7 +182,10 @@ fi
 # Image mode
 # ------------------------------------------------------------------------------
 OUTPUT_IMG="${1:-/tmp/booto_mock_disk.img}"
-IMG_SIZE_MB=64
+IMG_SIZE_MB="${2:-64}"
+[[ "${IMG_SIZE_MB}" =~ ^[0-9]+$ ]] && [ "${IMG_SIZE_MB}" -ge 8 ] || { echo "[-] Error: size must be at least 8 MB" >&2; exit 1; }
+command -v mke2fs >/dev/null || { echo "[-] Error: required tool 'mke2fs' not found in PATH." >&2; exit 1; }
+PART_SECTORS=$(( (IMG_SIZE_MB - 1) * 2048 ))   # from LBA 2048 (1 MiB) to the end of the image
 
 STAGING_DIR="/tmp/booto_mock_staging_$$"
 on_exit() {
@@ -214,8 +218,11 @@ plant_preload "${STAGING_DIR}"
 echo "[+] Generating synthetic Initramfs CPIO archive with reverse shell payload..."
 plant_initramfs "${STAGING_DIR}" revshell
 
+echo "[+] Writing the staged tree into the image's ext4 partition..."
+mke2fs -q -F -t ext4 -d "${STAGING_DIR}" -E offset=1048576 "${OUTPUT_IMG}" "$(( PART_SECTORS / 2 ))k"
+
 echo "[+] Injecting synthetic Rovnix MBR Bootkit into Sector 0 of disk image..."
-plant_mbr "${OUTPUT_IMG}" rovnix
+plant_mbr "${OUTPUT_IMG}" rovnix "${PART_SECTORS}"
 
 echo "[+] Staging complete at ${STAGING_DIR}"
 echo "=== Synthetic disk artifacts created successfully ==="
