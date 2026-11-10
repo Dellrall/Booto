@@ -58,9 +58,8 @@ static bool uevent_value(const char *path, const char *key, char *out, size_t ou
     return found;
 }
 
-booto_error_t persistence_find_data_partition(const char *mountinfo_path, const char *sysfs_root,
-                                              char *out_dev, size_t out_len) {
-    if (!mountinfo_path || !sysfs_root || !out_dev || out_len == 0) return BOOTO_ERR_INVALID_ARG;
+booto_error_t persistence_find_boot_disk(const char *mountinfo_path, const char *sysfs_root, char *disk, size_t len) {
+    if (!mountinfo_path || !sysfs_root || !disk || len < PATH_MAX) return BOOTO_ERR_INVALID_ARG;
 
     FILE *f = fopen(mountinfo_path, "re");
     if (!f) return BOOTO_ERR_IO;
@@ -76,12 +75,21 @@ booto_error_t persistence_find_data_partition(const char *mountinfo_path, const 
     fclose(f);
     if (!devnum[0]) return BOOTO_ERR_NOT_FOUND;
 
-    char path[PATH_MAX], disk[PATH_MAX];
+    char path[PATH_MAX];
     snprintf(path, sizeof(path), "%s/dev/block/%s", sysfs_root, devnum);
     if (!realpath(path, disk)) return BOOTO_ERR_NOT_FOUND;
     /* The medium is normally partition 1: its disk is the parent sysfs directory. */
     snprintf(path, sizeof(path), "%.4000s/partition", disk);
     if (access(path, F_OK) == 0) *strrchr(disk, '/') = '\0';
+    return BOOTO_OK;
+}
+
+booto_error_t persistence_find_data_partition(const char *mountinfo_path, const char *sysfs_root,
+                                              char *out_dev, size_t out_len) {
+    if (!out_dev || out_len == 0) return BOOTO_ERR_INVALID_ARG;
+    char path[PATH_MAX], disk[PATH_MAX];
+    booto_error_t found = persistence_find_boot_disk(mountinfo_path, sysfs_root, disk, sizeof(disk));
+    if (found != BOOTO_OK) return found;
 
     DIR *d = opendir(disk);
     if (!d) return BOOTO_ERR_NOT_FOUND;

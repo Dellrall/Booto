@@ -5,6 +5,7 @@
 #include "test_framework.h"
 #include "persistence_mgr.h"
 
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -41,7 +42,10 @@ static void test_find_data_partition_on_boot_disk_only(void) {
     snprintf(nolive, sizeof(nolive), "%s/nolive", root);
 
     booto_error_t found = persistence_find_data_partition(live, sys, dev, sizeof(dev));
-    booto_error_t not_live = persistence_find_data_partition(nolive, sys, dev, sizeof(dev));
+    char disk[PATH_MAX] = "", dev_nl[128];
+    booto_error_t boot_disk = persistence_find_boot_disk(live, sys, disk, sizeof(disk));
+    size_t dl = strlen(disk);
+    booto_error_t not_live = persistence_find_data_partition(nolive, sys, dev_nl, sizeof(dev_nl));
     put_file(sdb, "sdb2/uevent", "DEVNAME=sdb2\nPARTNAME=OTHER\n");
     char dev2[128] = "";
     booto_error_t decoy_only = persistence_find_data_partition(live, sys, dev2, sizeof(dev2));
@@ -49,6 +53,8 @@ static void test_find_data_partition_on_boot_disk_only(void) {
     if (system(cmd) != 0) perror("rm");
 
     ASSERT_INT_EQ(found, BOOTO_OK, "BOOTO_DATA found on the boot disk");
+    ASSERT_INT_EQ(boot_disk, BOOTO_OK, "boot disk found from the live medium mount");
+    ASSERT_TRUE(dl > 10 && strcmp(disk + dl - 10, "/block/sdb") == 0, "boot disk is the medium's whole disk, not its partition");
     ASSERT_STR_EQ(dev, "/dev/sdb2", "partition is the boot disk's, not the suspect disk's");
     ASSERT_INT_EQ(not_live, BOOTO_ERR_NOT_FOUND, "no live medium mounted -> not found");
     ASSERT_INT_EQ(decoy_only, BOOTO_ERR_NOT_FOUND, "same-named partition on another disk is ignored");
