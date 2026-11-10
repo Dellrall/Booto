@@ -13,7 +13,7 @@ How to put Booto on a USB stick, boot a suspect machine from it, scan the machin
 | Secure Boot | On or off. The stick boots through Debian's signed shim, GRUB and kernel, so machines with Microsoft's standard keys accept it. With Secure Boot on the kernel locks down `/dev/mem`, so the expert SPI flash dump (`-x`) needs Secure Boot off. A machine with only its owner's own keys refuses the stick: turn Secure Boot off for that boot. |
 | RAM | 2 GiB minimum (the QEMU test VM uses 2048 MiB). The live system runs from RAM and never writes to the internal disks. |
 | Boot source | Must allow booting from USB. The live system only loads from removable media (USB stick, CD/DVD). A USB SSD that reports itself as non-removable boots only via the "USB not detected" GRUB entry (finds this build's ISO by UUID). |
-| Disk being scanned | Any disk Linux can mount read-only. The package check needs a Debian-based system (Debian, Ubuntu, Mint, Kali); other systems show it as `SKIPPED`. Encrypted (LUKS) disks can be unlocked read-only from the TUI (`F3`). |
+| Disk being scanned | Any disk Linux can mount read-only: ext4, xfs, btrfs, NTFS (Windows), LVM volumes, and LUKS (unlocked read-only from the TUI with `F3`, including LVM inside LUKS). The package check covers Debian-, Arch- and RPM-based systems; others show it as `SKIPPED`. A Windows disk gets the Windows boot chain check. BitLocker volumes are detected but cannot be unlocked yet (verdict `INCOMPLETE`). |
 
 ### USB stick
 
@@ -58,9 +58,9 @@ sudo apt-get install -y qemu-system-x86 ovmf
 
 Option A, download the release (recommended):
 
-1. Download `booto-v1.4.0-amd64.iso` and `booto-v1.4.0-amd64.iso.sha256` from <https://github.com/Dellrall/Booto/releases/latest>.
-2. Check the download: `sha256sum -c booto-v1.4.0-amd64.iso.sha256`. It must print `OK`.
-3. Optional, proves GitHub's CI built it from this repository (releases from v1.7.0 on): `gh attestation verify booto-v1.4.0-amd64.iso --repo Dellrall/Booto`. It must print `Verification succeeded`.
+1. Download `booto-<version>-amd64.iso` and `booto-<version>-amd64.iso.sha256` from <https://github.com/Dellrall/Booto/releases> (e.g. `booto-v1.9.2-beta-amd64.iso`; beta releases are marked pre-release, so `latest` may not show them).
+2. Check the download: `sha256sum -c booto-<version>-amd64.iso.sha256`. It must print `OK`.
+3. Optional, proves GitHub's CI built it from this repository (releases from v1.7.0 on): `gh attestation verify booto-<version>-amd64.iso --repo Dellrall/Booto`. It must print `Verification succeeded`.
 
 Option B, build it yourself (about 10 minutes):
 
@@ -73,13 +73,15 @@ Optional check in a VM: `./scripts/run_qemu_vm.sh`.
 
 ### Step 2: Write the USB stick
 
+Alternative on Windows or Linux without these scripts: [booto-writer](https://github.com/Dellrall/booto-writer) downloads, verifies and writes the ISO with the same layout.
+
 1. Plug in the stick and find its device name. The `TRAN` column must say `usb`:
    ```bash
    lsblk -d -o NAME,SIZE,MODEL,TRAN
    ```
 2. Run the installer. **This erases the whole stick.** Replace `/dev/sdX` with your stick:
    ```bash
-   sudo ./scripts/setup_usb.sh --data-size=512M /dev/sdX path/to/booto-v1.4.0-amd64.iso
+   sudo ./scripts/setup_usb.sh --data-size=512M /dev/sdX path/to/booto-<version>-amd64.iso
    ```
    - `--data-size=SIZE` sets the report partition, e.g. `256M` or `2G` (minimum `64M`). Leave it out to use the rest of the stick.
    - `--encrypt` or `--no-encrypt` decides whether the report partition gets a passphrase. Leave both out to be asked.
@@ -97,6 +99,8 @@ Optional check in a VM: `./scripts/run_qemu_vm.sh`.
 
 ### Step 4: Unlock the report partition
 
+At boot a write blocker sets every disk except the Booto USB read-only (`blockdev --setro`) as soon as it appears.
+
 Booto finds the `BOOTO_DATA` partition on the USB stick it booted from (never one on the suspect disk):
 
 - **With a passphrase:** a box asks for it when the TUI starts. Type it and press `Enter`. Press `Esc` to skip; reports then go to RAM and are lost at power-off. Press `F4` to unlock later.
@@ -112,7 +116,8 @@ In the TUI:
 2. For an encrypted target, press `F3` and enter its passphrase. It is unlocked read-only.
 3. Optionally turn engines on or off in the module list with `Space`.
 4. Press `F5` to scan. The result is `CLEAN`, `THREATS` or `INCOMPLETE` (an engine could not run, so the disk is not proven clean).
-5. Press `F6` to save the reports to `/persistence/cases`.
+5. Press `2` for the Findings page (every finding with its rule, hash and detail), `3` for Firmware, `4` for Evidence (before/after hash of the target, quarantine, what each engine read). `1` or `Esc` returns to the panes.
+6. Press `F6` to save the reports to `/persistence/cases`.
 
 Without the TUI (from the root shell):
 
