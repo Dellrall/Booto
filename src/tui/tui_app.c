@@ -608,11 +608,12 @@ static void report_persist_result(tui_app_state_t *app, booto_error_t err) {
     }
 }
 
-/* Runs an interactive shell on a clean screen and returns to the TUI when it exits; scans keep running. */
-static bool run_shell(void) {
+/* Runs an interactive shell (cmd NULL) or a bash command on a clean screen and returns to the TUI when it
+ * exits; scans keep running. */
+static bool run_shell(const char *cmd) {
     term_shutdown();
-    static const char banner[] = "\033[2J\033[HBooto root shell. Type 'exit' to return to Booto.\n\n";
-    ssize_t w = write(STDOUT_FILENO, banner, sizeof(banner) - 1);
+    const char *banner = cmd ? "\033[2J\033[H" : "\033[2J\033[HBooto root shell. Type 'exit' to return to Booto.\n\n";
+    ssize_t w = write(STDOUT_FILENO, banner, strlen(banner));
     (void)w;
 
     /* Like system(): the shell owns Ctrl-C while it runs, so Booto must not die from it. */
@@ -630,7 +631,8 @@ static bool run_shell(void) {
         signal(SIGTTOU, SIG_DFL);
         /* getty sends Booto's stderr to the journal; bash -i draws its prompt and echo on stderr. */
         dup2(STDOUT_FILENO, STDERR_FILENO);
-        execl("/bin/bash", "bash", "-i", (char *)NULL);
+        if (cmd) execl("/bin/bash", "bash", "-c", cmd, (char *)NULL);
+        else execl("/bin/bash", "bash", "-i", (char *)NULL);
         execl("/bin/sh", "sh", "-i", (char *)NULL);
         _exit(127);
     }
@@ -644,6 +646,14 @@ static bool run_shell(void) {
     sigaction(SIGINT, &old_int, NULL);
     sigaction(SIGQUIT, &old_quit, NULL);
     return term_init() == 0; /* re-entering resets the front buffer, so the next frame repaints fully */
+}
+
+/* Report storage: encrypted -> ask for the passphrase now (Esc skips); plain -> mount without asking. */
+static void attach_storage(tui_app_state_t *app) {
+    if (persistence_init(&app->persist, NULL) == BOOTO_OK && app->persist.state == PERSISTENCE_STATE_LOCKED) {
+        if (app->persist.encrypted) open_persist_modal(app);
+        else report_persist_result(app, persistence_unlock(&app->persist, NULL));
+    }
 }
 
 /* Quit/power paths: never exit (or free last_scan) under a running worker; block until it finishes,
@@ -674,11 +684,7 @@ int tui_app_run(booto_context_t *ctx) {
     g_current_app = &app;
     logger_set_callback(tui_logger_hook, NULL);
 
-    // Report storage: encrypted -> ask for the passphrase now (Esc skips); plain -> mount without asking.
-    if (persistence_init(&app.persist, NULL) == BOOTO_OK && app.persist.state == PERSISTENCE_STATE_LOCKED) {
-        if (app.persist.encrypted) open_persist_modal(&app);
-        else report_persist_result(&app, persistence_unlock(&app.persist, NULL));
-    }
+    attach_storage(&app);
 
     bool resize_mode = false;
     wm_node_t *drag_split = NULL; /* split whose border the mouse is dragging */
@@ -762,7 +768,7 @@ int tui_app_run(booto_context_t *ctx) {
                     exit(0);
                 } else if (event.type == KEY_CHAR && (event.ch == 's' || event.ch == 'S' || event.ch == '3')) {
                     app.show_exit_modal = false;
-                    if (!run_shell()) app.running = false;
+                    if (!run_shell(NULL)) app.running = false;
                 } else if (event.type == KEY_CHAR && (event.ch == 'q' || event.ch == 'Q')) {
                     app.running = false;
                 } else if (event.type == KEY_ESC || event.type == KEY_F10 || (event.type == KEY_CHAR && (event.ch == 'c' || event.ch == 'C'))) {
@@ -923,7 +929,9 @@ int tui_app_run(booto_context_t *ctx) {
                 if (persistence_is_unlocked(&app.persist)) {
                     snprintf(app.status_msg, sizeof(app.status_msg), "Report storage is already mounted at %.150s.", app.persist.mount_path);
                 } else if (app.persist.state == PERSISTENCE_STATE_ABSENT) {
-                    snprintf(app.status_msg, sizeof(app.status_msg), "No %s partition on the boot USB; reports stay in RAM.", PERSISTENCE_PART_LABEL);
+                    /* Tails-style: make one in the boot USB's free space; the script asks before writing. */
+                    if (!run_shell("booto-storage create; read -rp 'Press Enter to return to Booto. ' _")) app.running = false;
+                    attach_storage(&app);
                 } else if (app.persist.encrypted) {
                     open_persist_modal(&app);
                 } else {

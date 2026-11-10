@@ -459,7 +459,7 @@ static void render_persistence_pane(wm_node_t *n, bool focused, tui_app_state_t 
         if (p->state == PERSISTENCE_STATE_UNLOCKED) {
             snprintf(state, sizeof(state), "on USB, %llu MiB free", (unsigned long long)(p->free_bytes >> 20));
         } else {
-            snprintf(state, sizeof(state), "%s", p->state == PERSISTENCE_STATE_LOCKED ? "locked, saving to RAM" : "RAM only (no USB storage)");
+            snprintf(state, sizeof(state), "%s", p->state == PERSISTENCE_STATE_LOCKED ? "locked, saving to RAM" : "RAM only (F4 creates USB storage)");
         }
         int w = term_puts_clip(x0, y, iw, "Storage", A_TEXT);
         term_puts_clip(x0 + w + 1, y, right - (x0 + w + 1), state,
@@ -472,7 +472,7 @@ static void render_persistence_pane(wm_node_t *n, bool focused, tui_app_state_t 
         const char *what;
     } HINTS[] = {
         {" F3 ", "Unlock a LUKS target"},
-        {" F4 ", "Unlock report storage on the boot USB"},
+        {" F4 ", "Unlock report storage on the boot USB (none: create it)"},
         {" F6 ", "Export case report (JSON + Markdown, SHA-256 checksum)"},
         {" F7 ", "Toggle quarantine: flagged files to an encrypted ZIP"},
     };
