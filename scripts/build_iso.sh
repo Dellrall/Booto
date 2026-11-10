@@ -42,7 +42,7 @@ mkdir -p "${WORK_DIR}" "${CD_DIR}/live" "${CD_DIR}/boot/grub" "${OUTPUT_DIR}"
 echo "[+] Step 1/6: Bootstrapping Debian 12 (Bookworm) minimal rootfs..."
 debootstrap --arch=amd64 \
             --variant=minbase \
-            --include=linux-image-amd64,live-boot,systemd,systemd-sysv,libncurses6,libblkid1,libudev1,libssl3,libsqlite3-0,libyara9,cryptsetup,lvm2,util-linux,gzip,xz-utils,zstd,lz4,bzip2,flashrom,gpm,plymouth,plymouth-label,console-setup-linux,vim-tiny,nano,man-db \
+            --include=linux-image-amd64,live-boot,systemd,systemd-sysv,libncurses6,libblkid1,libudev1,libssl3,libsqlite3-0,libyara9,cryptsetup,lvm2,util-linux,gdisk,e2fsprogs,gzip,xz-utils,zstd,lz4,bzip2,flashrom,gpm,plymouth,plymouth-label,console-setup-linux,vim-tiny,nano,man-db \
             "${DEBIAN_VERSION}" "${ROOTFS_DIR}" "${DEBIAN_MIRROR}"
 
 # The kernel and every library must carry Debian's security fixes, not only the last point release:
@@ -85,7 +85,7 @@ if in_chroot ldd /usr/local/bin/booto | grep -q "not found"; then
     exit 1
 fi
 # Every program booto runs at scan time (grep execlp/execvp in src/ when adding one).
-for tool in bash cryptsetup vgchange lvs pvs xz gzip zstd lz4 bzip2 flashrom systemctl man vi nano; do
+for tool in bash cryptsetup vgchange lvs pvs xz gzip zstd lz4 bzip2 flashrom systemctl man vi nano sgdisk partx wipefs mkfs.ext4 udevadm; do
     in_chroot sh -c "command -v ${tool}" > /dev/null || { echo "[-] Error: live system lacks ${tool}."; exit 1; }
 done
 # Unmount before the rootfs is squashed, or the host's /proc, /sys and /dev end up in the image.
@@ -107,6 +107,7 @@ echo "msr" > "${ROOTFS_DIR}/etc/modules-load.d/booto.conf"
 # Write blocker: every disk except the Booto USB is read-only from the moment udev sees it.
 install -D -m 644 "${REPO_ROOT}/assets/udev/90-booto-readonly.rules" "${ROOTFS_DIR}/etc/udev/rules.d/90-booto-readonly.rules"
 install -D -m 755 "${REPO_ROOT}/assets/udev/booto-ro" "${ROOTFS_DIR}/usr/local/sbin/booto-ro"
+install -m 755 "${REPO_ROOT}/assets/booto-storage" "${ROOTFS_DIR}/usr/local/sbin/booto-storage"
 # Never auto-activate LVM on the suspect disks; Booto activates a volume group read-only on request.
 rm -f "${ROOTFS_DIR}"/lib/udev/rules.d/69-lvm*.rules
 # Its initramfs hook copies those rules and fails without them; the live initramfs needs no LVM.

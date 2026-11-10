@@ -1,0 +1,101 @@
+#!/bin/bash
+# booto-storage create|delete: add or remove the BOOTO_DATA report partition in the free space of the
+# Booto USB it runs from, like Tails' Persistent Storage. Never touches any other disk.
+set -euo pipefail
+
+die() { echo "booto-storage: $*" >&2; exit 1; }
+LABEL=BOOTO_DATA
+
+[ "$(id -u)" -eq 0 ] || die "run as root."
+MEDIUM=$(findmnt -nvro SOURCE /run/live/medium 2>/dev/null) || die "not running from a Booto live USB."
+DISK=$(lsblk -no PKNAME "${MEDIUM}" | head -n1)
+DISK=/dev/${DISK:-${MEDIUM#/dev/}}
+[ "$(lsblk -dno TYPE "${DISK}")" = disk ] || die "${DISK} is not a disk."
+
+part_path() { if [[ "${DISK}" =~ [0-9]$ ]]; then echo "${DISK}p$1"; else echo "${DISK}$1"; fi; }
+# sgdisk rewrites the protective MBR without xorriso's bootable dummy entry, which some BIOSes need to boot:
+# put MBR entries 2-4 back after every sgdisk write.
+gpt() {
+    local saved; saved=$(mktemp)
+    dd if="${DISK}" of="${saved}" bs=1 skip=462 count=48 status=none
+    sgdisk "$@" "${DISK}" >/dev/null
+    dd if="${saved}" of="${DISK}" bs=1 seek=462 count=48 conv=notrunc status=none
+    rm -f "${saved}"
+}
+existing() { lsblk -nro PATH,PARTLABEL "${DISK}" | awk -v l="${LABEL}" '$2 == l { print $1; exit }'; }
+
+create() {
+    local cur; cur=$(existing)
+    [ -z "${cur}" ] || die "${cur} is already the report partition; delete it first to recreate it."
+    [ "$(lsblk -dno PTTYPE "${DISK}")" = gpt ] ||
+        die "this USB has no GPT partition table (Booto 1.9.3 or older). Write it with booto-writer, or dd a newer ISO."
+
+    # After dd the backup GPT sits where the ISO ended: move it to the real end of the stick.
+    gpt -e
+    local first last free_mib
+    first=$(sgdisk -F "${DISK}")
+    last=$(sgdisk -E "${DISK}")
+    free_mib=$(( (last - first + 1) / 2048 ))
+    # LUKS2 takes 16 MiB of it; below 64 MiB there is little left for reports.
+    [ "${free_mib}" -ge 64 ] || die "only ${free_mib} MiB free on ${DISK}; at least 64 MiB is needed."
+
+    echo "Booto USB: ${DISK}  $(lsblk -dno SIZE,MODEL "${DISK}")"
+    echo "Free space after the live system: ${free_mib} MiB"
+    local size enc ans
+    read -rp "Report partition size in MiB [${free_mib}]: " size
+    size=${size:-${free_mib}}
+    [[ "${size}" =~ ^[0-9]+$ ]] && [ "${size}" -ge 64 ] && [ "${size}" -le "${free_mib}" ] ||
+        die "size must be a number from 64 to ${free_mib}."
+    read -rp "Protect the reports with a passphrase? [Y/n] " ans
+    enc=1; [[ "${ans}" =~ ^[Nn] ]] && enc=0
+    read -rp "Create a ${size} MiB $([ "${enc}" -eq 1 ] && echo encrypted || echo plain) partition on ${DISK}? [y/N] " ans
+    [[ "${ans}" =~ ^[Yy] ]] || die "cancelled; nothing changed."
+
+    local num type part data
+    num=$(sgdisk -p "${DISK}" | awk '$1 ~ /^[0-9]+$/ { n = $1 } END { print n + 1 }')
+    type=8309; [ "${enc}" -eq 1 ] || type=8300
+    gpt -n "${num}:${first}:+${size}M" -t "${num}:${type}" -c "${num}:${LABEL}"
+    # The live system is mounted from this disk, so the kernel cannot reread the whole table: add just this one.
+    partx -a -n "${num}" "${DISK}"
+    udevadm settle
+    part=$(part_path "${num}")
+    [ -b "${part}" ] || die "partition ${part} did not appear."
+
+    data=${part}
+    if [ "${enc}" -eq 1 ]; then
+        echo "Choose the passphrase (asked twice):"
+        cryptsetup luksFormat --type luks2 --batch-mode --verify-passphrase "${part}"
+        echo "Enter it once more to format the partition:"
+        cryptsetup open "${part}" booto_storage_init
+        data=/dev/mapper/booto_storage_init
+    fi
+    # Same layout as booto-writer and setup_usb.sh: small blocks for KiB-sized reports, no root reserve.
+    mkfs.ext4 -q -L persistence -T small -O inline_data -m 0 "${data}"
+    local mnt; mnt=$(mktemp -d)
+    mount "${data}" "${mnt}"
+    echo "/ union" > "${mnt}/persistence.conf"
+    install -d -m 0700 "${mnt}/cases" "${mnt}/rules" "${mnt}/logs"
+    umount "${mnt}"; rmdir "${mnt}"
+    [ "${enc}" -eq 0 ] || cryptsetup close booto_storage_init
+    echo "Done: ${part} is the report partition."
+}
+
+delete() {
+    local part; part=$(existing)
+    [ -n "${part}" ] || die "no ${LABEL} partition on ${DISK}."
+    lsblk -nro MOUNTPOINT "${part}" | grep -q . && die "${part} is in use; quit Booto (F10, then Q) so it is locked first."
+    echo "This erases every report on ${part}. They cannot be recovered."
+    local ans; read -rp "Type DELETE to confirm: " ans
+    [ "${ans}" = DELETE ] || die "cancelled; nothing changed."
+    local num=${part##*[!0-9]}
+    wipefs -aq "${part}"  # removes the LUKS header, so the old key slots are gone too
+    partx -d -n "${num}" "${DISK}"
+    gpt -d "${num}"
+    echo "Done: ${part} deleted; its space is free again."
+}
+
+case "${1:-}" in
+    create) create ;;
+    delete) delete ;;
+    *) echo "Usage: booto-storage create|delete" >&2; exit 2 ;;
+esac
