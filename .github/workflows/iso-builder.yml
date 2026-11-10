@@ -38,13 +38,7 @@ jobs:
             grub-efi-amd64-bin \
             grub-common \
             mtools \
-            dosfstools \
-            libncurses-dev \
-            libblkid-dev \
-            libudev-dev \
-            libssl-dev \
-            libsqlite3-dev \
-            libyara-dev
+            dosfstools
 
       - name: Build Standalone Debian Live ISO
         run: |
