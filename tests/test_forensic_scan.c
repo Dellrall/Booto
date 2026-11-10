@@ -194,6 +194,42 @@ static void test_highest_severity(void) {
     TEST_PASS("test_highest_severity");
 }
 
+/* Findings of every engine flatten into one list in engine order; overflow counts beyond an array are not listed. */
+static void test_finding_list(void) {
+    TEST_START("test_finding_list");
+    forensic_scan_report_t *r = calloc(1, sizeof(*r));
+    scan_finding_t f;
+    ASSERT_INT_EQ(forensic_scan_finding_count(r), 0, "Empty report lists nothing");
+    ASSERT_TRUE(!forensic_scan_finding(r, 0, &f), "No first finding in an empty report");
+    r->mbr.threats_detected = 1;
+    snprintf(r->mbr.findings[0].threat_name, sizeof(r->mbr.findings[0].threat_name), "TDL4");
+    snprintf(r->mbr.findings[0].target_device, sizeof(r->mbr.findings[0].target_device), "/dev/sda");
+    r->mbr.findings[0].sector_lba = 63;
+    r->mbr.findings[0].severity = SEVERITY_HIGH;
+    r->pkg.threats_detected = MAX_PKG_THREATS + 5;
+    snprintf(r->pkg.findings[0].file_path, sizeof(r->pkg.findings[0].file_path), "/usr/bin/ls");
+    r->winboot.threats_detected = 1;
+    snprintf(r->winboot.findings[0].reason, sizeof(r->winboot.findings[0].reason), "bad signature");
+    r->winboot.findings[0].severity = SEVERITY_MEDIUM;
+    int n = forensic_scan_finding_count(r);
+    ASSERT_INT_EQ(n, 1 + MAX_PKG_THREATS + 1, "Counts only stored findings");
+    ASSERT_TRUE(forensic_scan_finding(r, 0, &f), "MBR finding first");
+    ASSERT_INT_EQ(f.engine, SCAN_MOD_MBR, "Engine is MBR");
+    ASSERT_STR_EQ(f.where, "/dev/sda (LBA 63)", "MBR location names device and LBA");
+    ASSERT_INT_EQ(f.severity, SEVERITY_HIGH, "MBR severity kept");
+    ASSERT_TRUE(forensic_scan_finding(r, 1, &f), "Package finding second");
+    ASSERT_INT_EQ(f.engine, SCAN_MOD_PKG, "Engine is packages");
+    ASSERT_INT_EQ(f.severity, SEVERITY_CRITICAL, "Package tampering is CRITICAL");
+    ASSERT_STR_EQ(f.hash, "", "No hash when the file is gone");
+    ASSERT_TRUE(forensic_scan_finding(r, n - 1, &f), "Last finding exists");
+    ASSERT_INT_EQ(f.engine, SCAN_MOD_WINBOOT, "Windows finding last");
+    ASSERT_STR_EQ(f.rule, "bad signature", "Windows reason shown as the rule");
+    ASSERT_TRUE(!forensic_scan_finding(r, n, &f), "Nothing past the end");
+    ASSERT_TRUE(!forensic_scan_finding(r, -1, &f), "Negative index rejected");
+    free(r);
+    TEST_PASS("test_finding_list");
+}
+
 static void test_invalid_args(void) {
     TEST_START("test_invalid_args");
     forensic_scan_report_t *r = calloc(1, sizeof(*r));
@@ -251,6 +287,7 @@ int main(void) {
     test_rootfs_esp_used();
     test_all_disabled();
     test_highest_severity();
+    test_finding_list();
     test_invalid_args();
     test_quarantine_export();
     char cmd[128];

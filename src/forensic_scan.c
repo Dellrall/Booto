@@ -96,6 +96,112 @@ int forensic_scan_module_threats(const forensic_scan_report_t *r, scan_module_id
     }
 }
 
+/* Findings an engine kept: it counts past its array when it runs out of room. */
+static int kept(int detected, int max) {
+    return detected < 0 ? 0 : detected < max ? detected : max;
+}
+
+int forensic_scan_finding_count(const forensic_scan_report_t *r) {
+    if (!r) return 0;
+    return kept(r->mbr.threats_detected, MAX_MBR_THREATS) + kept(r->uefi.bootkits_detected, MAX_UEFI_THREATS) +
+           kept(r->kernel.threats_detected, MAX_KERNEL_THREATS) + kept(r->initramfs.threats_detected, MAX_INITRAMFS_THREATS) +
+           kept(r->preload.threats_detected, MAX_PRELOAD_THREATS) + kept(r->pkg.threats_detected, MAX_PKG_THREATS) +
+           kept(r->winboot.threats_detected, MAX_WINBOOT_THREATS);
+}
+
+bool forensic_scan_finding(const forensic_scan_report_t *r, int i, scan_finding_t *f) {
+    if (!r || !f || i < 0) return false;
+    memset(f, 0, sizeof(*f));
+    f->severity = SEVERITY_CRITICAL;
+    int n = kept(r->mbr.threats_detected, MAX_MBR_THREATS);
+    if (i < n) {
+        const mbr_threat_finding_t *s = &r->mbr.findings[i];
+        f->engine = SCAN_MOD_MBR;
+        f->severity = s->severity;
+        snprintf(f->name, sizeof(f->name), "%s", s->threat_name);
+        snprintf(f->where, sizeof(f->where), "%.255s (LBA %llu)", s->target_device, (unsigned long long)s->sector_lba);
+        snprintf(f->rule, sizeof(f->rule), "%s", s->rule_id);
+        snprintf(f->hash, sizeof(f->hash), "%s", s->sha256);
+        snprintf(f->detail, sizeof(f->detail), "%s", s->description);
+        return true;
+    }
+    i -= n;
+    n = kept(r->uefi.bootkits_detected, MAX_UEFI_THREATS);
+    if (i < n) {
+        const uefi_threat_finding_t *s = &r->uefi.findings[i];
+        f->engine = SCAN_MOD_UEFI;
+        f->severity = s->severity;
+        snprintf(f->name, sizeof(f->name), "%s", s->threat_name);
+        snprintf(f->where, sizeof(f->where), "%s", s->file_path);
+        snprintf(f->rule, sizeof(f->rule), "%s", s->rule_id);
+        snprintf(f->hash, sizeof(f->hash), "%s", s->sha256);
+        snprintf(f->detail, sizeof(f->detail), "%s", s->description);
+        return true;
+    }
+    i -= n;
+    n = kept(r->kernel.threats_detected, MAX_KERNEL_THREATS);
+    if (i < n) {
+        const kernel_threat_finding_t *s = &r->kernel.findings[i];
+        f->engine = SCAN_MOD_KERNEL;
+        f->severity = s->severity;
+        snprintf(f->name, sizeof(f->name), "%s", s->threat_name);
+        snprintf(f->where, sizeof(f->where), "%s", s->file_path);
+        snprintf(f->rule, sizeof(f->rule), "%s%s%s", s->detection_rule, s->matched_symbol[0] ? ": " : "", s->matched_symbol);
+        snprintf(f->hash, sizeof(f->hash), "%s", s->sha256);
+        snprintf(f->detail, sizeof(f->detail), "%s", s->description);
+        return true;
+    }
+    i -= n;
+    n = kept(r->initramfs.threats_detected, MAX_INITRAMFS_THREATS);
+    if (i < n) {
+        const initramfs_finding_t *s = &r->initramfs.findings[i];
+        f->engine = SCAN_MOD_INITRAMFS;
+        snprintf(f->name, sizeof(f->name), "%s", s->threat_name);
+        snprintf(f->where, sizeof(f->where), "%.255s line %u", s->file_path, (unsigned)s->line_number);
+        snprintf(f->rule, sizeof(f->rule), "Pattern: %s", s->matched_pattern);
+        snprintf(f->detail, sizeof(f->detail), "%s", s->description);
+        return true;
+    }
+    i -= n;
+    n = kept(r->preload.threats_detected, MAX_PRELOAD_THREATS);
+    if (i < n) {
+        const preload_finding_t *s = &r->preload.findings[i];
+        f->engine = SCAN_MOD_PRELOAD;
+        snprintf(f->name, sizeof(f->name), "%s", s->threat_name);
+        snprintf(f->where, sizeof(f->where), "%s", s->file_path);
+        snprintf(f->rule, sizeof(f->rule), "%.60s -> %.95s", s->rule_id, s->target_library);
+        snprintf(f->hash, sizeof(f->hash), "%s", s->sha256);
+        snprintf(f->detail, sizeof(f->detail), "%s", s->description);
+        return true;
+    }
+    i -= n;
+    n = kept(r->pkg.threats_detected, MAX_PKG_THREATS);
+    if (i < n) {
+        const pkg_finding_t *s = &r->pkg.findings[i];
+        f->engine = SCAN_MOD_PKG;
+        snprintf(f->name, sizeof(f->name), "Modified package file");
+        snprintf(f->where, sizeof(f->where), "%s", s->file_path);
+        snprintf(f->rule, sizeof(f->rule), "%.47s (%.95s)", s->reason, s->package);
+        if (s->actual_hash[0])
+            snprintf(f->hash, sizeof(f->hash), "%s %s", strlen(s->actual_hash) == 32 ? "MD5" : "SHA-256", s->actual_hash);
+        snprintf(f->detail, sizeof(f->detail), "Package manager recorded %s", s->expected_hash);
+        return true;
+    }
+    i -= n;
+    n = kept(r->winboot.threats_detected, MAX_WINBOOT_THREATS);
+    if (i < n) {
+        const winboot_finding_t *s = &r->winboot.findings[i];
+        f->engine = SCAN_MOD_WINBOOT;
+        f->severity = s->severity;
+        snprintf(f->name, sizeof(f->name), "Windows boot file");
+        snprintf(f->where, sizeof(f->where), "%.299s", s->file_path);
+        snprintf(f->rule, sizeof(f->rule), "%s", s->reason);
+        snprintf(f->hash, sizeof(f->hash), "%s", s->sha256);
+        return true;
+    }
+    return false;
+}
+
 static void set_status(forensic_scan_report_t *r, scan_module_id_t id, scan_status_t s, booto_error_t e, const char *note) {
     r->status[id] = s;
     r->err[id] = e;
