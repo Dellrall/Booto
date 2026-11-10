@@ -191,7 +191,7 @@ Set `NO_COLOR=1` (see [no-color.org](https://no-color.org)) for a monochrome TUI
 | **Stage 15** | `v1.6.0-beta` | Expert Firmware Scan (SPI Dump), Inspect View, Resizable Panes | **Completed** |
 | **Stage 16** | `v1.7.0-beta` | Live Console Mouse, Man Pages | **Completed** |
 | **Stage 17** | `v1.8.0-beta` | Right-Click Menu, Double-Click, Hover Highlight | **Completed** |
-| **Stage 18** | next | Windows Boot Chain Check; measured detection rate (`make zoo`) | **In progress** |
+| **Stage 18** | `v1.9.0-beta` | Windows Boot Chain, Baselines, Signed Rules, YARA, Detection Zoo | **Completed** |
 
 Releases tagged `-beta` are pre-releases: Booto has not yet been validated against real bootkits on real hardware.
 
