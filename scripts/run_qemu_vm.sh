@@ -48,7 +48,7 @@ if [ ! -f "${DISK_IMG}" ]; then
         "${REPO_ROOT}/scripts/gen_mock_disk.sh" "${DISK_IMG}" 500
     else
         dd if=/dev/zero of="${DISK_IMG}" bs=1M count=500 status=none
-        mkfs.ext4 -F "${DISK_IMG}" status=none 2>/dev/null || true
+        mkfs.ext4 -q -F "${DISK_IMG}"
     fi
 fi
 
