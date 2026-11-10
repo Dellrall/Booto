@@ -149,6 +149,7 @@ mksquashfs "${ROOTFS_DIR}" "${CD_DIR}/live/filesystem.squashfs" \
 echo "[+] Step 6/6: Assembling GRUB2 hybrid boot configuration..."
 # live-media=removable: live-boot must not take filesystem.squashfs from an internal (suspect) disk.
 # systemd.swap=no: never activate swap found on the suspect disk.
+# verify-checksums: live-boot checks live/ against sha256sum.txt and stops on a corrupted or altered stick.
 cat << EOF_GRUB > "${CD_DIR}/boot/grub/grub.cfg"
 set default=0
 set timeout=5
@@ -168,20 +169,20 @@ search --no-floppy --set=root --file ${BOOT_MARKER}
 
 menuentry "Booto - Live Rootkit & Bootkit Forensic System (Amnesic RAM Mode)" {
     search --no-floppy --set=root --file ${BOOT_MARKER}
-    linux  /live/vmlinuz boot=live components live-media=removable systemd.swap=no iomem=relaxed quiet splash systemd.show_status=0 loglevel=3
+    linux  /live/vmlinuz boot=live components live-media=removable systemd.swap=no verify-checksums iomem=relaxed quiet splash systemd.show_status=0 loglevel=3
     initrd /live/initrd.img
 }
 
 # Fallback for USB SSDs/enclosures that do not report removable: find this build's ISO by UUID (same trust as the GRUB search above).
 menuentry "Booto - USB not detected (non-removable USB drive)" {
     search --no-floppy --set=root --file ${BOOT_MARKER}
-    linux  /live/vmlinuz boot=live components live-media=/dev/disk/by-uuid/${ISO_UUID} systemd.swap=no iomem=relaxed quiet splash systemd.show_status=0 loglevel=3
+    linux  /live/vmlinuz boot=live components live-media=/dev/disk/by-uuid/${ISO_UUID} systemd.swap=no verify-checksums iomem=relaxed quiet splash systemd.show_status=0 loglevel=3
     initrd /live/initrd.img
 }
 
 menuentry "Booto - Live Rootkit & Bootkit Forensic System (Debug Verbose)" {
     search --no-floppy --set=root --file ${BOOT_MARKER}
-    linux  /live/vmlinuz boot=live components live-media=removable systemd.swap=no iomem=relaxed verbose
+    linux  /live/vmlinuz boot=live components live-media=removable systemd.swap=no verify-checksums iomem=relaxed verbose
     initrd /live/initrd.img
 }
 EOF_GRUB
@@ -218,6 +219,8 @@ if [ -f /usr/lib/grub/i386-pc/cdboot.img ]; then
         "boot/grub/grub.cfg=${CD_DIR}/boot/grub/grub.cfg"
     cat /usr/lib/grub/i386-pc/cdboot.img "${WORK_DIR}/core.img" > "${CD_DIR}/boot/grub/bios.img"
 fi
+
+(cd "${CD_DIR}" && find live -type f -print0 | sort -z | xargs -0 sha256sum > sha256sum.txt)
 
 # Create standalone hybrid ISO image (Universal Dual BIOS + UEFI)
 if [ -f "${CD_DIR}/boot/grub/bios.img" ]; then
