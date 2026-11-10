@@ -116,6 +116,9 @@ booto_error_t rules_get_ioc(const rules_ioc_set_t **out); /* rootkit_file_iocs.j
 /* Tests: forget cached sets so the next rules_get_* reloads. */
 void rules_reset_cache(void);
 
+/* Tests: trust this Ed25519 public key instead of the release key; NULL restores it. Resets the cache. */
+void rules_set_signing_key(const uint8_t pubkey[32]);
+
 /* Severity string ("INFO".."CRITICAL") -> 0..4, matching every engine's severity enum order; -1 if invalid.
  * Loaded entries are validated, so their severity always maps to 0..4. */
 int rules_severity_level(const char *severity);

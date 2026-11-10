@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Detection zoo (`make zoo`)**: generates 9 planted cases (at least one per engine) and 3 clean installs (Debian, Arch, Fedora), scans each, and fails on a miss or a false alarm. CI runs it; the README states the measured rates. `scripts/gen_mock_disk.sh --zoo` builds the cases.
 - **Windows boot chain check**: NTFS partitions are now scan targets, mounted read-only. On a Windows install, a new engine verifies the Authenticode signatures of winload, winresume, ntoskrnl, hal, ci and the boot drivers against Microsoft's roots, and flags a file patched after signing or signed by someone else. Flagged files go to the quarantine export. The Linux engines skip Windows roots.
 
+### Changed
+- **Rule files are signed (Ed25519).** Each `rules/*.json` now needs a `*.json.sig` that verifies against a public key built into `booto`; the old `*.json.sha256` seals are gone, since anyone who could edit a rule could also redo its seal. An unsigned or altered file is refused and its engine fails closed, as before. `scripts/update_rules.sh` signs when `BOOTO_RULES_SIGNING_KEY` names the private key.
+
 ### Fixed
 - **A faked module signature no longer passes.** A kernel module ending in the text `~Module signature appended~` used to count as signed. Booto now also requires the signature block the kernel's `sign-file` writes before it. The signature is still not verified against the kernel's keys.
 - **A self-signed first-stage boot loader is now flagged** (`UEFI_FIRST_STAGE_NOT_MICROSOFT`, HIGH). Before, any valid signature on `BOOTX64.EFI`, shim or `bootmgfw.efi` passed, whoever signed it. GRUB and kernels, which distros sign with their own keys, are not affected. A machine whose owner enrolled their own Secure Boot keys will show this finding.

@@ -14,6 +14,7 @@
 #include "logger.h"
 
 #include <errno.h>
+#include <openssl/evp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,7 +28,7 @@
 
 #define JSON_MAX_DEPTH 16
 #define RULES_MAX_FILE_BYTES (1024U * 1024U)
-#define SEAL_MAX_FILE_BYTES 4096U
+#define SIG_BYTES 64U
 
 /* ========================================================================== */
 /* Built-in tables (canonical content; the rules JSON files mirror them)      */
@@ -700,25 +701,43 @@ static booto_error_t read_whole_file(const char *path, size_t max, char **out, s
     return BOOTO_OK;
 }
 
-/* Seal is sha256sum output "<hex>  <path>"; only the digest is compared. */
-static booto_error_t verify_seal(const char *path, const char *data, size_t len) {
-    char seal_path[600];
-    if ((size_t)snprintf(seal_path, sizeof(seal_path), "%s.sha256", path) >= sizeof(seal_path)) {
+/* Release key that signs rules/ (private half kept off the repo); tests swap it with rules_set_signing_key. */
+static const uint8_t RELEASE_PUBKEY[32] = {
+    0x2c, 0x73, 0xd9, 0x22, 0x61, 0x16, 0x69, 0x07, 0xa7, 0x1d, 0xa9, 0xc5, 0x51, 0xf5, 0xd8, 0x51,
+    0x4f, 0xdf, 0x52, 0x10, 0xc7, 0xf7, 0xa6, 0x4e, 0x43, 0x27, 0xc6, 0x12, 0xc4, 0xb3, 0x3b, 0x41,
+};
+
+static uint8_t g_rules_pubkey[32];
+static bool g_test_key;
+
+void rules_set_signing_key(const uint8_t pubkey[32]) {
+    g_test_key = pubkey != NULL;
+    if (pubkey) memcpy(g_rules_pubkey, pubkey, sizeof(g_rules_pubkey));
+    rules_reset_cache();
+}
+
+/* "<path>.sig" holds the raw 64-byte Ed25519 signature over the file's exact bytes. */
+static booto_error_t verify_signature(const char *path, const char *data, size_t len) {
+    char sig_path[600];
+    if ((size_t)snprintf(sig_path, sizeof(sig_path), "%s.sig", path) >= sizeof(sig_path)) {
         return BOOTO_ERR_CORRUPT_DATA;
     }
-    char *seal = NULL;
-    size_t seal_len = 0;
-    if (read_whole_file(seal_path, SEAL_MAX_FILE_BYTES, &seal, &seal_len) != BOOTO_OK) {
-        LOG_ERROR("Rules seal '%s' missing or unreadable; refusing '%s'", seal_path, path);
+    char *sig = NULL;
+    size_t sig_len = 0;
+    if (read_whole_file(sig_path, SIG_BYTES, &sig, &sig_len) != BOOTO_OK || sig_len != SIG_BYTES) {
+        free(sig);
+        LOG_ERROR("Rules signature '%s' missing or malformed; refusing '%s'", sig_path, path);
         return BOOTO_ERR_CORRUPT_DATA;
     }
-    char actual[65];
-    sha256_buffer_hex((const uint8_t *)data, len, actual);
-    bool ok = seal_len >= 64 && strncasecmp(seal, actual, 64) == 0 &&
-              (seal_len == 64 || seal[64] == ' ' || seal[64] == '\t' || seal[64] == '\n' || seal[64] == '\r');
-    free(seal);
+    EVP_PKEY *key = EVP_PKEY_new_raw_public_key(EVP_PKEY_ED25519, NULL, g_test_key ? g_rules_pubkey : RELEASE_PUBKEY, 32);
+    EVP_MD_CTX *ctx = EVP_MD_CTX_new();
+    bool ok = key && ctx && EVP_DigestVerifyInit(ctx, NULL, NULL, NULL, key) == 1 &&
+              EVP_DigestVerify(ctx, (const unsigned char *)sig, SIG_BYTES, (const unsigned char *)data, len) == 1;
+    EVP_MD_CTX_free(ctx);
+    EVP_PKEY_free(key);
+    free(sig);
     if (!ok) {
-        LOG_ERROR("Rules seal mismatch for '%s' (actual SHA-256 %s); refusing tampered rules", path, actual);
+        LOG_ERROR("Rules signature invalid for '%s'; refusing tampered or unsigned rules", path);
         return BOOTO_ERR_CORRUPT_DATA;
     }
     return BOOTO_OK;
@@ -756,13 +775,13 @@ static booto_error_t load_rules(const char *file, const char *array_key, entry_p
         LOG_ERROR("Cannot read rules file '%s' (err: %d)", path, err);
         return err == BOOTO_ERR_NOT_FOUND ? BOOTO_ERR_IO : err;
     }
-    err = verify_seal(path, buf, len);
+    err = verify_signature(path, buf, len);
     if (err == BOOTO_OK && !parse_document(buf, len, array_key, parse_entry, set)) {
         LOG_ERROR("Rules file '%s' is malformed or violates the schema", path);
         err = BOOTO_ERR_CORRUPT_DATA;
     }
     free(buf);
-    if (err == BOOTO_OK) LOG_INFO("Loaded %d sealed rules from %s", *count, path);
+    if (err == BOOTO_OK) LOG_INFO("Loaded %d signed rules from %s", *count, path);
     return err;
 }
 

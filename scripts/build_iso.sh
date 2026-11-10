@@ -51,7 +51,7 @@ debootstrap --arch=amd64 \
 echo "[+] Step 3/6: Installing Booto binary into rootfs..."
 install -m 755 "${REPO_ROOT}/bin/booto" "${ROOTFS_DIR}/usr/local/bin/booto"
 install -d -m 755 "${ROOTFS_DIR}/usr/share/booto/rules"
-install -m 644 "${REPO_ROOT}"/rules/*.json "${REPO_ROOT}"/rules/*.json.sha256 "${ROOTFS_DIR}/usr/share/booto/rules/"
+install -m 644 "${REPO_ROOT}"/rules/*.json "${REPO_ROOT}"/rules/*.json.sig "${ROOTFS_DIR}/usr/share/booto/rules/"
 install -m 644 "${REPO_ROOT}/LICENSE" "${ROOTFS_DIR}/usr/share/booto/LICENSE"
 install -D -m 644 "${REPO_ROOT}/man/booto.1" "${ROOTFS_DIR}/usr/share/man/man1/booto.1"
 install -D -m 644 "${REPO_ROOT}/man/booto-checks.7" "${ROOTFS_DIR}/usr/share/man/man7/booto-checks.7"
