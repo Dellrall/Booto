@@ -398,6 +398,9 @@ optionally LUKS-encrypted). It holds
 .I logs/
 and
 .IR rules/ .
+A signed rule pack copied into
+.I rules/
+replaces the ISO's rules at the next start; an unsigned or altered file there is refused.
 Without it, reports stay in RAM and are lost at power off.
 .SH EXAMPLES
 Scan a disk and save the report on the USB:

@@ -118,7 +118,9 @@ Exit codes: `0` CLEAN (every enabled engine ran, nothing found), `1` THREATS, `2
 
 Rule files are searched in order: `$BOOTO_RULES_DIR`, `/persistence/rules`, `/usr/share/booto/rules`, `./rules` (set `BOOTO_RULES_DIR_ONLY=1` to use only `$BOOTO_RULES_DIR`). Each `*.json` needs a valid `*.json.sig` (Ed25519, over the file's exact bytes) or it is refused, so an attacker who can edit the rules cannot re-sign them. `--update-rules` runs `scripts/update_rules.sh`, which regenerates the files and, when `BOOTO_RULES_SIGNING_KEY=<private key PEM>` is set, signs them; it does not download anything.
 
-The shipped DBX, LKM and MBR signatures are illustrative samples, not an authoritative threat feed. DBX entries are placeholders until real Authenticode revocation hashes are imported.
+**Offline rule update:** copy a newer signed pack (each `*.json` with its `*.json.sig`, from a newer release's `rules/`) into `rules/` on the `BOOTO_DATA` partition, which the live system mounts at `/persistence/rules`. Booto picks it up at the next start, ahead of the rules on the ISO. A file there that is unsigned or altered is refused and its engine reports an error rather than falling back to the ISO's copy, so a bad pack cannot quietly weaken a scan.
+
+The DBX rules come from Microsoft's dbx list. The shipped LKM, MBR and IOC signatures are illustrative samples, not an authoritative threat feed.
 
 ---
 
