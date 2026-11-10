@@ -68,17 +68,41 @@ static const lkm_codec_t G_LKM_CODECS[] = {
 #define LKM_SIG_MAGIC_LEN (sizeof(LKM_SIG_MAGIC) - 1)
 #define LKM_UNSIGNED_CAP 32
 
+/* The marker alone proves nothing: anyone can append it. Before it must sit a module_signature struct
+ * (algo, hash, id_type, signer_len, key_id_len, pad[3], be32 sig_len) and a DER blob of exactly sig_len bytes.
+ * shortcut: the signature is not verified against the kernel's keys (they live inside vmlinuz); add when
+ * Booto extracts the builtin keyring. */
+#define LKM_SIG_INFO_LEN 12
 static bool lkm_tail_signed(const uint8_t *buf, size_t len) {
-    return len >= LKM_SIG_MAGIC_LEN && memcmp(buf + len - LKM_SIG_MAGIC_LEN, LKM_SIG_MAGIC, LKM_SIG_MAGIC_LEN) == 0;
+    static const uint8_t pkcs7_info[8] = { 0, 0, 2 /* PKEY_ID_PKCS7 */, 0, 0, 0, 0, 0 };
+    if (len < LKM_SIG_MAGIC_LEN + LKM_SIG_INFO_LEN ||
+        memcmp(buf + len - LKM_SIG_MAGIC_LEN, LKM_SIG_MAGIC, LKM_SIG_MAGIC_LEN) != 0) {
+        return false;
+    }
+    const uint8_t *info = buf + len - LKM_SIG_MAGIC_LEN - LKM_SIG_INFO_LEN;
+    size_t sig_len = ((size_t)info[8] << 24) | ((size_t)info[9] << 16) | ((size_t)info[10] << 8) | info[11];
+    if (memcmp(info, pkcs7_info, sizeof(pkcs7_info)) != 0 || sig_len < 6 || sig_len > (size_t)(info - buf)) return false;
+    const uint8_t *sig = info - sig_len;
+    // DER SEQUENCE whose stated length fills the blob (long form, as every real signature is over 127 bytes).
+    size_t n = sig[1] & 0x7f, body = 0;
+    if (sig[0] != 0x30 || !(sig[1] & 0x80) || n < 1 || n > 4) return false;
+    for (size_t i = 0; i < n; i++) body = (body << 8) | sig[2 + i];
+    return 2 + n + body == sig_len;
 }
 
+/* shortcut: reads the last 16 KiB; a signature larger than that reads as unsigned. Raise if one is seen. */
 static bool lkm_file_signed(const char *path) {
-    uint8_t tail[LKM_SIG_MAGIC_LEN];
+    uint8_t tail[16384];
     FILE *fp = fopen(path, "rb");
     if (!fp) return false;
-    bool ok = fseek(fp, -(long)LKM_SIG_MAGIC_LEN, SEEK_END) == 0 && fread(tail, 1, sizeof(tail), fp) == sizeof(tail);
+    size_t got = 0;
+    if (fseek(fp, 0, SEEK_END) == 0) {
+        long size = ftell(fp);
+        long start = size > (long)sizeof(tail) ? size - (long)sizeof(tail) : 0;
+        if (size > 0 && fseek(fp, start, SEEK_SET) == 0) got = fread(tail, 1, sizeof(tail), fp);
+    }
     fclose(fp);
-    return ok && lkm_tail_signed(tail, sizeof(tail));
+    return lkm_tail_signed(tail, got);
 }
 
 /* Directory walk state: unsigned modules are held back until we know whether this kernel signs modules at all. */

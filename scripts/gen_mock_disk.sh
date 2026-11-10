@@ -57,12 +57,20 @@ plant_preload() {
 # Zoo mode
 # ------------------------------------------------------------------------------
 
-# module <root> <name> [unsigned]: a real ELF object; signed ones end with the kernel's signature marker.
+# module <root> <name> [unsigned|fake]: a real ELF object. Signed ones end as scripts/sign-file leaves them:
+# a DER blob, the module_signature struct, the marker. "fake" has the marker only.
 module() {
     local ko="$1/lib/modules/${KVER}/kernel/drivers/char/$2.ko"
     mkdir -p "$(dirname "${ko}")"
     echo "int $2_init(void) { return 0; }" | "${CC:-cc}" -x c -c - -o "${ko}"
-    [ "${3:-}" = unsigned ] || printf '~Module signature appended~\n' >> "${ko}"
+    case "${3:-}" in
+        unsigned) return ;;
+        fake) ;;
+        *)  printf '\060\202\001\050' >> "${ko}"                                   # SEQUENCE, 296 bytes
+            head -c 296 /dev/zero >> "${ko}"
+            printf '\000\000\002\000\000\000\000\000\000\000\001\054' >> "${ko}" ;; # id_type PKCS#7, sig_len 300
+    esac
+    printf '~Module signature appended~\n' >> "${ko}"
 }
 
 pe() { "${MKPE}" "$@" >/dev/null 2>&1; }
@@ -139,6 +147,9 @@ build_zoo() {
 
     new_case lkm-unsigned "Kernel LKM"
     module "${ROOT}" rootkit unsigned
+
+    new_case lkm-fake-signature "Kernel LKM"
+    module "${ROOT}" rootkit fake
 
     new_case initramfs-revshell "Initramfs"
     plant_initramfs "${ROOT}" revshell
