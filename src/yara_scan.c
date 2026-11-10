@@ -112,21 +112,30 @@ booto_error_t yara_rules_status(void) {
     return get_rules(&rules);
 }
 
-booto_error_t yara_scan_buffer(const uint8_t *buf, size_t len, yara_match_t *out, int max, int *count) {
-    if (!buf || !out || max <= 0 || !count) return BOOTO_ERR_INVALID_ARG;
+static booto_error_t scan(const uint8_t *buf, size_t len, const char *path, yara_match_t *out, int max, int *count) {
+    if ((!buf && !path) || !out || max <= 0 || !count) return BOOTO_ERR_INVALID_ARG;
     *count = 0;
     YR_RULES *rules;
     booto_error_t err = get_rules(&rules);
     if (err != BOOTO_OK || !rules) return err;
 
     scan_ctx_t ctx = { out, max, 0 };
-    int rc = yr_rules_scan_mem(rules, buf, len, SCAN_FLAGS_FAST_MODE, on_match, &ctx, YARA_SCAN_TIMEOUT_S);
+    int rc = path ? yr_rules_scan_file(rules, path, SCAN_FLAGS_FAST_MODE, on_match, &ctx, YARA_SCAN_TIMEOUT_S)
+                  : yr_rules_scan_mem(rules, buf, len, SCAN_FLAGS_FAST_MODE, on_match, &ctx, YARA_SCAN_TIMEOUT_S);
     *count = ctx.count;
     if (rc != ERROR_SUCCESS && rc != ERROR_CALLBACK_ERROR) {
         LOG_WARN("YARA scan stopped early (libyara error %d)", rc);
         return BOOTO_ERR_GENERIC;
     }
     return BOOTO_OK;
+}
+
+booto_error_t yara_scan_buffer(const uint8_t *buf, size_t len, yara_match_t *out, int max, int *count) {
+    return buf ? scan(buf, len, NULL, out, max, count) : BOOTO_ERR_INVALID_ARG;
+}
+
+booto_error_t yara_scan_file(const char *path, yara_match_t *out, int max, int *count) {
+    return path ? scan(NULL, 0, path, out, max, count) : BOOTO_ERR_INVALID_ARG;
 }
 
 void yara_scan_reset(void) {

@@ -104,6 +104,10 @@ static void test_shipped_rules(void) {
     ASSERT_INT_EQ(yara_scan_buffer(img, sizeof(img), m, YARA_MAX_MATCHES, &n), BOOTO_OK, "scan ok");
     ASSERT_INT_EQ(n, 1, "embedded PE flagged");
     ASSERT_STR_EQ(m[0].rule, "BOOTO_YARA_EMBEDDED_PE", "rule id");
+    static const char ko[] = "\x7f" "ELF\0\0author=x\0description=LKM rootkit\0";
+    ASSERT_INT_EQ(yara_scan_buffer((const uint8_t *)ko, sizeof(ko), m, YARA_MAX_MATCHES, &n), BOOTO_OK, "scan ok");
+    ASSERT_INT_EQ(n, 1, "rootkit module info flagged");
+    ASSERT_STR_EQ(m[0].rule, "BOOTO_YARA_LKM_ROOTKIT_MODINFO", "Linux rule id");
     TEST_PASS("shipped rules load and flag an embedded PE");
 }
 

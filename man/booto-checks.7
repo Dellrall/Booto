@@ -207,12 +207,13 @@ the BlackLotus payload layout.
 A copy of a boot loader renamed aside, how a replacement loader chainloads
 the original.
 .SS YARA rules
-Every PE image read by the UEFI and Windows boot checks is matched against
+Every PE image read by the UEFI and Windows boot checks, every kernel module,
+and every ELF file inside the initramfs is matched against
 .IR rules/bootkits.yar ,
 which must carry a valid Ed25519
 .I bootkits.yar.sig
-like the other rule files; an unsigned, altered or uncompilable file fails both
-engines closed. Each rule needs string metas
+like the other rule files; an unsigned, altered or uncompilable file makes all
+four engines fail closed. Each rule needs string metas
 .B severity
 and
 .BR description .
@@ -225,6 +226,23 @@ installers carry their payload.
 .BR BOOTO_YARA_EFIGUARD " (HIGH)"
 An image naming EfiGuard, a public tool that disables PatchGuard and driver
 signature checks at boot.
+.TP
+.BR BOOTO_YARA_LKM_ROOTKIT_MODINFO " (HIGH)"
+A kernel module whose module info (description, author or name) says
+"rootkit", as Diamorphine and its forks do.
+.TP
+.BR BOOTO_YARA_LINUX_ROOTKIT_FAMILY " (HIGH)"
+An ELF file naming a public Linux rootkit: Diamorphine, Reptile, KoviD, Azazel,
+Jynx, BEURK, bdvl or Vlany.
+.TP
+.BR BOOTO_YARA_LKM_SYSCALL_HOOK " (HIGH)"
+A kernel module that names the getdents64 and kill syscalls and looks up
+hidden kernel symbols (kallsyms_lookup_name or a kprobe), the usual way a
+rootkit hides files and processes.
+.TP
+.BR BOOTO_YARA_BOOTKITTY " (CRITICAL)"
+A PE or ELF file naming Bootkitty, the first public UEFI bootkit aimed at
+Linux.
 .SH INITRAMFS
 Each initramfs image is unpacked in memory and its scripts are searched.
 These findings are reported by title:

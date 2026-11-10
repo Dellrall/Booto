@@ -14,6 +14,7 @@
 #include "disk_mount.h"
 #include "logger.h"
 #include "rules_loader.h"
+#include "yara_scan.h"
 
 #include <dirent.h>
 #include <stdio.h>
@@ -127,6 +128,16 @@ static void note_signature(lkm_walk_t *w, const char *path, const char *sha, boo
     w->unsigned_count++;
 }
 
+/* Signed YARA rules over the module's bytes: buf when it was decompressed, else the file itself. */
+static void yara_lkm(const char *ko_path, const char *sha256, const uint8_t *buf, size_t len, kernel_scan_result_t *result) {
+    yara_match_t m[YARA_MAX_MATCHES];
+    int n = 0;
+    if (buf) yara_scan_buffer(buf, len, m, YARA_MAX_MATCHES, &n);
+    else yara_scan_file(ko_path, m, YARA_MAX_MATCHES, &n);
+    for (int i = 0; i < n; i++)
+        add_threat_finding(result, "YARA Rule Match", ko_path, sha256, m[i].rule, "", 0, m[i].severity, m[i].description);
+}
+
 /* Rule + modinfo checks on a parsed module; frees elf's symbol table. */
 static void analyze_lkm(const char *ko_path, const rules_lkm_set_t *rules, elf_binary_info_t *elf, kernel_scan_result_t *result) {
     // 1. Symbol Table Signature Matching
@@ -184,6 +195,7 @@ static booto_error_t inspect_lkm_file(const char *ko_path, kernel_scan_result_t 
         return err;
     }
     note_signature(w, ko_path, elf.sha256, lkm_file_signed(ko_path));
+    yara_lkm(ko_path, elf.sha256, NULL, 0, result);
     analyze_lkm(ko_path, rules, &elf, result);
     return BOOTO_OK;
 }
@@ -235,6 +247,7 @@ static booto_error_t inspect_compressed_lkm(const char *ko_path, const lkm_codec
     elf_binary_info_t elf;
     err = raw ? elf_parse_buffer(raw, raw_len, &elf) : BOOTO_ERR_CORRUPT_DATA;
     bool is_signed = raw && lkm_tail_signed(raw, raw_len);
+    if (err == BOOTO_OK) yara_lkm(ko_path, elf.sha256, raw, raw_len, result);
     free(raw);
     if (err != BOOTO_OK) {
         LOG_WARN("Could not parse decompressed ELF binary '%s' (err: %d)", ko_path, err);
@@ -292,6 +305,7 @@ booto_error_t kernel_inspect_directory(const char *lib_modules_dir, kernel_scan_
     // Per-file errors are tolerated during the walk; unusable rules or a missing decompressor fail the whole engine.
     const rules_lkm_set_t *rules;
     booto_error_t err = rules_get_lkm(&rules);
+    if (err == BOOTO_OK) err = yara_rules_status();
     if (err != BOOTO_OK) return err;
 
     LOG_INFO("Scanning kernel modules in directory: %s", lib_modules_dir);

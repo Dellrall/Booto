@@ -12,6 +12,7 @@
 #include "initramfs_auditor.h"
 #include "disk_mount.h"
 #include "logger.h"
+#include "yara_scan.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -186,6 +187,12 @@ static booto_error_t parse_cpio_archive(const uint8_t *buf, size_t len, size_t b
 
         result->files_extracted++;
 
+        const uint8_t *data = buf + data_offset;
+        yara_match_t m[YARA_MAX_MATCHES];
+        int n = 0;
+        if (filesize >= 4 && memcmp(data, "\x7f" "ELF", 4) == 0) yara_scan_buffer(data, filesize, m, YARA_MAX_MATCHES, &n);
+        for (int k = 0; k < n; k++) add_initramfs_threat(result, file_name, "YARA Rule Match", m[k].rule, 0, m[k].description);
+
         if (strstr(file_name, "init") || strstr(file_name, ".sh") ||
             strstr(file_name, "scripts/") || strstr(file_name, "conf/")) {
             audit_script_content(file_name, (const char *)(buf + data_offset), filesize, result);
@@ -263,7 +270,9 @@ booto_error_t initramfs_audit_buffer(const uint8_t *buf, size_t len, initramfs_s
     memset(result, 0, sizeof(*result));
     snprintf(result->compression, sizeof(result->compression), "none");
 
-    booto_error_t err = audit_segments(buf, len, 0, result);
+    booto_error_t err = yara_rules_status();
+    if (err != BOOTO_OK) return err;
+    err = audit_segments(buf, len, 0, result);
     if (err != BOOTO_OK) return err;
     if (result->segments_parsed == 0) {
         LOG_ERROR("Initramfs image contains no CPIO archive");
