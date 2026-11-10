@@ -109,6 +109,8 @@ install -D -m 644 "${REPO_ROOT}/assets/udev/90-booto-readonly.rules" "${ROOTFS_D
 install -D -m 755 "${REPO_ROOT}/assets/udev/booto-ro" "${ROOTFS_DIR}/usr/local/sbin/booto-ro"
 # Never auto-activate LVM on the suspect disks; Booto activates a volume group read-only on request.
 rm -f "${ROOTFS_DIR}"/lib/udev/rules.d/69-lvm*.rules
+# Its initramfs hook copies those rules and fails without them; the live initramfs needs no LVM.
+rm -f "${ROOTFS_DIR}"/usr/share/initramfs-tools/hooks/lvm2 "${ROOTFS_DIR}"/usr/share/initramfs-tools/scripts/*/lvm2
 chroot "${ROOTFS_DIR}" systemctl mask lvm2-monitor.service lvm2-lvmpolld.socket
 # gpm passes the mouse to the text console, which forwards it to the TUI as X10 reports
 chroot "${ROOTFS_DIR}" systemctl enable gpm.service
