@@ -11,6 +11,7 @@
 #include "firmware_auditor.h"
 #include "crypto_utils.h"
 #include "disk_mount.h"
+#include "rules_loader.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -118,6 +119,7 @@ static const char *const CHECK_NAMES[FW_CHECK_COUNT] = {
     "Platform key",
     "No test keys (PKfail)",
     "Revocation list (dbx)",
+    "2023 Microsoft CA in db",
     "Shim MOK keys known",
     "No pending BootNext",
     "IOMMU described (DMAR/IVRS)",
@@ -135,6 +137,10 @@ typedef struct {
     char first_cn[128];         /* CN of the first X.509 entry, if cheaply found */
     const char *const *known;   /* if set: NULL-terminated CN substrings; others go to unknown_cn */
     char unknown_cn[128];       /* first X.509 CN matching none of known ("?" if it has no CN) */
+    int ms_count;               /* X.509 entries naming Microsoft */
+    int ms2023_count;           /* of those, the 2023 CAs that replace the 2011 ones */
+    uint8_t (*sha)[32];         /* if set: SHA-256 entries are copied here, up to sha_cap */
+    int sha_cap;
 } siglist_stats_t;
 
 typedef struct {
@@ -250,6 +256,8 @@ static bool parse_siglists(const uint8_t *d, size_t len, siglist_stats_t *st) {
         const uint8_t *sig = list + SIGLIST_HDR_SIZE + hdr_size;
         for (size_t k = 0; k < body / sig_size; k++, sig += sig_size) {
             if (is_sha256) {
+                if (st->sha && st->sha256_count < st->sha_cap && sig_size >= SIG_OWNER_SIZE + 32)
+                    memcpy(st->sha[st->sha256_count], sig + SIG_OWNER_SIZE, 32);
                 st->sha256_count++;
             } else if (is_x509) {
                 const uint8_t *cert = sig + SIG_OWNER_SIZE;
@@ -263,6 +271,11 @@ static bool parse_siglists(const uint8_t *d, size_t len, siglist_stats_t *st) {
                     if (!ok) snprintf(st->unknown_cn, sizeof(st->unknown_cn), "%s", cn[0] ? cn : "?");
                 }
                 st->x509_count++;
+                if (memmem(cert, cert_len, "Microsoft", 9)) {
+                    st->ms_count++;
+                    // "Microsoft UEFI CA 2023", "Windows UEFI CA 2023", "Microsoft Option ROM UEFI CA 2023"
+                    if (memmem(cert, cert_len, "UEFI CA 2023", 12)) st->ms2023_count++;
+                }
                 for (size_t m = 0; !st->test_marker && m < sizeof(TEST_KEY_MARKERS) / sizeof(TEST_KEY_MARKERS[0]); m++) {
                     if (memmem(cert, cert_len, TEST_KEY_MARKERS[m], strlen(TEST_KEY_MARKERS[m])))
                         st->test_marker = TEST_KEY_MARKERS[m];
@@ -352,6 +365,23 @@ static void check_test_keys(fw_check_t *c, const efivar_t *const vars[], const c
         set_check(c, FW_RESULT_PASS, "No test keys in PK, KEK or db.");
 }
 
+static int hex_nibble(char ch) {
+    if (ch >= '0' && ch <= '9') return ch - '0';
+    if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
+    if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
+    return -1;
+}
+
+/* Hex to bytes; false on a bad or missing digit. */
+static bool hex_to_bytes(const char *hex, uint8_t *out, size_t n) {
+    for (size_t i = 0; i < n; i++) {
+        int hi = hex_nibble(hex[2 * i]), lo = hi < 0 ? -1 : hex_nibble(hex[2 * i + 1]);
+        if (lo < 0) return false;
+        out[i] = (uint8_t)(hi << 4 | lo);
+    }
+    return true;
+}
+
 static void check_dbx(fw_check_t *c, const efivar_t *dbx) {
     static const char empty_msg[] = "The revocation list is empty: known-vulnerable bootloaders can still boot.";
     if (dbx->err == ENOENT) {
@@ -363,16 +393,66 @@ static void check_dbx(fw_check_t *c, const efivar_t *dbx) {
         snprintf(c->detail, sizeof(c->detail), "Could not read dbx: %s.", strerror(dbx->err));
         return;
     }
+    static uint8_t host[RULES_MAX_DBX_ENTRIES * 2][32];
     siglist_stats_t st;
     memset(&st, 0, sizeof(st));
+    st.sha = host;
+    st.sha_cap = (int)(sizeof(host) / sizeof(host[0]));
     if (!parse_siglists(efivar_data(dbx), efivar_data_len(dbx), &st)) {
         set_check(c, FW_RESULT_FAIL, "Revocation list is malformed.");
-    } else if (st.sha256_count == 0) {
-        set_check(c, FW_RESULT_FAIL, empty_msg);
-    } else {
-        c->result = FW_RESULT_PASS;
-        snprintf(c->detail, sizeof(c->detail), "%d revoked hashes.", st.sha256_count);
+        return;
     }
+    if (st.sha256_count == 0) {
+        set_check(c, FW_RESULT_FAIL, empty_msg);
+        return;
+    }
+    c->result = FW_RESULT_PASS;
+    snprintf(c->detail, sizeof(c->detail), "%d revoked hashes.", st.sha256_count);
+
+    // Freshness: every x64 hash in Microsoft's latest list (the rules) should be in the host dbx.
+    const rules_dbx_set_t *ms = NULL;
+    if (rules_get_dbx(&ms) != BOOTO_OK || !ms) return;
+    int n = st.sha256_count < st.sha_cap ? st.sha256_count : st.sha_cap, want = 0, missing = 0;
+    for (int i = 0; i < ms->count; i++) {
+        uint8_t h[32];
+        if (!strstr(ms->entries[i].description, "arch x64;") || !hex_to_bytes(ms->entries[i].sha256, h, 32)) continue;
+        want++;
+        int k = 0;
+        while (k < n && memcmp(host[k], h, 32) != 0) k++;
+        if (k == n) missing++;
+    }
+    if (missing) {
+        c->result = FW_RESULT_FAIL;
+        snprintf(c->detail, sizeof(c->detail),
+                 "%d revoked hashes, but %d of Microsoft's %d x64 revocations are missing: update dbx.",
+                 st.sha256_count, missing, want);
+    } else if (want) {
+        snprintf(c->detail, sizeof(c->detail), "%d revoked hashes, all %d of Microsoft's x64 revocations.",
+                 st.sha256_count, want);
+    }
+}
+
+/* The 2011 Microsoft UEFI CAs expire in 2026; without the 2023 ones, new Windows and shim builds stop booting. */
+static void check_db_2023(fw_check_t *c, const efivar_t *db) {
+    if (db->err == ENOENT) {
+        set_check(c, FW_RESULT_NA, "No db enrolled.");
+        return;
+    }
+    if (db->err) {
+        c->result = FW_RESULT_UNKNOWN;
+        snprintf(c->detail, sizeof(c->detail), "Could not read db: %s.", strerror(db->err));
+        return;
+    }
+    siglist_stats_t st;
+    memset(&st, 0, sizeof(st));
+    if (!parse_siglists(efivar_data(db), efivar_data_len(db), &st))
+        set_check(c, FW_RESULT_UNKNOWN, "db is malformed.");
+    else if (st.ms2023_count)
+        set_check(c, FW_RESULT_PASS, "db holds a 2023 Microsoft UEFI CA.");
+    else if (st.ms_count)
+        set_check(c, FW_RESULT_FAIL, "db holds only the 2011 Microsoft CAs, which expire in 2026: update db.");
+    else
+        set_check(c, FW_RESULT_PASS, "No Microsoft CA in db: the machine uses its own keys.");
 }
 
 /* shim's MokListRT: keys and hashes shim trusts on top of db. An attacker who enrolls one boots unsigned code. */
@@ -826,13 +906,6 @@ static uint16_t rd_le16(const uint8_t *p) {
     return (uint16_t)(p[0] | (p[1] << 8));
 }
 
-static int hex_nibble(char ch) {
-    if (ch >= '0' && ch <= '9') return ch - '0';
-    if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
-    if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
-    return -1;
-}
-
 /* Replays the SHA-256 bank of the log into pcr[0..7]. Every length is checked against the
  * bytes left before it is used; the log is firmware-written, so any inconsistency is MALFORMED.
  * apps non-NULL: also collects up to max_apps EFI application digests into apps, count in *n_apps. */
@@ -1030,6 +1103,7 @@ booto_error_t firmware_audit(const firmware_paths_t *paths, firmware_report_t *o
         check_platform_key(&ck[FW_CHECK_PLATFORM_KEY], &pk);
         check_test_keys(&ck[FW_CHECK_TEST_KEYS], key_vars, key_names, 3);
         check_dbx(&ck[FW_CHECK_DBX], &dbx);
+        check_db_2023(&ck[FW_CHECK_DB_2023], &db);
         efivar_t mok = read_efivar(efi, "MokListRT", SHIM_LOCK_GUID);
         check_mok(&ck[FW_CHECK_MOK], &mok);
         free(mok.buf);
