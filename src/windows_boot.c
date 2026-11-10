@@ -122,6 +122,11 @@ static void check_file(winboot_scan_result_t *res, const char *path, bool core) 
             else res->drivers_third_party++;  // shortcut: legacy cross-signed drivers chain elsewhere; check against db later
             break;
     }
+    char reason[96];
+    for (int i = 0; i < pe.yara_count && !pe.authenticode_microsoft; i++) {
+        snprintf(reason, sizeof(reason), "matches YARA rule %.63s", pe.yara[i].rule);
+        add(res, path, &pe, pe.yara[i].severity, reason);
+    }
 }
 
 static const char *const CORE[] = { "winload.efi", "winload.exe", "winresume.efi", "winresume.exe",
@@ -241,6 +246,8 @@ booto_error_t winboot_scan_rootfs(const char *root, winboot_scan_result_t *res) 
     memset(res, 0, sizeof(*res));
     char s32[512], path[512];
     if (!system32(root, s32, sizeof(s32))) return BOOTO_ERR_NOT_FOUND;
+    booto_error_t rules_err = yara_rules_status();
+    if (rules_err != BOOTO_OK) return rules_err;
 
     for (size_t i = 0; i < sizeof(CORE) / sizeof(CORE[0]); i++)
         if (ci_child(s32, CORE[i], path, sizeof(path))) check_file(res, path, true);

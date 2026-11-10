@@ -6,6 +6,7 @@
 #define BOOTO_UEFI_ANALYZER_H
 
 #include "booto.h"
+#include "yara_scan.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -46,6 +47,8 @@ typedef struct {
     uint32_t sbat_ptr;        // .sbat section (shim/GRUB revocation metadata): file offset (0 = none)
     uint32_t sbat_size;       // and raw size
     char sbat_revoked[64];    // "<component>,<generation>" below the current SbatLevel, or "" (uefi_parse_pe_file)
+    int yara_count;           // signed YARA rules the whole file matched (uefi_parse_pe_file only)
+    yara_match_t yara[YARA_MAX_MATCHES];
 } pe_efi_info_t;
 
 typedef struct {
