@@ -25,6 +25,8 @@ typedef enum { SCAN_MOD_MBR, SCAN_MOD_UEFI, SCAN_MOD_KERNEL, SCAN_MOD_INITRAMFS,
 _Static_assert(sizeof(((forensic_case_summary_t *)0)->module_status) / sizeof(((forensic_case_summary_t *)0)->module_status[0]) == SCAN_MOD_COUNT,
                "forensic_case_summary_t.module_status must hold one entry per scan module");
 typedef enum { SCAN_STATUS_NOT_RUN, SCAN_STATUS_OK, SCAN_STATUS_ERROR, SCAN_STATUS_SKIPPED } scan_status_t;
+#define SCAN_HEAD_BYTES (1024 * 1024) /* LBA 0-2047: MBR, GPT, VBR or superblock */
+
 typedef enum { SCAN_VERDICT_CLEAN, SCAN_VERDICT_THREATS, SCAN_VERDICT_INCOMPLETE } scan_verdict_t;
 
 typedef struct {
@@ -51,6 +53,8 @@ typedef struct {
     char quarantine_zip[512];   /* "" when quarantine was off or nothing was flagged */
     char measured_note[160];    /* Windows: ESP boot manager against the last saved boot log; "" when not checked */
     inspect_sample_t inspect;   /* first flagged file, read before unmount; path "" when none */
+    char head_before[65];       /* SHA-256 of the target's first SCAN_HEAD_BYTES before mounting; "" when unreadable */
+    char head_after[65];        /* the same after unmounting: equal proves the scan wrote nothing there */
 } forensic_scan_report_t;
 
 /* step is 1..SCAN_MOD_COUNT, called before each module runs. */

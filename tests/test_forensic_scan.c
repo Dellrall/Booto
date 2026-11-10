@@ -120,6 +120,26 @@ static void test_unreadable_partition_table(void) {
     TEST_PASS("test_unreadable_partition_table");
 }
 
+/* A regular file stands in for the disk: mounting it fails, but it is hashed before and after. */
+static void test_head_hash_unchanged(void) {
+    TEST_START("test_head_hash_unchanged");
+    char img[300];
+    snprintf(img, sizeof(img), "%s/disk.img", g_root);
+    FILE *fp = fopen(img, "w");
+    ASSERT_TRUE(fp != NULL, "Create image");
+    fputs("not a filesystem", fp);
+    fclose(fp);
+    forensic_scan_report_t *r = calloc(1, sizeof(*r));
+    ASSERT_INT_EQ(forensic_scan_run(img, NULL, NULL, NULL, NULL, NULL, r), BOOTO_OK, "Scan must run");
+    ASSERT_INT_EQ((int)strlen(r->head_before), 64, "Hashed before the scan");
+    ASSERT_STR_EQ(r->head_after, r->head_before, "Scan must not change the first 1 MiB");
+    forensic_case_summary_t sum;
+    forensic_scan_fill_case_summary(r, "CASE-H", "tester", &sum);
+    ASSERT_STR_EQ(sum.head_before, r->head_before, "Summary carries the hash");
+    free(r);
+    TEST_PASS("test_head_hash_unchanged");
+}
+
 static void test_mount_failure_never_clean(void) {
     TEST_START("test_mount_failure_never_clean");
     forensic_scan_report_t *r = calloc(1, sizeof(*r));
@@ -226,6 +246,7 @@ int main(void) {
     if (geteuid() != 0) {
         test_mount_failure_never_clean();
         test_unreadable_partition_table();
+        test_head_hash_unchanged();
     }
     test_rootfs_esp_used();
     test_all_disabled();

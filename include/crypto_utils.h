@@ -45,6 +45,12 @@ void sha256_buffer_hex(const uint8_t *data, size_t len, char hex_out[65]);
 bool sha256_file_hex(const char *file_path, char hex_out[65]);
 
 /**
+ * @brief SHA-256 of the first `bytes` bytes of a file or block device (fewer if it is shorter).
+ * @return false if it cannot be opened or nothing could be read.
+ */
+bool sha256_head_hex(const char *path, size_t bytes, char hex_out[65]);
+
+/**
  * @brief CRC-32 (IEEE 802.3, reflected, polynomial 0xEDB88320) over data, continuing from crc.
  *        No pre/post inversion: start with 0xFFFFFFFF and invert the final value.
  */

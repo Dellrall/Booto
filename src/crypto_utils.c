@@ -170,6 +170,26 @@ bool sha256_file_hex(const char *file_path, char hex_out[65]) {
     return true;
 }
 
+bool sha256_head_hex(const char *path, size_t bytes, char hex_out[65]) {
+    if (!path || !hex_out) return false;
+    FILE *fp = fopen(path, "rbe");
+    if (!fp) return false;
+    sha256_ctx_t ctx;
+    sha256_init(&ctx);
+    uint8_t buf[65536];
+    size_t done = 0, n;
+    while (done < bytes && (n = fread(buf, 1, bytes - done < sizeof(buf) ? bytes - done : sizeof(buf), fp)) > 0) {
+        sha256_update(&ctx, buf, n);
+        done += n;
+    }
+    fclose(fp);
+    uint8_t hash[32];
+    sha256_final(&ctx, hash);
+    for (int i = 0; i < 32; i++) snprintf(&hex_out[i * 2], 3, "%02x", hash[i]);
+    hex_out[64] = '\0';
+    return done > 0;
+}
+
 /* MD5 (RFC 1321): only to compare against dpkg's md5sums lists, never as a security hash on its own. */
 static const uint32_t MD5_K[64] = {
     0xd76aa478, 0xe8c7b756, 0x242070db, 0xc1bdceee, 0xf57c0faf, 0x4787c62a, 0xa8304613, 0xfd469501,

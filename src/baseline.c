@@ -68,28 +68,8 @@ void baseline_add_tree(baseline_t *b, const char *prefix, const char *dir) {
 }
 
 void baseline_add_device(baseline_t *b, const char *label, const char *dev, size_t bytes) {
-    int fd = open(dev, O_RDONLY | O_CLOEXEC);
-    if (fd < 0) {
-        baseline_add_hash(b, label, UNREADABLE);
-        return;
-    }
-    sha256_ctx_t ctx;
-    sha256_init(&ctx);
-    uint8_t buf[65536];
-    size_t done = 0;
-    while (done < bytes) {
-        size_t want = bytes - done < sizeof(buf) ? bytes - done : sizeof(buf);
-        ssize_t n = read(fd, buf, want);
-        if (n <= 0) break;
-        sha256_update(&ctx, buf, (size_t)n);
-        done += (size_t)n;
-    }
-    close(fd);
-    uint8_t h[32];
-    sha256_final(&ctx, h);
     char hex[65];
-    for (int i = 0; i < 32; i++) snprintf(hex + 2 * i, 3, "%02x", h[i]);
-    baseline_add_hash(b, label, done ? hex : UNREADABLE);
+    baseline_add_hash(b, label, sha256_head_hex(dev, bytes, hex) ? hex : UNREADABLE);
 }
 
 booto_error_t baseline_write(const baseline_t *b, const char *path) {
