@@ -827,16 +827,33 @@ int tui_app_run(booto_context_t *ctx) {
                         tui_app_append_log(&app, LOG_LEVEL_INFO, NULL, "Successfully unlocked target LUKS volume (READ-ONLY)");
                         snprintf(app.status_msg, sizeof(app.status_msg), "LUKS target unlocked: /dev/mapper/booto_target_luks");
 
-                        // Add mapped volume to drives list and mark as target
-                        if (app.drive_count < MAX_DRIVES) {
+                        // Add the decrypted volume (or the LVM volumes inside it) with their real filesystem; target the first scannable one
+                        char vols[8][128] = {"/dev/mapper/booto_target_luks"};
+                        int nvol = 1;
+                        char fs[32] = "";
+                        if (disk_probe_fs_magic(vols[0], fs, sizeof(fs), NULL, 0) == BOOTO_OK && strcmp(fs, "LVM2_member") == 0) {
+                            nvol = disk_lvm_activate_ro(vols[0], vols, 8);
+                            tui_app_append_log(&app, nvol > 0 ? LOG_LEVEL_INFO : LOG_LEVEL_ERROR, NULL,
+                                               nvol > 0 ? "Activated the LVM volumes inside the LUKS volume (READ-ONLY)"
+                                                        : "LUKS volume holds LVM, but its volumes could not be activated (see Logs)");
+                            if (nvol < 0) nvol = 0;
+                        }
+                        int target = -1;
+                        for (int v = 0; v < nvol && app.drive_count < MAX_DRIVES; v++) {
                             int idx = app.drive_count++;
-                            snprintf(app.drives[idx].name, sizeof(app.drives[idx].name), "/dev/mapper/booto_target_luks");
+                            char label[64] = "";
+                            fs[0] = '\0';
+                            if (disk_probe_fs_magic(vols[v], fs, sizeof(fs), label, sizeof(label)) != BOOTO_OK) snprintf(fs, sizeof(fs), "unknown");
+                            snprintf(app.drives[idx].name, sizeof(app.drives[idx].name), "%.127s", vols[v]);
                             snprintf(app.drives[idx].size, sizeof(app.drives[idx].size), "Decrypted");
-                            snprintf(app.drives[idx].fs_type, sizeof(app.drives[idx].fs_type), "ext4");
-                            snprintf(app.drives[idx].label, sizeof(app.drives[idx].label), "Decrypted Target Rootfs");
-                            for (int d = 0; d < app.drive_count - 1; d++) app.drives[d].is_target = false;
-                            app.drives[idx].is_target = true;
-                            app.drive_cursor = idx;
+                            snprintf(app.drives[idx].fs_type, sizeof(app.drives[idx].fs_type), "%s", fs);
+                            snprintf(app.drives[idx].label, sizeof(app.drives[idx].label), "%s", label[0] ? label : "Decrypted Volume");
+                            app.drives[idx].is_target = false;
+                            if (target < 0 && (strcmp(fs, "ext4") == 0 || strcmp(fs, "xfs") == 0 || strcmp(fs, "btrfs") == 0)) target = idx;
+                        }
+                        if (target >= 0) {
+                            for (int d = 0; d < app.drive_count; d++) app.drives[d].is_target = (d == target);
+                            app.drive_cursor = target;
                         }
                         app.show_luks_modal = false;
                     } else if (err == BOOTO_ERR_PERMISSION_DENIED && disk_is_running_as_root()) {

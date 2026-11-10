@@ -99,6 +99,13 @@ booto_error_t disk_luks_open_ro(const char *dev_path, const char *mapper_name, c
 booto_error_t disk_luks_close(const char *mapper_name);
 
 /**
+ * @brief Activate the LVM volume group on pv_dev (e.g. an unlocked LUKS mapper) with every
+ *        logical volume read-only, and list their device paths.
+ * @return Number of paths written to lv_paths (at most max), or -1 on error.
+ */
+int disk_lvm_activate_ro(const char *pv_dev, char lv_paths[][128], int max);
+
+/**
  * @brief Run argv[0] via fork+execvp (no shell). If stdin_data != NULL, its exact stdin_len bytes are
  *        written to the child's stdin, then closed. Child stdout/stderr go to /dev/null.
  * @param exit_status Optional; receives the child exit code, or -1 if killed by signal / fork failed.
