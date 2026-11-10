@@ -202,6 +202,10 @@ static void run_uefi(forensic_scan_report_t *out, const char *target_dev, bool h
             set_status(out, SCAN_MOD_UEFI, SCAN_STATUS_OK, e, note);
             return;
         }
+        if (e == BOOTO_ERR_CORRUPT_DATA) {
+            set_status(out, SCAN_MOD_UEFI, SCAN_STATUS_ERROR, e, "YARA rules refused (unsigned or altered)");
+            return;
+        }
     }
     if (!target_dev) {
         set_status(out, SCAN_MOD_UEFI, SCAN_STATUS_SKIPPED, BOOTO_OK, "no EFI system partition found");

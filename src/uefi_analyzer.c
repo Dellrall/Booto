@@ -239,6 +239,7 @@ booto_error_t uefi_parse_pe_file(const char *path, pe_efi_info_t *info) {
     if (ret == BOOTO_OK && info->sbat_size) sbat_check(buf + info->sbat_ptr, info->sbat_size, info->sbat_revoked,
                                                        sizeof(info->sbat_revoked));
     if (ret == BOOTO_OK) authenticode_verify(buf, (size_t)fsize, info);
+    if (ret == BOOTO_OK) ret = yara_scan_buffer(buf, (size_t)fsize, info->yara, YARA_MAX_MATCHES, &info->yara_count);
     snprintf(info->file_path, sizeof(info->file_path), "%s", path);
     free(buf);
 
@@ -355,6 +356,12 @@ booto_error_t uefi_inspect_efi_file(const char *efi_path, uefi_scan_result_t *re
                         desc);
     }
 
+    // A valid Microsoft signature outranks a heuristic rule: genuine Windows loaders are not YARA-reported.
+    for (int i = 0; i < pe.yara_count && !pe.authenticode_microsoft; i++) {
+        add_uefi_threat(result, "YARA Rule Match", efi_path, pe.sha256, pe.yara[i].rule, pe.yara[i].severity,
+                        pe.yara[i].description);
+    }
+
     return BOOTO_OK;
 }
 
@@ -429,6 +436,8 @@ static void scan_esp_dir_recursive(const char *base_path, size_t root_len, uefi_
 
 booto_error_t uefi_inspect_esp_directory(const char *esp_dir, uefi_scan_result_t *result) {
     if (!esp_dir || !result) return BOOTO_ERR_INVALID_ARG;
+    booto_error_t rules_err = yara_rules_status();
+    if (rules_err != BOOTO_OK) return rules_err;
 
     LOG_INFO("Scanning EFI System Partition (ESP) at: %s", esp_dir);
     scan_esp_dir_recursive(esp_dir, strlen(esp_dir), result, 0);
