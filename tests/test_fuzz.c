@@ -14,6 +14,8 @@
 #include "baseline.h"
 #include "firmware_auditor.h"
 #include "logger.h"
+#include "reg_hive.h"
+#include "hive_fixture.h"
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -361,6 +363,25 @@ static void target_tpm_log(const uint8_t *buf, size_t len) {
     (void)firmware_tpm_log_apps(buf, len, apps, 8);
 }
 
+/* Mutations hit the cells; the base block is fixed so the root offset stays reachable. */
+static uint8_t g_hive[0x1000 + FUZZ_MAX_LEN];
+
+static void hive_walk(const reg_hive_t *h, uint32_t key, int depth) {
+    char name[64], s[64];
+    uint32_t x;
+    (void)reg_hive_dword(h, key, "Start", &x);
+    (void)reg_hive_string(h, key, "ImagePath", s, sizeof(s));
+    (void)reg_hive_subkey(h, key, "Services");
+    for (uint32_t i = 0, k; depth < 4 && (k = reg_hive_subkey_at(h, key, i, name, sizeof(name))) != 0; i++)
+        hive_walk(h, k, depth + 1);
+}
+
+static void target_hive(const uint8_t *buf, size_t len) {
+    memcpy(g_hive + 0x1000, buf, len);
+    reg_hive_t h;
+    if (reg_hive_open(g_hive, 0x1000 + len, &h) == BOOTO_OK) hive_walk(&h, reg_hive_root(&h), 0);
+}
+
 static uint8_t g_seed_a[FUZZ_MAX_LEN];
 static uint8_t g_seed_b[FUZZ_MAX_LEN];
 
@@ -503,6 +524,27 @@ static void test_fuzz_tpm_log(void) {
     TEST_PASS("test_fuzz_tpm_log");
 }
 
+static void test_fuzz_reg_hive(void) {
+    TEST_START("test_fuzz_reg_hive");
+    static uint8_t full[0x1000 + FUZZ_MAX_LEN];
+    hv_t h;
+    hv_init(&h, full, sizeof(full));
+    uint32_t vals[] = { hv_dword(&h, "Start", 0), hv_string(&h, "ImagePath", "System32\\drivers\\x.sys") };
+    uint32_t svc[] = { hv_key(&h, "x", NULL, 0, vals, 2), hv_key(&h, "y", NULL, 0, vals, 1) };
+    uint32_t svcs = hv_key(&h, "Services", svc, 2, NULL, 0);
+    size_t len = hv_root(&h, hv_key(&h, "ROOT", &svcs, 1, NULL, 0));
+    memcpy(g_hive, full, 0x1000);
+    memcpy(g_seed_a, full + 0x1000, len - 0x1000);
+    reg_hive_t hv;
+    ASSERT_INT_EQ(reg_hive_open(full, len, &hv), BOOTO_OK, "Hive seed opens");
+    ASSERT_TRUE(reg_hive_subkey(&hv, reg_hive_subkey(&hv, reg_hive_root(&hv), "Services"), "y") != 0, "Seed walks");
+
+    static const fuzz_region_t hot[] = {{0, 0x200}};
+    fuzz_seed_t seed = {g_seed_a, len - 0x1000, hot, 1};
+    ASSERT_TRUE(fuzz_run(target_hive, &seed, 1, 0xA0761D6478BD642FULL), "Hive fuzz run");
+    TEST_PASS("test_fuzz_reg_hive");
+}
+
 int main(void) {
     logger_init(LOG_LEVEL_CRITICAL, NULL); // parsers log per call; keep 9k iterations quiet and fast
     printf("\n--- Running Deterministic Parser Mutation Fuzzer (%d iterations/parser) ---\n", FUZZ_ITERATIONS);
@@ -514,6 +556,7 @@ int main(void) {
     test_fuzz_initramfs_parser();
     test_fuzz_baseline_parser();
     test_fuzz_tpm_log();
+    test_fuzz_reg_hive();
     TEST_SUMMARY();
     return 0;
 }
