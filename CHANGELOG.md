@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.5-beta] - 2026-11-11
+
 ### Fixed
 - `F4` now opens the passphrase prompt right after `booto-storage create`; before, the new partition was only found after a reboot.
 - The top bar no longer shows "LUKS locked" for Booto's own report partition, and says "Reports on USB" instead of "RAM only" once it is unlocked.
