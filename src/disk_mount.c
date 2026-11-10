@@ -350,6 +350,14 @@ booto_error_t disk_probe_fs_magic(const char *dev_path, char *fs_buf, size_t fs_
             return BOOTO_OK;
         }
 
+        // BitLocker replaces the NTFS OEM ID with "-FVE-FS-"; the volume cannot be read without its key.
+        if (memcmp(&sec0[3], "-FVE-FS-", 8) == 0) {
+            snprintf(fs_buf, fs_buf_size, "BitLocker");
+            if (label_buf && label_buf_size > 0) snprintf(label_buf, label_buf_size, "Encrypted Volume (BitLocker)");
+            close(fd);
+            return BOOTO_OK;
+        }
+
         // Check NTFS at offset 3 ("NTFS    ")
         if (memcmp(&sec0[3], "NTFS    ", 8) == 0) {
             snprintf(fs_buf, fs_buf_size, "ntfs");
@@ -537,7 +545,8 @@ booto_error_t disk_discover_partitions(disk_discovery_result_t *result, bool inc
                 }
 
                 if (strcmp(probed_fs, "ext4") == 0 || strcmp(probed_fs, "xfs") == 0 || strcmp(probed_fs, "btrfs") == 0 ||
-                    strcmp(probed_fs, "crypto_LUKS") == 0 || strcmp(probed_fs, "ntfs") == 0) {
+                    strcmp(probed_fs, "crypto_LUKS") == 0 || strcmp(probed_fs, "ntfs") == 0 ||
+                    strcmp(probed_fs, "BitLocker") == 0) {
                     p->is_target = true;
                 }
             } else {

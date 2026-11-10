@@ -314,7 +314,9 @@ Runs when the target root holds
 .IR Windows/System32/ntoskrnl.exe ;
 the Linux engines skip such a root. NTFS is mounted read-only with
 .BR ntfs3 .
-BitLocker volumes cannot be read. The embedded Authenticode signature of
+A BitLocker volume cannot be read: it is listed as a target, every engine that needs the root
+reports "BitLocker volume: encrypted, not scanned", and the verdict is INCOMPLETE, never CLEAN.
+The embedded Authenticode signature of
 .BR winload ,
 .BR winresume ,
 .BR ntoskrnl.exe ,
