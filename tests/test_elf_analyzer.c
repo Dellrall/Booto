@@ -165,8 +165,18 @@ static void test_unsigned_lkm_flagged(void) {
     ASSERT_INT_EQ(res.modules_scanned, 2, "Both modules scanned");
     ASSERT_INT_EQ(count_rule(&res, "LKM_UNSIGNED"), 0, "No module signed: kernel does not sign, nothing flagged");
 
-    snprintf(cmd, sizeof(cmd), "printf 'SIG~Module signature appended~\\n' >> %s/a.ko", dir);
-    ASSERT_TRUE(system(cmd) == 0, "append signature marker");
+    // Marker alone, as a rootkit would fake it: still unsigned, so the kernel still looks like it signs nothing.
+    snprintf(cmd, sizeof(cmd), "printf 'SIG~Module signature appended~\\n' >> %s/b.ko", dir);
+    ASSERT_TRUE(system(cmd) == 0, "append bare marker");
+    memset(&res, 0, sizeof(res));
+    kernel_inspect_directory(dir, &res);
+    ASSERT_INT_EQ(count_rule(&res, "LKM_UNSIGNED"), 0, "A bare marker does not count as a signature");
+
+    // 300-byte DER blob, module_signature (id_type 2, sig_len 300), marker: what scripts/sign-file appends.
+    snprintf(cmd, sizeof(cmd), "{ printf '\\060\\202\\001\\050'; head -c 296 /dev/zero; "
+             "printf '\\000\\000\\002\\000\\000\\000\\000\\000\\000\\000\\001\\054"
+             "~Module signature appended~\\n'; } >> %s/a.ko", dir);
+    ASSERT_TRUE(system(cmd) == 0, "append signature");
     memset(&res, 0, sizeof(res));
     kernel_inspect_directory(dir, &res);
     ASSERT_INT_EQ(count_rule(&res, "LKM_UNSIGNED"), 1, "Kernel signs modules: the unsigned one is flagged");
