@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **1.9.2-beta rebooted in a loop at the splash screen.** Every boot entry passed live-boot's `verify-checksums`, which is a media check that always reboots when it finishes. The normal entries boot again; the check moved to its own GRUB entry, "Check the USB for corruption".
+
 ## [1.9.2-beta] - 2026-11-10
 
 ### Added

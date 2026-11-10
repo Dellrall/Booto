@@ -44,7 +44,7 @@ Research date: 2026-11-03. Every claim below links its primary source. Three sur
 | # | Idea | State |
 |---|---|---|
 | 1 | dbx rules from Microsoft's JSON | done: `scripts/gen_dbx_rules.py`, built-in table plus sealed `rules/uefi_dbx_revocations.json` |
-| 2 | Harden ISO boot | done: GRUB looks for a marker file unique to each build, plus `live-media=removable systemd.swap=no verify-checksums` (live-boot checks `live/` against `sha256sum.txt`) |
+| 2 | Harden ISO boot | done: GRUB looks for a marker file unique to each build, plus `live-media=removable systemd.swap=no`; `verify-checksums` (live-boot checks `live/` against `sha256sum.txt`, then reboots) has its own GRUB entry |
 | 3 | Offline package integrity | done: dpkg `md5sums`, RPM `rpmdb.sqlite` digests, pacman `mtree` |
 | 4 | Known-rootkit path and string rules | paths done (`rules/rootkit_file_iocs.json`). YARA runs over EFI and Windows boot images, every kernel module, and ELF files inside the initramfs (`rules/bootkits.yar`: 2 PE rules, 4 Linux rules). Still to do: YARA over the installed ELF binaries |
 | 5 | Boot-chain anomaly checks | done: shadow loaders, BlackLotus ESP layout, MOK list, SBAT level, Authenticode hash, Microsoft signer check, Windows boot files (`winload`, `ntoskrnl`, drivers). Still to do: judging non-Microsoft signers (distro shim and GRUB) |
