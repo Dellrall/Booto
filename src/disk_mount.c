@@ -114,8 +114,8 @@ static bool exec_sandbox_child(void) {
     return prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) == 0;
 }
 
-booto_error_t disk_exec_capture(const char *const argv[], const uint8_t *stdin_data, size_t stdin_len,
-                                uint8_t **out, size_t *out_len, size_t max_out) {
+static booto_error_t exec_capture(const char *const argv[], const uint8_t *stdin_data, size_t stdin_len,
+                                  uint8_t **out, size_t *out_len, size_t max_out, bool sandbox) {
     if (out) *out = NULL;
     if (out_len) *out_len = 0;
     if (!argv || !argv[0] || !out || !out_len || (!stdin_data && stdin_len > 0)) return BOOTO_ERR_INVALID_ARG;
@@ -140,7 +140,7 @@ booto_error_t disk_exec_capture(const char *const argv[], const uint8_t *stdin_d
             dup2(devnull, STDERR_FILENO);
             if (devnull > STDERR_FILENO) close(devnull);
         }
-        if (!exec_sandbox_child()) _exit(126);
+        if (sandbox && !exec_sandbox_child()) _exit(126);
         execvp(argv[0], (char *const *)argv);
         _exit(127);
     }
@@ -248,6 +248,11 @@ booto_error_t disk_exec_capture(const char *const argv[], const uint8_t *stdin_d
     return BOOTO_OK;
 }
 
+booto_error_t disk_exec_capture(const char *const argv[], const uint8_t *stdin_data, size_t stdin_len,
+                                uint8_t **out, size_t *out_len, size_t max_out) {
+    return exec_capture(argv, stdin_data, stdin_len, out, out_len, max_out, true);
+}
+
 booto_error_t disk_ensure_private_dir(const char *path) {
     if (!path || !path[0]) return BOOTO_ERR_INVALID_ARG;
     if (mkdir(path, 0700) == 0) return BOOTO_OK;
@@ -322,6 +327,16 @@ booto_error_t disk_probe_fs_magic(const char *dev_path, char *fs_buf, size_t fs_
     int fd = open(full_dev, O_RDONLY);
     if (fd < 0) {
         return BOOTO_ERR_IO;
+    }
+
+    // LVM physical volume: "LABELONE" label in sector 1, type "LVM2 001" at byte 24 of it
+    uint8_t sec1[32];
+    if (pread(fd, sec1, sizeof(sec1), 512) == (ssize_t)sizeof(sec1) &&
+        memcmp(sec1, "LABELONE", 8) == 0 && memcmp(&sec1[24], "LVM2 001", 8) == 0) {
+        snprintf(fs_buf, fs_buf_size, "LVM2_member");
+        if (label_buf && label_buf_size > 0) snprintf(label_buf, label_buf_size, "LVM Physical Volume");
+        close(fd);
+        return BOOTO_OK;
     }
 
     // 1. Probe Sector 0 (512 bytes): LUKS, XFS, NTFS, FAT
@@ -754,6 +769,55 @@ booto_error_t disk_luks_close(const char *mapper_name) {
     }
 
     return BOOTO_OK;
+}
+
+/* Run an LVM report command as root (it must open the PV) and return its output, NUL-terminated. */
+static char *lvm_report(const char *const argv[]) {
+    uint8_t *raw = NULL;
+    size_t len = 0;
+    if (exec_capture(argv, NULL, 0, &raw, &len, 64 * 1024, false) != BOOTO_OK) return NULL;
+    char *txt = (char *)realloc(raw, len + 1);
+    if (!txt) { free(raw); return NULL; }
+    txt[len] = '\0';
+    return txt;
+}
+
+int disk_lvm_activate_ro(const char *pv_dev, char lv_paths[][128], int max) {
+    if (!pv_dev || !lv_paths || max <= 0) return -1;
+    if (!disk_is_running_as_root()) {
+        LOG_ERROR("LVM activation of %s requires root privileges", pv_dev);
+        return -1;
+    }
+
+    const char *const pvs[] = {"pvs", "--noheadings", "-o", "vg_name", pv_dev, NULL};
+    char *out = lvm_report(pvs);
+    char vg[128] = "";
+    if (out) sscanf(out, " %127s", vg);
+    free(out);
+    /* LVM's own VG name charset; anything else would break the --config string below. */
+    if (!vg[0] || strspn(vg, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+_.-") != strlen(vg)) {
+        LOG_ERROR("No volume group found on %s", pv_dev);
+        return -1;
+    }
+
+    /* read_only_volume_list makes every LV of the VG a read-only device-mapper table. */
+    char cfg[192];
+    snprintf(cfg, sizeof(cfg), "activation { read_only_volume_list = [ \"%s\" ] }", vg);
+    const char *const act[] = {"vgchange", "-ay", "--config", cfg, vg, NULL};
+    if (disk_exec_argv(act, NULL, 0, NULL) != BOOTO_OK) {
+        LOG_ERROR("Failed to activate volume group %s read-only", vg);
+        return -1;
+    }
+
+    const char *const lvs[] = {"lvs", "--noheadings", "-o", "lv_path", vg, NULL};
+    out = lvm_report(lvs);
+    int n = 0;
+    for (char *save = NULL, *tok = out ? strtok_r(out, " \t\n", &save) : NULL; tok && n < max;
+         tok = strtok_r(NULL, " \t\n", &save))
+        if (strncmp(tok, "/dev/", 5) == 0) snprintf(lv_paths[n++], 128, "%s", tok);
+    free(out);
+    LOG_INFO("Activated volume group %s read-only: %d logical volume(s)", vg, n);
+    return n;
 }
 
 /* ---- ESP discovery (GPT / MBR) ---- */

@@ -109,6 +109,21 @@ static void test_fs_magic_probing(void) {
         ASSERT_STR_EQ(label, "RootUbuntu", "Ext4 volume label");
     }
 
+    // 1b. LVM physical volume label in sector 1 (LVM inside LUKS on Debian/Ubuntu installs)
+    {
+        FILE *fp = fopen(tmp_img, "wb");
+        ASSERT_TRUE(fp != NULL, "Create test probe image");
+        uint8_t img[2048] = {0};
+        memcpy(&img[512], "LABELONE", 8);
+        memcpy(&img[512 + 24], "LVM2 001", 8);
+        fwrite(img, 1, sizeof(img), fp);
+        fclose(fp);
+
+        booto_error_t err = disk_probe_fs_magic(tmp_img, fs_type, sizeof(fs_type), label, sizeof(label));
+        ASSERT_INT_EQ(err, BOOTO_OK, "LVM probe return");
+        ASSERT_STR_EQ(fs_type, "LVM2_member", "LVM physical volume type");
+    }
+
     // 2. Test FAT32 OEM Probing
     {
         FILE *fp = fopen(tmp_img, "wb");

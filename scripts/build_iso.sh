@@ -42,7 +42,7 @@ mkdir -p "${WORK_DIR}" "${CD_DIR}/live" "${CD_DIR}/boot/grub" "${OUTPUT_DIR}"
 echo "[+] Step 1/6: Bootstrapping Debian 12 (Bookworm) minimal rootfs..."
 debootstrap --arch=amd64 \
             --variant=minbase \
-            --include=linux-image-amd64,live-boot,systemd,systemd-sysv,libncurses6,libblkid1,libudev1,libssl3,libsqlite3-0,libyara9,cryptsetup,util-linux,gzip,xz-utils,zstd,lz4,bzip2,flashrom,gpm,plymouth,plymouth-label,console-setup-linux,vim-tiny,nano,man-db \
+            --include=linux-image-amd64,live-boot,systemd,systemd-sysv,libncurses6,libblkid1,libudev1,libssl3,libsqlite3-0,libyara9,cryptsetup,lvm2,util-linux,gzip,xz-utils,zstd,lz4,bzip2,flashrom,gpm,plymouth,plymouth-label,console-setup-linux,vim-tiny,nano,man-db \
             "${DEBIAN_VERSION}" "${ROOTFS_DIR}" "${DEBIAN_MIRROR}"
 
 # The kernel and every library must carry Debian's security fixes, not only the last point release:
@@ -95,6 +95,9 @@ install -m 644 "${REPO_ROOT}/rules/sources/secureboot_objects-License.txt" "${RO
 # The firmware audit reads SMM/SMRR lock bits through /dev/cpu/N/msr (read-only).
 install -d -m 755 "${ROOTFS_DIR}/etc/modules-load.d"
 echo "msr" > "${ROOTFS_DIR}/etc/modules-load.d/booto.conf"
+# Never auto-activate LVM on the suspect disks; Booto activates a volume group read-only on request.
+rm -f "${ROOTFS_DIR}"/lib/udev/rules.d/69-lvm*.rules
+chroot "${ROOTFS_DIR}" systemctl mask lvm2-monitor.service lvm2-lvmpolld.socket
 # gpm passes the mouse to the text console, which forwards it to the TUI as X10 reports
 chroot "${ROOTFS_DIR}" systemctl enable gpm.service
 # Boot splash between GRUB and the TUI; getty@tty1 waits for plymouth to quit, so Booto starts on a clean screen.
