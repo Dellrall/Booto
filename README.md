@@ -166,6 +166,17 @@ Set `NO_COLOR=1` (see [no-color.org](https://no-color.org)) for a monochrome TUI
 | **Stage 7** | `v0.7.0-rc1`   | Advanced CI/CD Matrix, Sanitizers & Code Coverage | **Completed** |
 | **Stage 8** | `v0.8.0-rc1`   | Debian Live ISO Packaging (`make iso`) & Automated CD | **Completed** |
 | **Stage 9** | `v1.0.0`       | QEMU Testbed & Capstone Defense Evaluation | **Completed** |
+| **Stage 10** | `v1.1.0` | MBR, Track-0 Gap & VBR Bootkit Engine | **Completed** |
+| **Stage 11** | `v1.2.0` | Host Firmware Audit, ESP Auto-Discovery, Headless CLI, Runtime Rules Loader | **Completed** |
+| **Stage 12** | `v1.3.0` | Firmware Audit: Silicon Locks (SMM, BIOS Write Protection) | **Completed** |
+| **Stage 13** | `v1.4.0` | TPM Boot Measurements, Bounded Model Checking, Microsoft dbx Rules | **Completed** |
+| **Stage 14** | `v1.5.0-beta` | Quarantine Export, Mouse & Scrolling in the TUI | **Completed** |
+| **Stage 15** | `v1.6.0-beta` | Expert Firmware Scan (SPI Dump), Inspect View, Resizable Panes | **Completed** |
+| **Stage 16** | `v1.7.0-beta` | Live Console Mouse, Man Pages | **Completed** |
+| **Stage 17** | `v1.8.0-beta` | Right-Click Menu, Double-Click, Hover Highlight | **Completed** |
+| **Stage 18** | next | Windows Boot Chain Check; measured detection rate (`make zoo`) | **In progress** |
+
+Releases tagged `-beta` are pre-releases: Booto has not yet been validated against real bootkits on real hardware.
 
 ---
 

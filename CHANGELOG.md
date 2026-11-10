@@ -10,6 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Windows boot chain check**: NTFS partitions are now scan targets, mounted read-only. On a Windows install, a new engine verifies the Authenticode signatures of winload, winresume, ntoskrnl, hal, ci and the boot drivers against Microsoft's roots, and flags a file patched after signing or signed by someone else. Flagged files go to the quarantine export. The Linux engines skip Windows roots.
 
+### Fixed
+- **Booto's own USB is no longer the default scan target.** Partitions on the stick Booto booted from are labelled "Booto USB" and never picked automatically; `-t` can still name one.
+- **"LUKS locked" in the top bar** now shows only when the machine has an encrypted drive. Before, it showed on every machine and read as if the report storage were locked.
+- **`--update-rules` on the live USB** now explains that it needs the source tree and where to put new rule files, instead of failing with "not found".
+
+### Documentation
+- `SECURITY.md`: how to report a vulnerability and what Booto does not protect against.
+- The README milestone table now runs to the current version.
+
 ## [1.8.0-beta] - 2026-11-09
 
 ### Added
