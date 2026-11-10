@@ -49,6 +49,14 @@ static void test_find_data_partition_on_boot_disk_only(void) {
     put_file(sdb, "sdb2/uevent", "DEVNAME=sdb2\nPARTNAME=OTHER\n");
     char dev2[128] = "";
     booto_error_t decoy_only = persistence_find_data_partition(live, sys, dev2, sizeof(dev2));
+    /* Added by partx after boot: no PARTNAME in sysfs, the GPT name only in udev's database. */
+    snprintf(cmd, sizeof(cmd), "mkdir -p %s/sdb3 %s/run/udev/data", sdb, root);
+    ASSERT_TRUE(system(cmd) == 0, "fixture udev db");
+    put_file(sdb, "sdb3/uevent", "MAJOR=8\nMINOR=19\nDEVNAME=sdb3\n");
+    snprintf(cmd, sizeof(cmd), "%s/run/udev/data", root);
+    put_file(cmd, "b8:19", "S:disk/by-partlabel/BOOTO_DATA\nE:ID_PART_ENTRY_NAME=BOOTO_DATA\n");
+    char dev3[128] = "";
+    booto_error_t via_udev = persistence_find_data_partition(live, sys, dev3, sizeof(dev3));
     snprintf(cmd, sizeof(cmd), "rm -rf %s", root);
     if (system(cmd) != 0) perror("rm");
 
@@ -58,6 +66,8 @@ static void test_find_data_partition_on_boot_disk_only(void) {
     ASSERT_STR_EQ(dev, "/dev/sdb2", "partition is the boot disk's, not the suspect disk's");
     ASSERT_INT_EQ(not_live, BOOTO_ERR_NOT_FOUND, "no live medium mounted -> not found");
     ASSERT_INT_EQ(decoy_only, BOOTO_ERR_NOT_FOUND, "same-named partition on another disk is ignored");
+    ASSERT_INT_EQ(via_udev, BOOTO_OK, "partition added after boot is found by its udev GPT name");
+    ASSERT_STR_EQ(dev3, "/dev/sdb3", "udev fallback returns the new partition");
     TEST_PASS("test_find_data_partition_on_boot_disk_only");
 }
 

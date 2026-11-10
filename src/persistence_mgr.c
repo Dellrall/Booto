@@ -97,9 +97,18 @@ booto_error_t persistence_find_data_partition(const char *mountinfo_path, const 
     struct dirent *e;
     while (ret != BOOTO_OK && (e = readdir(d)) != NULL) {
         if (e->d_name[0] == '.') continue;
-        char name[64], devname[64];
+        char name[64] = "", devname[64];
         snprintf(path, sizeof(path), "%.3800s/%.255s/uevent", disk, e->d_name);
-        if (!uevent_value(path, "PARTNAME", name, sizeof(name)) || strcmp(name, PERSISTENCE_PART_LABEL) != 0) continue;
+        char maj[16], min[16];
+        if (!uevent_value(path, "PARTNAME", name, sizeof(name)) &&
+            uevent_value(path, "MAJOR", maj, sizeof(maj)) && uevent_value(path, "MINOR", min, sizeof(min))) {
+            /* A partition added with partx (booto-storage create) has no PARTNAME until reboot; udev's blkid
+             * probe records the GPT name. <sysfs_root>/../run is /run on a live system and the fixture root in tests. */
+            char db[PATH_MAX];
+            snprintf(db, sizeof(db), "%.3800s/../run/udev/data/b%.15s:%.15s", sysfs_root, maj, min);
+            if (!uevent_value(db, "E:ID_PART_ENTRY_NAME", name, sizeof(name))) continue;
+        }
+        if (strcmp(name, PERSISTENCE_PART_LABEL) != 0) continue;
         if (!uevent_value(path, "DEVNAME", devname, sizeof(devname)) || !devname[0] || strchr(devname, '/')) continue;
         snprintf(out_dev, out_len, "/dev/%s", devname);
         ret = BOOTO_OK;

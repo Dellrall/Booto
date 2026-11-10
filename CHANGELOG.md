@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `F4` now opens the passphrase prompt right after `booto-storage create`; before, the new partition was only found after a reboot.
+
 ## [1.9.4-beta] - 2026-11-10
 
 ### Added
