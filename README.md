@@ -157,6 +157,7 @@ These numbers cover synthetic look-alikes only: one or two cases per engine, no 
 | `Right-Click` | **Menu** | The pane's actions plus zoom, split, swap and resize; each row shows its key |
 | `Mouse Drag` | **Resize** | Drag a pane border (or the cell beside it); the pointer turns into `↔`/`↕` over one |
 | `Mouse Wheel` | **Scroll** | Scroll the pane under the pointer; `↑`/`↓` or `j`/`k` scroll the focused Findings and Reports panes |
+| `1`-`4` / `Esc` | **Pages** | Panes, Findings (every finding with its rule, hash and detail), Firmware, Evidence (before/after hash, quarantine, what each engine read); click a tab too; `Esc` back to the panes |
 | `F3` | **Unlock LUKS** | Unlock an encrypted target partition read-only |
 | `F4` | **Unlock Storage** | Mount the report partition on the boot USB (asks for its passphrase if encrypted) |
 | `F5` | **Start Scan** | Trigger forensic scanning sequence |

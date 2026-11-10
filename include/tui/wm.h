@@ -19,6 +19,9 @@ typedef enum {
     PANE_LIVE_LOGS,
     PANE_THREAT_INSPECTOR,
     PANE_PERSISTENCE,
+    PANE_FINDINGS_LIST, /* every finding, with the selected one's detail */
+    PANE_FIRMWARE,      /* this machine's firmware audit */
+    PANE_EVIDENCE,      /* what was scanned and proof the target was not changed */
     PANE_COUNT
 } pane_type_t;
 

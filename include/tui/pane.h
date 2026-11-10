@@ -63,14 +63,6 @@ typedef struct {
 } log_entry_t;
 
 typedef struct {
-    char threat_name[64];
-    char infected_file[128];
-    char hook_type[64];
-    char sha256[65];
-    char severity[16];
-} threat_detail_t;
-
-typedef struct {
     booto_context_t *ctx;
     wm_tree_t *wm;
     bool running;
@@ -94,9 +86,11 @@ typedef struct {
     int log_count;
     int log_scroll;
 
-    // Threat state
-    threat_detail_t threat;
+    // Scan result and pages (0 = panes, 1 = Findings, 2 = Firmware, 3 = Evidence)
     forensic_scan_report_t *last_scan;  // heap-allocated on first scan, freed at exit
+    int page;
+    int finding_cursor;                 // selected row of the Findings page
+    int finding_first, finding_list_y, finding_vis; // listed rows: first index, screen row, count (last render)
 
     // Background scan (F5). Worker owns pending_scan/pending_err/scan_target/scan_enabled until scan_done;
     // the main thread reads them only after pthread_join.

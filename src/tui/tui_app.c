@@ -152,6 +152,20 @@ static void render_bottom_bar(tui_app_state_t *app, int rows, int cols) {
     }
 }
 
+/* Row 1: one tab per page; a click acts as its digit key. */
+static void render_tab_strip(const tui_app_state_t *app, int cols) {
+    char findings[32];
+    snprintf(findings, sizeof(findings), " 2 Findings (%d) ", forensic_scan_finding_count(app->last_scan));
+    const char *tabs[] = {" 1 Panes ", findings, " 3 Firmware ", " 4 Evidence "};
+    int x = 1;
+    for (int i = 0; i < 4 && x < cols - 1; i++) {
+        int x0 = x;
+        put_clip(&x, 1, cols - 1, tabs[i], i == app->page ? A_CURSOR : A_MUTED);
+        term_add_click_zone(x0, x, 1, KEY_CHAR, '1' + i);
+        x++;
+    }
+}
+
 /* Centres a w x h modal (clamped to the screen), clears it and draws its frame. */
 static void modal_frame(int rows, int cols, int w, int h, const char *title, int *mx, int *my, int *mw) {
     if (w > cols) w = cols;
@@ -507,7 +521,8 @@ static void finish_forensic_scan(tui_app_state_t *app) {
     }
     free(app->last_scan);
     app->last_scan = r;
-    app->pane_scroll[PANE_THREAT_INSPECTOR] = 0;
+    for (int t = PANE_THREAT_INSPECTOR; t < PANE_COUNT; t++) app->pane_scroll[t] = 0;
+    app->finding_cursor = 0;
     app->show_inspect = false;
     if (r->quarantine_zip[0]) {
         snprintf(log_buf, sizeof(log_buf), "Quarantined %d file%s to %.180s (ZIP password \"infected\").", r->quarantined,
@@ -525,47 +540,7 @@ static void finish_forensic_scan(tui_app_state_t *app) {
     if (r->verdict == SCAN_VERDICT_THREATS) {
         snprintf(log_buf, sizeof(log_buf), "Scan finished: %d threat%s found.", r->total_threats, r->total_threats == 1 ? "" : "s");
         tui_app_append_log(app, LOG_LEVEL_CRITICAL, NULL, log_buf);
-        snprintf(app->threat.severity, sizeof(app->threat.severity), "CRITICAL");
-
-        if (r->mbr.threats_detected > 0) {
-            snprintf(app->threat.threat_name, sizeof(app->threat.threat_name), "%.60s", r->mbr.findings[0].threat_name);
-            snprintf(app->threat.infected_file, sizeof(app->threat.infected_file), "%.70s (LBA %llu)",
-                     r->mbr.findings[0].target_device, (unsigned long long)r->mbr.findings[0].sector_lba);
-            snprintf(app->threat.hook_type, sizeof(app->threat.hook_type), "Rule: %.50s", r->mbr.findings[0].rule_id);
-            snprintf(app->threat.sha256, sizeof(app->threat.sha256), "%.64s", r->mbr.findings[0].sha256);
-            snprintf(app->threat.severity, sizeof(app->threat.severity), "%.15s", booto_severity_str(r->mbr.findings[0].severity));
-        } else if (r->uefi.bootkits_detected > 0) {
-            snprintf(app->threat.threat_name, sizeof(app->threat.threat_name), "%.60s", r->uefi.findings[0].threat_name);
-            snprintf(app->threat.infected_file, sizeof(app->threat.infected_file), "%.120s", r->uefi.findings[0].file_path);
-            snprintf(app->threat.hook_type, sizeof(app->threat.hook_type), "Rule: %.50s", r->uefi.findings[0].rule_id);
-            snprintf(app->threat.sha256, sizeof(app->threat.sha256), "%.64s", r->uefi.findings[0].sha256);
-        } else if (r->kernel.threats_detected > 0) {
-            snprintf(app->threat.threat_name, sizeof(app->threat.threat_name), "%.60s", r->kernel.findings[0].threat_name);
-            snprintf(app->threat.infected_file, sizeof(app->threat.infected_file), "%.120s", r->kernel.findings[0].file_path);
-            snprintf(app->threat.hook_type, sizeof(app->threat.hook_type), "%.30s: %.25s",
-                     r->kernel.findings[0].detection_rule, r->kernel.findings[0].matched_symbol);
-            snprintf(app->threat.sha256, sizeof(app->threat.sha256), "%.64s", r->kernel.findings[0].sha256);
-            snprintf(app->threat.severity, sizeof(app->threat.severity), "%.15s", booto_severity_str(r->kernel.findings[0].severity));
-        } else if (r->initramfs.threats_detected > 0) {
-            snprintf(app->threat.threat_name, sizeof(app->threat.threat_name), "%.60s", r->initramfs.findings[0].threat_name);
-            snprintf(app->threat.infected_file, sizeof(app->threat.infected_file), "%.120s", r->initramfs.findings[0].file_path);
-            snprintf(app->threat.hook_type, sizeof(app->threat.hook_type), "Pattern: %.50s", r->initramfs.findings[0].matched_pattern);
-            snprintf(app->threat.sha256, sizeof(app->threat.sha256), "-");
-        } else if (r->preload.threats_detected > 0) {
-            snprintf(app->threat.threat_name, sizeof(app->threat.threat_name), "%.60s", r->preload.findings[0].threat_name);
-            snprintf(app->threat.infected_file, sizeof(app->threat.infected_file), "%.120s", r->preload.findings[0].file_path);
-            snprintf(app->threat.hook_type, sizeof(app->threat.hook_type), "Target: %.50s", r->preload.findings[0].target_library);
-            snprintf(app->threat.sha256, sizeof(app->threat.sha256), "%.64s", r->preload.findings[0].sha256);
-        } else if (r->pkg.threats_detected > 0) {
-            snprintf(app->threat.threat_name, sizeof(app->threat.threat_name), "Modified package file");
-            snprintf(app->threat.infected_file, sizeof(app->threat.infected_file), "%.120s", r->pkg.findings[0].file_path);
-            snprintf(app->threat.hook_type, sizeof(app->threat.hook_type), "%.30s (%.25s)", r->pkg.findings[0].reason,
-                     r->pkg.findings[0].package);
-            const char *h = r->pkg.findings[0].actual_hash;
-            if (strlen(h) == 32) snprintf(app->threat.sha256, sizeof(app->threat.sha256), "MD5 %.32s", h);
-            else snprintf(app->threat.sha256, sizeof(app->threat.sha256), "%.64s", h);
-        }
-        snprintf(app->status_msg, sizeof(app->status_msg), "Scan finished: %d threat%s found. See Findings.",
+        snprintf(app->status_msg, sizeof(app->status_msg), "Scan finished: %d threat%s found. Press 2 to list them.",
                  r->total_threats, r->total_threats == 1 ? "" : "s");
     } else if (r->verdict == SCAN_VERDICT_INCOMPLETE) {
         int failed = SCAN_MOD_COUNT - ok_count;
@@ -717,16 +692,23 @@ int tui_app_run(booto_context_t *ctx) {
         if (atomic_load(&app.scan_done)) finish_forensic_scan(&app);
 
         term_get_dimensions(&rows, &cols);
-        wm_recalculate_layout(app.wm, 0, 1, cols, rows - 2);
+        wm_recalculate_layout(app.wm, 0, 2, cols, rows - 3);
+        /* Pages 2-4 show one pane over the whole body instead of the tiled panes. */
+        static const pane_type_t PAGE_PANE[] = {PANE_COUNT, PANE_FINDINGS_LIST, PANE_FIRMWARE, PANE_EVIDENCE};
+        wm_node_t page_node = {.type = NODE_LEAF, .pane_type = PAGE_PANE[app.page], .x = 0, .y = 2, .w = cols, .h = rows - 3};
+        wm_node_t *page = app.page ? &page_node : NULL;
 
         term_clear();
 
         // 1. Render Top & Bottom Bars
         render_top_bar(&app, cols);
         render_bottom_bar(&app, rows, cols);
+        render_tab_strip(&app, cols);
 
-        // 2. Render BSP Window Tree
-        if (app.wm->zoomed_leaf) {
+        // 2. Render the page, or the BSP window tree
+        if (page) {
+            pane_render(page, true, &app);
+        } else if (app.wm->zoomed_leaf) {
             pane_render(app.wm->zoomed_leaf, true, &app);
         } else {
             // Focused pane last so its border wins on shared edges.
@@ -738,7 +720,7 @@ int tui_app_run(booto_context_t *ctx) {
         bool modal = app.show_exit_modal || app.show_luks_modal || app.show_inspect || menu_n > 0;
         int px, py;
         wm_node_t *hover = drag_split;
-        if (!hover && !modal && !app.wm->zoomed_leaf && term_get_pointer(&px, &py))
+        if (!hover && !modal && !page && !app.wm->zoomed_leaf && term_get_pointer(&px, &py))
             hover = wm_find_divider_at(app.wm->root, px, py);
         if (drag_split) {
             const wm_node_t *a = drag_split->left;
@@ -906,7 +888,17 @@ int tui_app_run(booto_context_t *ctx) {
                 continue;
             }
 
-            if (event.type == KEY_CHAR && event.ch == CTRL_R) {
+            if (event.type == KEY_CHAR && event.ch >= '1' && event.ch <= '4') {
+                app.page = event.ch - '1';
+            } else if (page && event.type == KEY_ESC) {
+                app.page = 0;
+            } else if (page && (event.type == KEY_MOUSE_WHEEL_UP || event.type == KEY_MOUSE_WHEEL_DOWN)) {
+                pane_handle_input(page, &(input_event_t){.type = event.type == KEY_MOUSE_WHEEL_UP ? KEY_UP : KEY_DOWN}, &app);
+            } else if (page && mouse) {
+                if (event.type == KEY_MOUSE_CLICK && event.mouse_btn == 0) pane_handle_click(page, event.mouse_x, event.mouse_y, &app);
+            } else if (page && (event.type == KEY_CHAR && event.ch == CTRL_R)) {
+                snprintf(app.status_msg, sizeof(app.status_msg), "Pages fill the screen; press 1 for the panes to resize them.");
+            } else if (event.type == KEY_CHAR && event.ch == CTRL_R) {
                 resize_mode = true;
                 snprintf(app.status_msg, sizeof(app.status_msg),
                          "Resize: h/j/k/l move the border, H/J/K/L by 5, Esc when done.");
@@ -1030,6 +1022,8 @@ int tui_app_run(booto_context_t *ctx) {
                         }
                     }
                 }
+            } else if (page) {
+                pane_handle_input(page, &event, &app);
             } else if (atomic_load(&app.scan_active) && event.type == KEY_ENTER && app.wm->focused_leaf &&
                        app.wm->focused_leaf->pane_type == PANE_STORAGE_DEVICES) {
                 snprintf(app.status_msg, sizeof(app.status_msg), "Mount and LUKS unlock are disabled while a scan runs.");
