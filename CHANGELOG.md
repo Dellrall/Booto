@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.1-beta] - 2026-11-10
+
 ### Fixed
 - **The 1.9.0-beta ISO could not start `booto`** ("libyara.so.10: cannot open shared object file"). The binary was compiled on the Ubuntu build host and linked a libyara that Debian 12 does not ship. `booto` is now compiled inside the ISO's own Debian 12 rootfs, and the build fails if the binary needs a library the live system lacks.
 - **The ISO now carries Debian's security updates.** The rootfs, kernel included, was built from the last point release only; it now adds `bookworm-security` and `bookworm-updates` and upgrades before packing. The live system mounts filesystems from the suspect disk, so kernel filesystem fixes matter even offline.
