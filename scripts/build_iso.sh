@@ -39,17 +39,51 @@ fi
 rm -rf "${WORK_DIR}"
 mkdir -p "${WORK_DIR}" "${CD_DIR}/live" "${CD_DIR}/boot/grub" "${OUTPUT_DIR}"
 
-echo "[+] Step 1/6: Compiling latest Booto C11 binary..."
-make -C "${REPO_ROOT}" clean all
-
-echo "[+] Step 2/6: Bootstrapping Debian 12 (Bookworm) minimal rootfs..."
+echo "[+] Step 1/6: Bootstrapping Debian 12 (Bookworm) minimal rootfs..."
 debootstrap --arch=amd64 \
             --variant=minbase \
             --include=linux-image-amd64,live-boot,systemd,systemd-sysv,libncurses6,libblkid1,libudev1,libssl3,libsqlite3-0,cryptsetup,util-linux,gzip,xz-utils,zstd,lz4,bzip2,flashrom,gpm,plymouth,plymouth-label,console-setup-linux,vim-tiny,nano,man-db \
             "${DEBIAN_VERSION}" "${ROOTFS_DIR}" "${DEBIAN_MIRROR}"
 
-echo "[+] Step 3/6: Installing Booto binary into rootfs..."
-install -m 755 "${REPO_ROOT}/bin/booto" "${ROOTFS_DIR}/usr/local/bin/booto"
+# The kernel and every library must carry Debian's security fixes, not only the last point release:
+# the live system mounts attacker-controlled filesystems.
+cat << EOF_APT > "${ROOTFS_DIR}/etc/apt/sources.list"
+deb ${DEBIAN_MIRROR} ${DEBIAN_VERSION} main
+deb ${DEBIAN_MIRROR} ${DEBIAN_VERSION}-updates main
+deb http://security.debian.org/debian-security ${DEBIAN_VERSION}-security main
+EOF_APT
+for fs in proc sys dev; do mount --bind "/${fs}" "${ROOTFS_DIR}/${fs}"; done
+trap 'for fs in dev sys proc; do umount -l "${ROOTFS_DIR}/${fs}" 2>/dev/null || true; done' EXIT
+in_chroot() { chroot "${ROOTFS_DIR}" env DEBIAN_FRONTEND=noninteractive "$@"; }
+in_chroot apt-get update
+in_chroot apt-get -y upgrade
+
+echo "[+] Step 2/6: Compiling Booto inside the rootfs..."
+# Built against the rootfs's own libraries: a binary from the build host links sonames Debian 12 may not ship.
+BUILD_DEPS="build-essential libncurses-dev libblkid-dev libudev-dev libssl-dev libsqlite3-dev"
+in_chroot apt-get install -y --no-install-recommends ${BUILD_DEPS}
+# version.h needs git, which the rootfs lacks: generate it here and copy it along with the tracked sources.
+rm -f "${REPO_ROOT}/include/version.h"
+make -C "${REPO_ROOT}" version
+mkdir -p "${ROOTFS_DIR}/tmp/booto-src"
+{ git -C "${REPO_ROOT}" ls-files -z; printf 'include/version.h\0'; } |
+    tar -C "${REPO_ROOT}" --null -T - -cf - | tar -C "${ROOTFS_DIR}/tmp/booto-src" -xf -
+in_chroot make -C /tmp/booto-src all
+install -m 755 "${ROOTFS_DIR}/tmp/booto-src/bin/booto" "${ROOTFS_DIR}/usr/local/bin/booto"
+rm -rf "${ROOTFS_DIR}/tmp/booto-src"
+in_chroot apt-get -y purge ${BUILD_DEPS}
+in_chroot apt-get -y --purge autoremove
+in_chroot apt-get clean
+if in_chroot ldd /usr/local/bin/booto | grep -q "not found"; then
+    in_chroot ldd /usr/local/bin/booto
+    echo "[-] Error: booto needs a library the live system does not ship."
+    exit 1
+fi
+# Unmount before the rootfs is squashed, or the host's /proc, /sys and /dev end up in the image.
+for fs in dev sys proc; do umount "${ROOTFS_DIR}/${fs}"; done
+trap - EXIT
+
+echo "[+] Step 3/6: Installing Booto data files into rootfs..."
 install -d -m 755 "${ROOTFS_DIR}/usr/share/booto/rules"
 install -m 644 "${REPO_ROOT}"/rules/*.json "${REPO_ROOT}"/rules/*.json.sha256 "${ROOTFS_DIR}/usr/share/booto/rules/"
 install -m 644 "${REPO_ROOT}/LICENSE" "${ROOTFS_DIR}/usr/share/booto/LICENSE"
