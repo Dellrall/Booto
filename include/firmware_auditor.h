@@ -22,6 +22,7 @@ typedef enum {
     FW_CHECK_PLATFORM_KEY,     /* "Platform key" */
     FW_CHECK_TEST_KEYS,        /* "No test keys (PKfail)" */
     FW_CHECK_DBX,              /* "Revocation list (dbx)" */
+    FW_CHECK_DB_2023,          /* "2023 Microsoft CA in db" */
     FW_CHECK_MOK,              /* "Shim MOK keys known" */
     FW_CHECK_BOOT_ENTRY,       /* "No pending BootNext" */
     FW_CHECK_IOMMU,            /* "IOMMU described (DMAR/IVRS)" */

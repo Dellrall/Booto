@@ -427,7 +427,14 @@ No key marked "DO NOT TRUST" or "DO NOT SHIP" (vendor test keys) in PK, KEK
 or db.
 .TP
 .B Revocation list (dbx)
-The dbx is not empty.
+The dbx is not empty and holds every x64 hash in Microsoft's latest dbx list
+(the built-in rules). A missing hash means the dbx is out of date: update it
+with fwupdmgr or Windows Update.
+.TP
+.B 2023 Microsoft CA in db
+If db trusts Microsoft at all, it holds one of the 2023 Microsoft UEFI CAs.
+The 2011 CAs expire in 2026; a db without the 2023 ones cannot boot newly
+signed Windows or shim builds. Passes when db holds only the owner's keys.
 .TP
 .B Shim MOK keys known
 Every machine-owner key belongs to a known distribution; binary hashes

@@ -6,6 +6,7 @@
 #include "firmware_auditor.h"
 #include "crypto_utils.h"
 #include "disk_mount.h"
+#include "rules_loader.h"
 
 #include <dirent.h>
 #include <fcntl.h>
@@ -94,7 +95,7 @@ static void write_file(const char *path, const void *data, size_t len) {
 
 /* efivarfs layout: 4-byte attributes, then the payload. */
 static void write_var(const char *name, const char *guid, const uint8_t *data, size_t len) {
-    uint8_t buf[4096];
+    static uint8_t buf[65536];
     static const uint8_t attrs[4] = { 0x07, 0x00, 0x00, 0x00 };
     if (len > sizeof(buf) - 4) return;
     memcpy(buf, attrs, 4);
@@ -155,6 +156,25 @@ static void write_dbx(size_t hashes) {
     uint8_t hash[32], list[1024];
     memset(hash, 0x5a, sizeof(hash));
     size_t len = hashes ? append_siglist(list, 0, T_SHA256, hash, sizeof(hash), hashes) : 0;
+    write_var("dbx", IMAGE_GUID, list, len);
+}
+
+/* dbx holding every x64 hash in the built-in Microsoft list: an up-to-date machine. */
+static void write_dbx_ms(void) {
+    static uint8_t list[65536];
+    const rules_dbx_set_t *ms = NULL;
+    if (rules_get_dbx(&ms) != BOOTO_OK) return;
+    size_t len = 0;
+    for (int i = 0; i < ms->count; i++) {
+        if (!strstr(ms->entries[i].description, "arch x64;")) continue;
+        uint8_t h[32];
+        for (int k = 0; k < 32; k++) {
+            unsigned v;
+            sscanf(ms->entries[i].sha256 + 2 * k, "%2x", &v);
+            h[k] = (uint8_t)v;
+        }
+        len = append_siglist(list, len, T_SHA256, h, sizeof(h), 1);
+    }
     write_var("dbx", IMAGE_GUID, list, len);
 }
 
@@ -340,7 +360,7 @@ static void build_good_machine(void) {
     write_cert_var("PK", GLOBAL_GUID, "Contoso PK", NULL);
     write_cert_var("KEK", GLOBAL_GUID, "Contoso KEK", NULL);
     write_cert_var("db", IMAGE_GUID, "Contoso CA", NULL);
-    write_dbx(3);
+    write_dbx_ms();
     write_cert_var("MokListRT", SHIM_GUID, "Fedora Secure Boot CA", NULL);
     write_u16_var("BootOrder", 1);
     write_boot_option(1, "Fedora", "\\EFI\\fedora\\shimx64.efi", 0);
@@ -368,11 +388,33 @@ static void test_good_machine(void) {
     ASSERT_INT_EQ(r.fail_count, 0, "no failures");
     ASSERT_INT_EQ(r.unknown_count, 0, "no unknowns");
     ASSERT_TRUE(strstr(r.checks[FW_CHECK_PLATFORM_KEY].detail, "Contoso PK") != NULL, "PK CN in detail");
-    ASSERT_STR_EQ(r.checks[FW_CHECK_DBX].detail, "3 revoked hashes.", "dbx count");
+    ASSERT_TRUE(strstr(r.checks[FW_CHECK_DBX].detail, "all ") != NULL, "dbx has every Microsoft revocation");
     ASSERT_TRUE(strstr(r.checks[FW_CHECK_IOMMU].detail, "DMAR") != NULL, "DMAR named");
     ASSERT_TRUE(strstr(r.checks[FW_CHECK_IOMMU].detail, "is set") != NULL, "opt-in flag reported");
     ASSERT_TRUE(!r.chipset_unconfirmed, "modern chipset needs no help request");
     TEST_PASS("test_good_machine");
+}
+
+static void test_dbx_freshness_and_db_2023(void) {
+    TEST_START("test_dbx_freshness_and_db_2023");
+    firmware_report_t r;
+
+    build_good_machine();
+    write_dbx(3);
+    write_cert_var("db", IMAGE_GUID, "Microsoft Corporation UEFI CA 2011", NULL);
+    firmware_audit(&g_paths, &r);
+    remove_tree(g_root);
+    ASSERT_INT_EQ(r.checks[FW_CHECK_DBX].result, FW_RESULT_FAIL, "stale dbx fails");
+    ASSERT_TRUE(strstr(r.checks[FW_CHECK_DBX].detail, "3 revoked hashes, but ") != NULL, "stale dbx detail");
+    ASSERT_INT_EQ(r.checks[FW_CHECK_DB_2023].result, FW_RESULT_FAIL, "2011-only db fails");
+
+    build_good_machine();
+    write_cert_var("db", IMAGE_GUID, "Microsoft UEFI CA 2023", NULL);
+    firmware_audit(&g_paths, &r);
+    remove_tree(g_root);
+    ASSERT_INT_EQ(r.checks[FW_CHECK_DB_2023].result, FW_RESULT_PASS, "2023 CA passes");
+    ASSERT_STR_EQ(r.checks[FW_CHECK_DB_2023].detail, "db holds a 2023 Microsoft UEFI CA.", "2023 detail");
+    TEST_PASS("test_dbx_freshness_and_db_2023");
 }
 
 static void test_mok_list(void) {
@@ -934,6 +976,7 @@ static void test_spi_analyze(void) {
 int main(void) {
     printf("\n--- Running Firmware Auditor Tests ---\n");
     test_good_machine();
+    test_dbx_freshness_and_db_2023();
     test_pkfail();
     test_mok_list();
     test_boot_entry();

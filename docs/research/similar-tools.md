@@ -50,7 +50,7 @@ Research date: 2026-11-03. Every claim below links its primary source. Three sur
 | 5 | Boot-chain anomaly checks | done: shadow loaders, BlackLotus ESP layout, MOK list, SBAT level, Authenticode hash, Microsoft signer check, Windows boot files (`winload`, `ntoskrnl`, drivers). Still to do: judging non-Microsoft signers (distro shim and GRUB) |
 | 6 | Persistence sweep | done: systemd, cron, rc.local, udev, modprobe.d, shell profiles, `authorized_keys`. `modules-load.d` not needed: modprobe only loads from `/lib/modules`, which the LKM scan walks in full |
 | 7 | Read-only disks, before/after hashes, case metadata | case metadata (examiner) done; a disk is set read-only (`BLKROSET`) when Booto mounts it. Still to do: read-only for every disk at boot, before/after hashes |
-| 8 | Cheap HSI gaps | BIOSWE, BLE and SMM_BWP checked. Still to do: 2023 Microsoft CA in db, dbx freshness |
+| 8 | Cheap HSI gaps | done: BIOSWE, BLE, SMM_BWP, 2023 Microsoft CA in db, dbx freshness (every x64 hash in Microsoft's list) |
 
 Also shipped since: a boot chain baseline (`baseline.h`), BitLocker volume detection (reported as encrypted, not scanned), LUKS unlock, LVM in LUKS (branch `fix/luks-lvm-fs`).
 
@@ -370,8 +370,8 @@ HSI level is the "needed to meet" level from https://fwupd.github.io/libfwupdplu
 | Uefi.SecureBoot (1) | SecureBoot enabled | "Secure Boot on" | ✅ |
 | — | SetupMode = 0 | "Setup mode off" | ➕ |
 | Uefi.Pk (1) | PK is not a test key ("DO NOT TRUST - AMI Test PK") | "Platform key" + "No test keys (PKfail)", which scans PK, KEK and db for DO NOT TRUST/SHIP | ✅ (Booto broader) |
-| Uefi.Db (MsUefi/Production) | db holds Microsoft UEFI CA 2023 | — | ❌ |
-| uefi-dbx plugin (device version, not an HSI ID) | dbx up to date (last-entry checksum vs LVFS); ESP binaries not blocked | "Revocation list (dbx)": non-empty count only | ◐ |
+| Uefi.Db (MsUefi/Production) | db holds Microsoft UEFI CA 2023 | "2023 Microsoft CA in db" | ✅ |
+| uefi-dbx plugin (device version, not an HSI ID) | dbx up to date (last-entry checksum vs LVFS); ESP binaries not blocked | "Revocation list (dbx)": every x64 hash in Microsoft's list present | ✅ |
 | Uefi.BootserviceVars (1) | Boot-service vars not readable at runtime | — | ❌ |
 | Uefi.MemoryProtection / NxCompat (3) | NX bootloader + firmware memory attributes | — | ❌ |
 | Spi.Bioswe (1) | BIOS_CNTL.BIOSWE clear | Not read (only BLE/SMM_BWP) | ❌ |
