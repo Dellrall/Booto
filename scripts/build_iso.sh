@@ -217,7 +217,6 @@ mmd -i "${WORK_DIR}/efiboot.img" ::/EFI ::/EFI/BOOT ::/boot ::/boot/grub
 mcopy -i "${WORK_DIR}/efiboot.img" "${CD_DIR}/EFI/BOOT/BOOTX64.EFI" ::/EFI/BOOT/BOOTX64.EFI
 mcopy -i "${WORK_DIR}/efiboot.img" "${CD_DIR}/EFI/BOOT/grubx64.efi" ::/EFI/BOOT/grubx64.efi
 mcopy -i "${WORK_DIR}/efiboot.img" "${CD_DIR}/boot/grub/grub.cfg" ::/boot/grub/grub.cfg
-cp "${WORK_DIR}/efiboot.img" "${CD_DIR}/boot/grub/efiboot.img"
 
 # Create BIOS GRUB bootloader if i386-pc is available
 BIOS_FLAG=""
@@ -236,38 +235,35 @@ fi
 
 (cd "${CD_DIR}" && find live -type f -print0 | sort -z | xargs -0 sha256sum > sha256sum.txt)
 
-# Create standalone hybrid ISO image (Universal Dual BIOS + UEFI)
+# Hybrid ISO with a real GPT: partition 1 is the ISO9660 data, partition 2 the FAT ESP (Ubuntu's layout).
+# A raw-written USB then boots on firmware that ignores El Torito on disks, and booto-storage can add
+# BOOTO_DATA in the free space after it. -isohybrid-gpt-basdat wrote no table with --grub2-mbr.
+BIOS_ARGS=()
 if [ -f "${CD_DIR}/boot/grub/bios.img" ]; then
     echo "[+] Building Dual BIOS + UEFI Hybrid ISO..."
     # --grub2-mbr: MBR boot code so BIOS can boot the ISO raw-written to a USB disk (El Torito alone only boots as CD).
-    xorriso -as mkisofs \
-        -iso-level 3 \
-        -full-iso9660-filenames \
-        -volid "BOOTO_LIVE" \
-        --modification-date="${ISO_DATE}" \
-        -output "${OUTPUT_DIR}/${ISO_NAME}" \
-        --grub2-mbr /usr/lib/grub/i386-pc/boot_hybrid.img --grub2-boot-info \
-        -b boot/grub/bios.img \
-        -c boot.catalog \
-        -no-emul-boot -boot-load-size 4 -boot-info-table \
-        --eltorito-alt-boot \
-        -e boot/grub/efiboot.img \
-        -no-emul-boot \
-        -isohybrid-gpt-basdat \
-        "${CD_DIR}"
+    BIOS_ARGS=(--grub2-mbr /usr/lib/grub/i386-pc/boot_hybrid.img
+               -b boot/grub/bios.img -no-emul-boot -boot-load-size 4 -boot-info-table --grub2-boot-info
+               -eltorito-alt-boot)
 else
-    echo "[+] Building UEFI Hybrid ISO with FAT efiboot..."
-    xorriso -as mkisofs \
-        -iso-level 3 \
-        -full-iso9660-filenames \
-        -volid "BOOTO_LIVE" \
-        --modification-date="${ISO_DATE}" \
-        -output "${OUTPUT_DIR}/${ISO_NAME}" \
-        -e boot/grub/efiboot.img \
-        -no-emul-boot \
-        -isohybrid-gpt-basdat \
-        "${CD_DIR}"
+    echo "[+] Building UEFI Hybrid ISO..."
 fi
+xorriso -as mkisofs \
+    -iso-level 3 \
+    -full-iso9660-filenames \
+    -volid "BOOTO_LIVE" \
+    --modification-date="${ISO_DATE}" \
+    -output "${OUTPUT_DIR}/${ISO_NAME}" \
+    -partition_offset 16 \
+    --mbr-force-bootable \
+    -append_partition 2 28732ac11ff8d211ba4b00a0c93ec93b "${WORK_DIR}/efiboot.img" \
+    -appended_part_as_gpt \
+    -iso_mbr_part_type a2a0d0ebe5b9334487c068b6b72699c7 \
+    -c boot.catalog \
+    "${BIOS_ARGS[@]}" \
+    -e '--interval:appended_partition_2:::' \
+    -no-emul-boot \
+    "${CD_DIR}"
 
 # Generate SHA-256 Checksum Seal
 cd "${OUTPUT_DIR}"
