@@ -79,6 +79,10 @@ if in_chroot ldd /usr/local/bin/booto | grep -q "not found"; then
     echo "[-] Error: booto needs a library the live system does not ship."
     exit 1
 fi
+# Every program booto runs at scan time (grep execlp/execvp in src/ when adding one).
+for tool in bash cryptsetup vgchange lvs pvs xz gzip zstd lz4 bzip2 flashrom systemctl man vi nano; do
+    in_chroot sh -c "command -v ${tool}" > /dev/null || { echo "[-] Error: live system lacks ${tool}."; exit 1; }
+done
 # Unmount before the rootfs is squashed, or the host's /proc, /sys and /dev end up in the image.
 for fs in dev sys proc; do umount "${ROOTFS_DIR}/${fs}"; done
 trap - EXIT
