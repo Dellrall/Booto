@@ -81,6 +81,19 @@ const char *forensic_scan_status_str(scan_status_t s);
 const char *forensic_scan_verdict_str(scan_verdict_t v);
 /* Threats found by one module. */
 int forensic_scan_module_threats(const forensic_scan_report_t *r, scan_module_id_t id);
+/* One finding of any engine, flattened for listing. Engines without a severity report CRITICAL. */
+typedef struct {
+    scan_module_id_t engine;
+    booto_severity_t severity;
+    char name[96];
+    char where[300];    /* file path, or device and LBA */
+    char rule[160];     /* rule id, matched pattern, symbol or reason */
+    char hash[80];      /* "" when none */
+    char detail[256];
+} scan_finding_t;
+/* Findings stored in r (engine order); the i-th is copied by forensic_scan_finding, false past the end. */
+int forensic_scan_finding_count(const forensic_scan_report_t *r);
+bool forensic_scan_finding(const forensic_scan_report_t *r, int i, scan_finding_t *out);
 /* Fill a case summary from a finished report (timestamp = now UTC).
  * case_id NULL: CASE-<UTC time>; examiner NULL: $USER, else "unknown". */
 void forensic_scan_fill_case_summary(const forensic_scan_report_t *r, const char *case_id, const char *examiner,
