@@ -82,16 +82,24 @@ static void check_file(winboot_scan_result_t *res, const char *path, bool core) 
     }
 }
 
+static const char *const CORE[] = { "winload.efi", "winload.exe", "winresume.efi", "winresume.exe",
+                                   "ntoskrnl.exe", "hal.dll", "ci.dll" };
+
+void winboot_each_core_file(const char *root, void (*fn)(const char *path, void *user), void *user) {
+    char s32[512], path[512];
+    if (!root || !fn || !system32(root, s32, sizeof(s32))) return;
+    for (size_t i = 0; i < sizeof(CORE) / sizeof(CORE[0]); i++)
+        if (ci_child(s32, CORE[i], path, sizeof(path))) fn(path, user);
+}
+
 booto_error_t winboot_scan_rootfs(const char *root, winboot_scan_result_t *res) {
     if (!root || !res) return BOOTO_ERR_INVALID_ARG;
     memset(res, 0, sizeof(*res));
     char s32[512], path[512];
     if (!system32(root, s32, sizeof(s32))) return BOOTO_ERR_NOT_FOUND;
 
-    static const char *const core[] = { "winload.efi", "winload.exe", "winresume.efi", "winresume.exe",
-                                        "ntoskrnl.exe", "hal.dll", "ci.dll" };
-    for (size_t i = 0; i < sizeof(core) / sizeof(core[0]); i++)
-        if (ci_child(s32, core[i], path, sizeof(path))) check_file(res, path, true);
+    for (size_t i = 0; i < sizeof(CORE) / sizeof(CORE[0]); i++)
+        if (ci_child(s32, CORE[i], path, sizeof(path))) check_file(res, path, true);
 
     char drv[512];
     if (!ci_child(s32, "drivers", drv, sizeof(drv))) return BOOTO_OK;

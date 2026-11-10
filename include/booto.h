@@ -65,6 +65,8 @@ typedef struct {
     char target_dev[128];      /**< Raw block device to scan (-t) */
     char target_rootfs[512];   /**< Already-available rootfs directory to inspect (-s) */
     char persistence_dir[512]; /**< Case report output directory (-p) */
+    char baseline_out[512];    /**< Write the boot chain hash list here (--baseline) */
+    char baseline_in[512];     /**< Compare the boot chain with this hash list (--compare) */
 } booto_context_t;
 
 /**

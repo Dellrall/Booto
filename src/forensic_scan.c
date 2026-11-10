@@ -14,6 +14,7 @@
 #include "logger.h"
 #include "quarantine.h"
 #include "inspect.h"
+#include "baseline.h"
 
 #include <dirent.h>
 #include <inttypes.h>
@@ -26,6 +27,21 @@
 #define SCAN_MOUNT_POINT "/tmp/booto_scan_target"
 #define ESP_MOUNT_POINT "/tmp/booto_esp_target"
 #define MBR_EXPORT_BYTES (1024 * 1024)  /* MBR plus the post-MBR gap where bootkits hide their stage 2 */
+
+static baseline_t *g_baseline;   /* NULL: no boot chain hash list wanted */
+
+void forensic_scan_set_baseline(baseline_t *b) {
+    g_baseline = b;
+}
+
+typedef struct { baseline_t *b; size_t root_len; } core_ctx_t;
+
+static void add_core(const char *path, void *user) {
+    const core_ctx_t *c = user;
+    char label[BASELINE_LABEL_MAX];
+    snprintf(label, sizeof(label), "root%s", path + c->root_len);
+    baseline_add_file(c->b, label, path);
+}
 
 static const char *err_name(booto_error_t e) {
     switch (e) {
@@ -216,6 +232,7 @@ static void run_uefi(forensic_scan_report_t *out, const char *target_dev, bool h
         memset(&out->uefi, 0, sizeof(out->uefi));
         e = uefi_inspect_esp_directory(ESP_MOUNT_POINT, &out->uefi);
         if (e == BOOTO_OK) export_uefi(out, q, &out->uefi, ESP_MOUNT_POINT);
+        if (g_baseline) baseline_add_tree(g_baseline, "esp", ESP_MOUNT_POINT);
         booto_error_t ue = disk_unmount(ESP_MOUNT_POINT);
         if (ue != BOOTO_OK) LOG_WARN("Failed to unmount %s: %s", ESP_MOUNT_POINT, err_name(ue));
         snprintf(out->esp_dev, sizeof(out->esp_dev), "%.127s", esp);
@@ -347,6 +364,16 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
             } else {
                 set_result(out, SCAN_MOD_WINBOOT, e);
             }
+        }
+    }
+
+    if (g_baseline) {
+        if (target_dev) baseline_add_device(g_baseline, "disk/first-1MiB", target_dev, MBR_EXPORT_BYTES);
+        if (have_root) {
+            snprintf(path, sizeof(path), "%.256s/boot", root);
+            baseline_add_tree(g_baseline, "root/boot", path);
+            core_ctx_t c = { g_baseline, strlen(root) };
+            if (windows) winboot_each_core_file(root, add_core, &c);
         }
     }
 

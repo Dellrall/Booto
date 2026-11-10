@@ -15,6 +15,7 @@
 #include "pkg_integrity.h"
 #include "inspect.h"
 #include "windows_boot.h"
+#include "baseline.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -67,6 +68,9 @@ typedef void (*forensic_scan_progress_cb)(int step, int total, const char *msg, 
 booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, const bool *enabled,
                                 const char *quarantine_dir, forensic_scan_progress_cb cb, void *user,
                                 forensic_scan_report_t *out);
+/* b non-NULL: later scans also hash the boot chain into b (first 1 MiB of the device, <root>/boot, an auto-found
+ * ESP, Windows core files) before unmounting. NULL turns it off. Not thread-safe; set it before the scan. */
+void forensic_scan_set_baseline(baseline_t *b);
 const char *forensic_scan_module_name(scan_module_id_t id);
 const char *forensic_scan_status_str(scan_status_t s);
 const char *forensic_scan_verdict_str(scan_verdict_t v);
