@@ -143,6 +143,23 @@ static void test_fs_magic_probing(void) {
         ASSERT_STR_EQ(fs_type, "ntfs", "NTFS filesystem type");
     }
 
+    // 3b. BitLocker volume: NTFS OEM ID replaced
+    {
+        FILE *fp = fopen(tmp_img, "wb");
+        ASSERT_TRUE(fp != NULL, "Create test probe image");
+        uint8_t bl[512] = {0};
+        memcpy(&bl[3], "-FVE-FS-", 8);
+        bl[510] = 0x55;
+        bl[511] = 0xAA;
+        fwrite(bl, 1, sizeof(bl), fp);
+        fclose(fp);
+
+        booto_error_t err = disk_probe_fs_magic(tmp_img, fs_type, sizeof(fs_type), label, sizeof(label));
+        ASSERT_INT_EQ(err, BOOTO_OK, "BitLocker probe return");
+        ASSERT_STR_EQ(fs_type, "BitLocker", "BitLocker detected");
+        ASSERT_STR_EQ(label, "Encrypted Volume (BitLocker)", "BitLocker label");
+    }
+
     // 4. Test XFS Superblock Probing
     {
         FILE *fp = fopen(tmp_img, "wb");
