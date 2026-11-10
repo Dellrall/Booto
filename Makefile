@@ -1,7 +1,7 @@
 CC ?= gcc
 CFLAGS ?= -std=c11 -Wall -Wextra -Wpedantic -Werror -Wshadow -Wformat=2 -Wconversion -fstack-protector-strong -O2 -D_FORTIFY_SOURCE=2 -fPIE -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE -pthread
 LDFLAGS ?= -pie -Wl,-z,relro,-z,now -pthread
-LDLIBS = -lcrypto -lsqlite3
+LDLIBS = -lcrypto -lsqlite3 -lyara
 
 GIT_VERSION := $(shell git describe --tags --always 2>/dev/null | sed 's/^v//')
 VERSION ?= $(if $(GIT_VERSION),$(GIT_VERSION),0.0.0-unknown)
@@ -27,6 +27,7 @@ SOURCES = $(SRCDIR)/logger.c \
           $(SRCDIR)/forensic_scan.c \
           $(SRCDIR)/disk_mount.c \
           $(SRCDIR)/rules_loader.c \
+          $(SRCDIR)/yara_scan.c \
           $(SRCDIR)/firmware_auditor.c \
           $(SRCDIR)/quarantine.c \
           $(SRCDIR)/inspect.c \

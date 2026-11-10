@@ -42,7 +42,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential clang libncurses-dev libblkid-dev libudev-dev libssl-dev libsqlite3-dev cpio python3
+          sudo apt-get install -y build-essential clang libncurses-dev libblkid-dev libudev-dev libssl-dev libsqlite3-dev libyara-dev cpio python3
 
       - name: Build with Makefile (${{ matrix.compiler }})
         env:
@@ -76,7 +76,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential clang libncurses-dev libblkid-dev libudev-dev libssl-dev libsqlite3-dev
+          sudo apt-get install -y build-essential clang libncurses-dev libblkid-dev libudev-dev libssl-dev libsqlite3-dev libyara-dev
 
       - name: Run ASan & UBSan Test Suite
         run: make asan
@@ -96,7 +96,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential lcov libncurses-dev libblkid-dev libudev-dev libssl-dev libsqlite3-dev
+          sudo apt-get install -y build-essential lcov libncurses-dev libblkid-dev libudev-dev libssl-dev libsqlite3-dev libyara-dev
 
       - name: Run Coverage Evaluation
         run: make coverage
@@ -125,6 +125,7 @@ jobs:
                    --suppress=missingIncludeSystem \
                    --suppress=unusedFunction \
                    --suppress=unmatchedSuppression \
+                   --suppress=unknownMacro:src/yara_scan.c \
                    --error-exitcode=1 \
                    -I include \
                    src/
@@ -155,7 +156,7 @@ jobs:
       - name: Install Valgrind
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential valgrind libncurses-dev libblkid-dev libssl-dev libsqlite3-dev
+          sudo apt-get install -y build-essential valgrind libncurses-dev libblkid-dev libssl-dev libsqlite3-dev libyara-dev
 
       - name: Build Project
         run: make all

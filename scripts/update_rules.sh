@@ -296,6 +296,11 @@ if [ -n "${BOOTO_RULES_SIGNING_KEY:-}" ]; then
         openssl pkeyutl -sign -rawin -inkey "${BOOTO_RULES_SIGNING_KEY}" \
             -in "${RULES_DIR}/${f}.json" -out "${RULES_DIR}/${f}.json.sig"
     done
+    # bootkits.yar is written by hand, not generated; re-sign it with the pack.
+    if [ -f "${RULES_DIR}/bootkits.yar" ]; then
+        openssl pkeyutl -sign -rawin -inkey "${BOOTO_RULES_SIGNING_KEY}" \
+            -in "${RULES_DIR}/bootkits.yar" -out "${RULES_DIR}/bootkits.yar.sig"
+    fi
 else
     echo "[!] BOOTO_RULES_SIGNING_KEY not set: existing .sig files kept; changed rules will be refused."
 fi

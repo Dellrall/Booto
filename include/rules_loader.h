@@ -113,7 +113,11 @@ booto_error_t rules_get_lkm(const rules_lkm_set_t **out); /* lkm_rootkit_signatu
 booto_error_t rules_get_mbr(const rules_mbr_set_t **out); /* mbr_bootkit_signatures.json */
 booto_error_t rules_get_ioc(const rules_ioc_set_t **out); /* rootkit_file_iocs.json */
 
-/* Tests: forget cached sets so the next rules_get_* reloads. */
+/* Find `file` on the rules search path, read it (NUL-terminated, at most 1 MiB) and check its "<file>.sig".
+ * BOOTO_ERR_NOT_FOUND when absent everywhere; BOOTO_ERR_CORRUPT_DATA when unsigned or altered. Caller frees *buf. */
+booto_error_t rules_read_signed(const char *file, char **buf, size_t *len, char *path, size_t path_cap);
+
+/* Tests: forget cached sets (and the YARA rules) so the next rules_get_* reloads. */
 void rules_reset_cache(void);
 
 /* Tests: trust this Ed25519 public key instead of the release key; NULL restores it. Resets the cache. */
