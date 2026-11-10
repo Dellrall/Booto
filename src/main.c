@@ -73,6 +73,9 @@ static void print_help(const char *prog_name) {
     printf("                             dump the SPI flash read-only with flashrom (slower; off by default)\n");
     printf("  -q, --quarantine           CLI, with -p: copy flagged files into an encrypted ZIP (password\n");
     printf("                             \"infected\") under <dir>/quarantine for analysis elsewhere\n");
+    printf("      --baseline <file>      CLI: also write the boot chain hashes (first 1 MiB, /boot, ESP,\n");
+    printf("                             Windows core files) to <file>; run it on a known-good machine\n");
+    printf("      --compare <file>       CLI: list what changed in the boot chain since that baseline\n");
     printf("  -V, --verbose              Enable verbose/debug logging\n\n");
     printf("CLI exit codes:\n");
     printf("  0  CLEAN       every enabled engine ran and found nothing\n");
@@ -175,17 +178,32 @@ static int run_cli(booto_context_t *ctx) {
             return EXIT_INCOMPLETE;
         }
     }
+    bool want_hashes = ctx->baseline_out[0] || ctx->baseline_in[0];
+    baseline_t *old = ctx->baseline_in[0] ? calloc(1, sizeof(*old)) : NULL;
+    baseline_t *cur = want_hashes ? calloc(1, sizeof(*cur)) : NULL;
     forensic_scan_report_t *rep = calloc(1, sizeof(*rep));
-    if (!rep) {
+    if (!rep || (want_hashes && !cur) || (ctx->baseline_in[0] && !old)) {
         LOG_ERROR("Out of memory allocating scan report");
+        free(rep), free(cur), free(old);
         return EXIT_INCOMPLETE;
     }
+    if (old) {
+        booto_error_t le = baseline_load(ctx->baseline_in, old);
+        if (le != BOOTO_OK) {
+            LOG_ERROR("Cannot read baseline %s: %s", ctx->baseline_in,
+                      le == BOOTO_ERR_CORRUPT_DATA ? "not a Booto baseline file" : "unreadable");
+            free(rep), free(cur), free(old);
+            return EXIT_INCOMPLETE;
+        }
+    }
+    forensic_scan_set_baseline(cur);
     booto_error_t e = forensic_scan_run(ctx->target_dev[0] ? ctx->target_dev : NULL,
                                         ctx->target_rootfs[0] ? ctx->target_rootfs : NULL,
                                         NULL, qdir[0] ? qdir : NULL, scan_progress, NULL, rep);
+    forensic_scan_set_baseline(NULL);
     if (e != BOOTO_OK) {
         LOG_ERROR("Scan could not run (error %d)", e);
-        free(rep);
+        free(rep), free(cur), free(old);
         return EXIT_INCOMPLETE;
     }
 
@@ -213,6 +231,21 @@ static int run_cli(booto_context_t *ctx) {
                rep->quarantined, rep->quarantine_zip);
     else if (rep->quarantined < 0)
         printf("\nQuarantine: the archive could not be finished; see the log\n");
+
+    if (cur && cur->truncated) printf("\nBaseline: more than %d boot files; the rest were not hashed\n", BASELINE_MAX);
+    if (ctx->baseline_out[0]) {
+        if (baseline_write(cur, ctx->baseline_out) == BOOTO_OK)
+            printf("\nBaseline: %d boot file hash(es) written to %s\n", cur->count, ctx->baseline_out);
+        else
+            fprintf(stderr, "Failed to write baseline %s\n", ctx->baseline_out);
+    }
+    if (old) {
+        printf("\nBoot chain since baseline %s\n", ctx->baseline_in);
+        int n = baseline_compare(old, cur, stdout);
+        if (n == 0) printf("  no change (%d file(s) compared)\n", cur->count);
+        else printf("  %d change(s): expected after an OS or boot loader update, suspicious otherwise\n", n);
+    }
+    free(cur), free(old);
 
     if (ctx->expert_firmware) run_expert_firmware(ctx->persistence_dir);
     if (ctx->persistence_dir[0]) write_reports(rep, ctx->persistence_dir);
@@ -257,6 +290,8 @@ int main(int argc, char *argv[]) {
         {"verbose",         no_argument,       0, 'V'},
         {"expert-firmware", no_argument,       0, 'x'},
         {"quarantine",      no_argument,       0, 'q'},
+        {"baseline",        required_argument, 0, 'B'},
+        {"compare",         required_argument, 0, 'C'},
         {0, 0, 0, 0}
     };
 
@@ -311,6 +346,12 @@ int main(int argc, char *argv[]) {
                 break;
             case 'q':
                 ctx.quarantine = true;
+                break;
+            case 'B':
+                snprintf(ctx.baseline_out, sizeof(ctx.baseline_out), "%s", optarg);
+                break;
+            case 'C':
+                snprintf(ctx.baseline_in, sizeof(ctx.baseline_in), "%s", optarg);
                 break;
             default:
                 print_help(argv[0]);

@@ -35,6 +35,8 @@ bool winboot_is_windows_root(const char *root);
 /* Core files (winload, winresume, ntoskrnl, hal, ci) must carry an intact signature chaining to Microsoft;
  * a driver in System32/drivers is flagged when its embedded signature is broken. */
 booto_error_t winboot_scan_rootfs(const char *root, winboot_scan_result_t *res);
+/* Calls fn with the path of each core file present (winload, winresume, ntoskrnl, hal, ci). */
+void winboot_each_core_file(const char *root, void (*fn)(const char *path, void *user), void *user);
 
 #ifdef __cplusplus
 }

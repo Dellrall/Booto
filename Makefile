@@ -31,6 +31,7 @@ SOURCES = $(SRCDIR)/logger.c \
           $(SRCDIR)/quarantine.c \
           $(SRCDIR)/inspect.c \
           $(SRCDIR)/windows_boot.c \
+          $(SRCDIR)/baseline.c \
           $(SRCDIR)/tui/terminal.c \
           $(SRCDIR)/tui/evdev_ptr.c \
           $(SRCDIR)/tui/wm.c \

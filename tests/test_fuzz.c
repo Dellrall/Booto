@@ -11,6 +11,7 @@
 #include "uefi_analyzer.h"
 #include "initramfs_auditor.h"
 #include "mbr_auditor.h"
+#include "baseline.h"
 #include "logger.h"
 
 #include <stdint.h>
@@ -348,6 +349,12 @@ static void target_initramfs(const uint8_t *buf, size_t len) {
 
 /* ---- Tests: each asserts its seed parses deeply, then fuzzes it ---- */
 
+static baseline_t g_baseline;
+
+static void target_baseline(const uint8_t *buf, size_t len) {
+    (void)baseline_parse((const char *)buf, len, &g_baseline);
+}
+
 static uint8_t g_seed_a[FUZZ_MAX_LEN];
 static uint8_t g_seed_b[FUZZ_MAX_LEN];
 
@@ -446,6 +453,23 @@ static void test_fuzz_initramfs_parser(void) {
     TEST_PASS("test_fuzz_initramfs_parser");
 }
 
+static void test_fuzz_baseline_parser(void) {
+    TEST_START("test_fuzz_baseline_parser");
+    static const char text[] =
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  disk/first-1MiB\n"
+        "unreadable  esp/EFI/BOOT/BOOTX64.EFI\n"
+        "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210  root/boot/vmlinuz\n";
+    size_t len = sizeof(text) - 1;
+    memcpy(g_seed_a, text, len);
+    ASSERT_INT_EQ(baseline_parse(text, len, &g_baseline), BOOTO_OK, "Baseline seed parses");
+    ASSERT_INT_EQ(g_baseline.count, 3, "Baseline seed entries");
+
+    static const fuzz_region_t hot[] = {{0, 70}, {80, 40}};
+    fuzz_seed_t seed = {g_seed_a, len, hot, 2};
+    ASSERT_TRUE(fuzz_run(target_baseline, &seed, 1, 0xA0761D6478BD642FULL), "Baseline fuzz run");
+    TEST_PASS("test_fuzz_baseline_parser");
+}
+
 int main(void) {
     logger_init(LOG_LEVEL_CRITICAL, NULL); // parsers log per call; keep 9k iterations quiet and fast
     printf("\n--- Running Deterministic Parser Mutation Fuzzer (%d iterations/parser) ---\n", FUZZ_ITERATIONS);
@@ -455,6 +479,7 @@ int main(void) {
     test_fuzz_vbr_auditor();
     test_fuzz_gap_auditor();
     test_fuzz_initramfs_parser();
+    test_fuzz_baseline_parser();
     TEST_SUMMARY();
     return 0;
 }

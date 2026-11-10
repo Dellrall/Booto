@@ -144,6 +144,29 @@ Each file is stored as
 .I <path>.malware
 so it cannot run by accident when the ZIP is opened elsewhere.
 .TP
+.BI \-\-baseline " file"
+CLI mode. Also write the SHA\-256 of the boot chain to
+.IR file :
+the first 1 MiB of the device (MBR, VBR and the gap after the MBR), every file under
+.IR /boot ,
+every file on an auto\-found EFI system partition, and the Windows core boot files.
+One
+.RI \(dq hash "  " label \(dq
+line per file, like
+.BR sha256sum (1).
+Run it on a machine you trust, and keep the file on the report partition.
+.TP
+.BI \-\-compare " file"
+CLI mode. Hash the same files and list each one that is
+.BR changed ,
+.B missing
+or
+.B new
+since the baseline in
+.IR file .
+An OS or boot loader update explains most changes; anything else is worth a look.
+The list does not change the verdict or the exit code.
+.TP
 .BR \-V ", " \-\-verbose
 Show debug messages.
 .SH TUI
