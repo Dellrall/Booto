@@ -22,6 +22,13 @@ booto \- live forensic scanner for Linux rootkits and bootkits
 inspects a suspect machine's disk from a separate, trusted live system.
 It never runs code from the target: block devices are mounted read-only,
 and every engine reads files and sectors as plain data.
+On the live USB a udev rule also sets every disk except the Booto USB
+read-only as soon as it appears
+.RB ( "blockdev \-\-setro" ;
+undo for one device with
+.BR "blockdev \-\-setrw" ).
+Reports record the SHA-256 of the target's first 1 MiB before and after the
+scan, so they show the scan changed nothing there.
 .PP
 Without
 .BR \-c ,

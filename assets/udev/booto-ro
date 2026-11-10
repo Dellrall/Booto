@@ -1,0 +1,14 @@
+#!/bin/sh
+# booto-ro DEVNODE: set a disk or partition read-only unless it is on the Booto USB.
+# A whole disk must be skipped too: BLKROSET on /dev/sdb also makes /dev/sdb2 read-only.
+dev=$1
+[ -b "$dev" ] || exit 0
+# The live medium's disk (dd-written ISO); empty with toram or before live-boot mounts it.
+med=$(findmnt -no SOURCE /run/live/medium 2>/dev/null)
+boot=$([ -n "$med" ] && lsblk -no PKNAME "$med" 2>/dev/null | head -n1)
+disk=$(lsblk -no PKNAME "$dev" 2>/dev/null | head -n1)
+[ -n "$disk" ] || disk=${dev#/dev/}
+[ -n "$boot" ] && [ "$disk" = "$boot" ] && exit 0
+# A stick written by booto-writer: its partitions are labelled BOOTO_LIVE / BOOTO_DATA.
+lsblk -nro PARTLABEL,LABEL "/dev/$disk" 2>/dev/null | grep -Eq '(^| )(BOOTO_[A-Z]+|persistence)( |$)' && exit 0
+exec blockdev --setro "$dev"

@@ -1,0 +1,7 @@
+# Write blocker: every disk and partition is read-only from the moment it appears,
+# except the Booto USB. Undo for one device: blockdev --setrw /dev/sdX
+ACTION!="add|change", GOTO="booto_ro_end"
+SUBSYSTEM!="block", GOTO="booto_ro_end"
+KERNEL!="sd*|nvme*|mmcblk*|vd*|xvd*|hd*", GOTO="booto_ro_end"
+RUN+="/usr/local/sbin/booto-ro $devnode"
+LABEL="booto_ro_end"
