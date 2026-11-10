@@ -35,7 +35,6 @@ jobs:
             squashfs-tools \
             xorriso \
             grub-pc-bin \
-            grub-efi-amd64-bin \
             grub-common \
             mtools \
             dosfstools
