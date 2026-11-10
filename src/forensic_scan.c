@@ -272,6 +272,27 @@ static void run_uefi(forensic_scan_report_t *out, const char *target_dev, bool h
     set_status(out, SCAN_MOD_UEFI, SCAN_STATUS_SKIPPED, BOOTO_OK, "no EFI system partition found");
 }
 
+/* The BCD store on the ESP the UEFI engine found, mounted again read-only when it is a device. */
+static void check_bcd(forensic_scan_report_t *out, quarantine_t *q) {
+    if (!out->esp_dev[0]) return;
+    bool dev = strncmp(out->esp_dev, out->scan_root, strlen(out->scan_root)) != 0;
+    const char *esp = dev ? ESP_MOUNT_POINT : out->esp_dev;
+    if (dev && disk_mount_ro(out->esp_dev, ESP_MOUNT_POINT, "vfat") != BOOTO_OK) {
+        LOG_WARN("Windows boot: cannot mount %s again for its BCD store", out->esp_dev);
+        out->winboot.not_checked++;
+        return;
+    }
+    int before = out->winboot.threats_detected;
+    booto_error_t e = winboot_check_bcd(esp, &out->winboot);
+    if (e != BOOTO_OK && e != BOOTO_ERR_NOT_FOUND) out->winboot.not_checked++;
+    for (int i = before; i < out->winboot.threats_detected && i < MAX_WINBOOT_THREATS; i++)
+        export_file(out, q, "windows", esp, out->winboot.findings[i].file_path, QUARANTINE_MAX_ITEM);
+    if (dev) {
+        booto_error_t ue = disk_unmount(ESP_MOUNT_POINT);
+        if (ue != BOOTO_OK) LOG_WARN("Failed to unmount %s: %s", ESP_MOUNT_POINT, err_name(ue));
+    }
+}
+
 booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, const bool *enabled,
                                 const char *quarantine_dir, forensic_scan_progress_cb cb, void *user,
                                 forensic_scan_report_t *out) {
@@ -376,10 +397,12 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
             booto_error_t e = winboot_scan_rootfs(root, &out->winboot);
             for (int i = 0; i < out->winboot.threats_detected && i < MAX_WINBOOT_THREATS; i++)
                 export_file(out, q, "windows", root, out->winboot.findings[i].file_path, QUARANTINE_MAX_ITEM);
+            if (e == BOOTO_OK) check_bcd(out, q);
             if (e == BOOTO_OK) {
                 char note[96];
-                snprintf(note, sizeof(note), "%d files; %d drivers catalog-signed, %d third-party",
-                         out->winboot.files_checked, out->winboot.drivers_unsigned, out->winboot.drivers_third_party);
+                snprintf(note, sizeof(note), "%d files, %d boot-start; %d drivers catalog-signed, %d third-party",
+                         out->winboot.files_checked, out->winboot.boot_start, out->winboot.drivers_unsigned,
+                         out->winboot.drivers_third_party);
                 set_status(out, SCAN_MOD_WINBOOT, SCAN_STATUS_OK, e, note);
             } else {
                 set_result(out, SCAN_MOD_WINBOOT, e);

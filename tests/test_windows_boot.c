@@ -5,6 +5,7 @@
 #include "test_framework.h"
 #include "forensic_scan.h"
 #include "windows_boot.h"
+#include "hive_fixture.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -155,6 +156,76 @@ static void test_orchestrator(void) {
     TEST_PASS("test_orchestrator");
 }
 
+static uint8_t g_hive[0x3000];
+
+static void test_boot_start(void) {
+    TEST_START("test_boot_start");
+    mk("WINDOWS/system32/config");
+    mk("WINDOWS/system32/Evil");
+    uint8_t b[0x400];
+    size_t len = build_pe(b, sizeof(b), true);
+    put("WINDOWS/system32/Evil/hidden.sys", b, len);
+    put("outside.sys", b, len);
+    hv_t h;
+    hv_init(&h, g_hive, sizeof(g_hive));
+    uint32_t v1[] = { hv_dword(&h, "Start", 0), hv_string(&h, "ImagePath", "\\SystemRoot\\System32\\evil\\HIDDEN.sys") };
+    uint32_t v2[] = { hv_dword(&h, "Start", 0), hv_string(&h, "ImagePath", "System32\\..\\..\\outside.sys") };
+    uint32_t v3[] = { hv_dword(&h, "Start", 3), hv_string(&h, "ImagePath", "System32\\Evil\\hidden.sys") };
+    uint32_t v4[] = { hv_dword(&h, "Start", 0) };
+    uint32_t svc[] = { hv_key(&h, "evil", NULL, 0, v1, 2), hv_key(&h, "escape", NULL, 0, v2, 2),
+                       hv_key(&h, "demand", NULL, 0, v3, 2), hv_key(&h, "broken", NULL, 0, v4, 1) };
+    uint32_t svcs = hv_key(&h, "Services", svc, 4, NULL, 0);
+    uint32_t cur = hv_dword(&h, "Current", 1);
+    uint32_t top[] = { hv_key(&h, "Select", NULL, 0, &cur, 1), hv_key(&h, "ControlSet001", &svcs, 1, NULL, 0) };
+    put("WINDOWS/system32/config/SYSTEM", g_hive, hv_root(&h, hv_key(&h, "ROOT", top, 2, NULL, 0)));
+
+    winboot_scan_result_t *r = calloc(1, sizeof(*r));
+    ASSERT_INT_EQ(winboot_scan_rootfs(g_root, r), BOOTO_OK, "Scan runs");
+    ASSERT_INT_EQ(r->boot_start, 3, "Three boot-start services");
+    ASSERT_TRUE(has_finding(r, "Evil/hidden.sys", "does not verify"), "Boot-start driver outside drivers checked");
+    ASSERT_TRUE(!has_finding(r, "outside.sys", ""), "ImagePath with .. is not followed");
+    ASSERT_INT_EQ(r->files_checked, 5, "Drivers dir file not checked twice");
+    free(r);
+    TEST_PASS("test_boot_start");
+}
+
+static void test_bcd(void) {
+    TEST_START("test_bcd");
+    mk("esp");
+    mk("esp/EFI");
+    mk("esp/EFI/Microsoft");
+    mk("esp/EFI/Microsoft/Boot");
+    char esp[512];
+    snprintf(esp, sizeof(esp), "%s/esp", g_root);
+    winboot_scan_result_t *r = calloc(1, sizeof(*r));
+    ASSERT_INT_EQ(winboot_check_bcd(esp, r), BOOTO_ERR_NOT_FOUND, "No BCD store");
+
+    for (int bad = 0; bad < 2; bad++) {
+        hv_t h;
+        hv_init(&h, g_hive, sizeof(g_hive));
+        uint8_t on = (uint8_t)bad;
+        uint32_t ts = hv_value(&h, "Element", 3, &on, 1);
+        uint32_t ap = hv_string(&h, "Element", bad ? "\\Windows\\system32\\evil.efi" : "\\WINDOWS\\system32\\winload.efi");
+        uint32_t els[] = { hv_key(&h, "16000049", NULL, 0, &ts, 1), hv_key(&h, "12000002", NULL, 0, &ap, 1) };
+        uint32_t ty = hv_dword(&h, "Type", 0x10200003u);
+        uint32_t parts[] = { hv_key(&h, "Description", NULL, 0, &ty, 1), hv_key(&h, "Elements", els, 2, NULL, 0) };
+        uint32_t obj = hv_key(&h, "{a}", parts, 2, NULL, 0);
+        uint32_t objs = hv_key(&h, "Objects", &obj, 1, NULL, 0);
+        put("esp/EFI/Microsoft/Boot/BCD", g_hive, hv_root(&h, hv_key(&h, "NewStoreRoot", &objs, 1, NULL, 0)));
+        memset(r, 0, sizeof(*r));
+        ASSERT_INT_EQ(winboot_check_bcd(esp, r), BOOTO_OK, "BCD read");
+        ASSERT_INT_EQ(r->threats_detected, bad ? 2 : 0, "Findings only when tampered");
+    }
+    ASSERT_TRUE(has_finding(r, "BCD", "testsigning"), "testsigning flagged");
+    ASSERT_TRUE(has_finding(r, "BCD", "evil.efi"), "Changed loader path flagged");
+    put("esp/EFI/Microsoft/Boot/BCD", (const uint8_t *)"junk", 4);
+    memset(r, 0, sizeof(*r));
+    ASSERT_INT_EQ(winboot_check_bcd(esp, r), BOOTO_OK, "Junk BCD read");
+    ASSERT_TRUE(has_finding(r, "BCD", "not a valid"), "Junk BCD flagged");
+    free(r);
+    TEST_PASS("test_bcd");
+}
+
 int main(void) {
     printf("\n--- Running Windows Boot Engine Tests ---\n");
     if (!mkdtemp(g_root)) {
@@ -165,6 +236,8 @@ int main(void) {
     test_scan();
     test_orchestrator();
     test_measured_boot();
+    test_boot_start();
+    test_bcd();
     char cmd[128];
     snprintf(cmd, sizeof(cmd), "rm -rf '%s'", g_root);
     if (system(cmd) != 0) fprintf(stderr, "warning: cleanup of %s failed\n", g_root);
