@@ -7,6 +7,7 @@
  * opened O_RDONLY; nothing is written to efivars, ACPI, sysfs, PCI config space or MSRs.
  * Register layouts come from the Intel SDM, Intel PCH datasheets and AMD PPRs.
  */
+#define _GNU_SOURCE /* memmem: glibc before 2.38 (Debian 12) declares it only under _GNU_SOURCE */
 #include "firmware_auditor.h"
 #include "crypto_utils.h"
 #include "disk_mount.h"
