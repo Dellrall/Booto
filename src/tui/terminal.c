@@ -55,6 +55,7 @@ static bool g_ascii_only = false;
 static term_abs_ptr_t g_abs[MAX_ABS_PTRS];
 static int g_abs_count = 0;
 static int g_ptr_x = -1, g_ptr_y = -1; /* last cell any mouse report named; -1 = unknown */
+static int g_ptr_held = 0;              /* left button down on any evdev device */
 static bool g_ptr_drawn = false;        /* evdev pointer: Booto draws it (reverse video); a terminal or gpm draws its own */
 static uint32_t g_ptr_glyph = 0;        /* shape drawn at the pointer instead of the cell's char; 0 = none */
 static bool g_ptr_moves = false;        /* pointer reports motion (evdev or mode 1003), so hover highlights track it */
@@ -133,7 +134,14 @@ static void update_dimensions(void) {
 
 /* Drains one device until it yields a click, drag, release or wheel event; plain motion only moves the drawn pointer. */
 static bool read_abs_pointer(term_abs_ptr_t *p, input_event_t *event) {
+    /* One pointer across devices: a VirtualBox tablet moves it while the PS/2 mouse sends its buttons. */
+    if (g_ptr_x >= 0 && g_ptr_y >= 0) {
+        p->x = g_ptr_x;
+        p->y = g_ptr_y;
+    }
+    p->held = g_ptr_held;
     ptr_action_t a = evdev_ptr_read(p, g_rows, g_cols);
+    g_ptr_held = p->held;
     if (p->x >= 0 && p->y >= 0) {
         g_ptr_x = p->x;
         g_ptr_y = p->y;
@@ -213,6 +221,7 @@ void term_shutdown(void) {
     for (int i = 0; i < g_abs_count; i++) close(g_abs[i].fd); /* closing also drops the grab */
     g_abs_count = 0;
     g_ptr_x = g_ptr_y = -1;
+    g_ptr_held = 0;
     g_ptr_drawn = false;
     g_ptr_moves = false;
 

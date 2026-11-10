@@ -58,9 +58,26 @@ static void test_rel_mouse(void) {
     TEST_PASS("test_rel_mouse");
 }
 
+static void test_split_pointer(void) {
+    TEST_START("test_split_pointer");
+    /* VirtualBox: the tablet moves the pointer, the PS/2 mouse sends only buttons. terminal.c hands the shared cell over. */
+    term_abs_ptr_t tablet = {.x_min = 0, .x_max = 32767, .y_min = 0, .y_max = 32767, .x = -1, .y = -1};
+    term_abs_ptr_t ps2 = {.rel = 1, .x = -1, .y = -1};
+    term_abs_feed(&tablet, EV_ABS, ABS_X, 8192, 25, 80);
+    term_abs_feed(&tablet, EV_ABS, ABS_Y, 8192, 25, 80);
+    ps2.x = tablet.x;
+    ps2.y = tablet.y;
+    ASSERT_INT_EQ(term_abs_feed(&ps2, EV_KEY, BTN_LEFT, 1, 25, 80), PTR_CLICK_LEFT, "Button-only mouse clicks at the shared cell");
+    ASSERT_INT_EQ(ps2.x, 20, "Click lands on the tablet's column");
+    tablet.held = ps2.held;
+    ASSERT_INT_EQ(term_abs_feed(&tablet, EV_ABS, ABS_X, 16384, 25, 80), PTR_DRAG, "Tablet motion drags while the PS/2 button is held");
+    TEST_PASS("test_split_pointer");
+}
+
 int main(void) {
     test_abs_pointer();
     test_rel_mouse();
+    test_split_pointer();
     TEST_SUMMARY();
     return 0;
 }

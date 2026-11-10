@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - `F4` now opens the passphrase prompt right after `booto-storage create`; before, the new partition was only found after a reboot.
 - The top bar no longer shows "LUKS locked" for Booto's own report partition, and says "Reports on USB" instead of "RAM only" once it is unlocked.
+- Mouse clicks work in VirtualBox with mouse integration on; before, the pointer moved and buttons highlighted, but clicks did nothing.
 
 ## [1.9.4-beta] - 2026-11-10
 
