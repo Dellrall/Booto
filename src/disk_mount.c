@@ -12,6 +12,7 @@
 #include "disk_mount.h"
 #include "logger.h"
 #include "crypto_utils.h"
+#include "persistence_mgr.h"
 
 #include <ctype.h>
 #include <dirent.h>
@@ -561,24 +562,40 @@ booto_error_t disk_discover_partitions(disk_discovery_result_t *result, bool inc
 
     fclose(fp);
 
+    // Booto's own stick is not evidence: keep it out of the default target choice (-t can still name it).
+    char boot_disk[PATH_MAX];
+    if (persistence_find_boot_disk("/proc/self/mountinfo", "/sys", boot_disk, sizeof(boot_disk)) == BOOTO_OK) {
+        size_t blen = strlen(boot_disk);
+        for (int i = 0; i < result->count; i++) {
+            disk_partition_t *p = &result->partitions[i];
+            char link[PATH_MAX], real[PATH_MAX];
+            snprintf(link, sizeof(link), "/sys/class/block/%s", p->name);
+            if (!realpath(link, real) || strncmp(real, boot_disk, blen) != 0 || (real[blen] != '/' && real[blen] != '\0'))
+                continue;
+            p->is_boot_media = true;
+            p->is_target = false;
+            snprintf(p->label, sizeof(p->label), "Booto USB");
+        }
+    }
+
     if (include_mock) add_mock_partitions(result);
 
     // Guarantee default target selection
     if (result->count > 0) {
         bool has_target = false;
-        int largest_idx = 0;
+        int largest_idx = -1;
         uint64_t max_size = 0;
         for (int i = 0; i < result->count; i++) {
             if (result->partitions[i].is_target) {
                 has_target = true;
                 break;
             }
-            if (result->partitions[i].size_bytes > max_size) {
+            if (!result->partitions[i].is_boot_media && result->partitions[i].size_bytes > max_size) {
                 max_size = result->partitions[i].size_bytes;
                 largest_idx = i;
             }
         }
-        if (!has_target && result->count > 0) {
+        if (!has_target && largest_idx >= 0) {
             result->partitions[largest_idx].is_target = true;
         }
     }

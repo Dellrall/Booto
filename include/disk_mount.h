@@ -31,6 +31,7 @@ typedef struct {
     char mount_point[256];  /**< Current mountpoint if mounted */
     bool is_mounted_ro;     /**< True if safely mounted read-only */
     bool is_target;         /**< Selected as the forensic target */
+    bool is_boot_media;     /**< On the USB Booto booted from: never picked as the default target */
     bool is_removable;      /**< True if USB / removable media */
 } disk_partition_t;
 
