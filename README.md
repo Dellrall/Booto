@@ -122,6 +122,17 @@ The shipped DBX, LKM and MBR signatures are illustrative samples, not an authori
 
 On the live system, `man booto` lists every option, key and error, and `man booto-checks` explains each finding ID. Read them from the repo with `man -l man/booto.1`.
 
+### Measured Detection
+
+`make zoo` builds a small test zoo and scans every case with `booto -c`; CI runs it on each push. A planted case is a clean install plus one harmless look-alike of a threat, and passes only when the expected engine fires and no other does. A clean case passes only when nothing fires.
+
+| Set | Cases | Result |
+|---|---|---|
+| Planted | Rovnix MBR hook bytes, ESP loader patched after signing, unsigned module beside signed ones, reverse shell in the initramfs, `ld.so.preload` hook, changed packaged binary, patched `winload.efi` | 7 of 7 caught |
+| Clean | minimal Debian (dpkg), Arch (pacman) and Fedora (rpm) installs | 0 of 3 false alarms |
+
+These numbers cover synthetic look-alikes only: one case per engine, no real malware samples and no real distro images. There is no clean Windows case yet, because that needs a Microsoft-signed `ntoskrnl.exe`, which the zoo cannot generate.
+
 ## TUI Window Navigation & Shortcuts
 
 | Shortcut | Action | Description |
