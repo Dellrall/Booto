@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <sys/wait.h>
 #include <time.h>
 
@@ -273,6 +274,13 @@ int main(int argc, char *argv[]) {
             case 'u':
                 logger_init(LOG_LEVEL_INFO, NULL);
                 LOG_INFO("Triggering Booto forensic rules and DBX updater...");
+                /* The generator and its sources live in the source tree, not on the live USB. */
+                if (access("./scripts/update_rules.sh", X_OK) != 0) {
+                    fprintf(stderr, "booto: --update-rules needs the Booto source tree: run it from the repository root.\n"
+                                    "On the live USB, copy new rule files and their .sha256 seals to /persistence/rules instead.\n");
+                    logger_shutdown();
+                    return 1;
+                }
                 int res = system("./scripts/update_rules.sh");
                 logger_shutdown();
                 if (res == -1 || !WIFEXITED(res)) return 1;
