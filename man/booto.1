@@ -119,7 +119,11 @@ seal file.
 .BR \-u ", " \-\-update\-rules
 Regenerate the sealed rule files by running
 .IR scripts/update_rules.sh .
-Nothing is fetched from the network.
+Nothing is fetched from the network. It works only from the root of the
+Booto source tree; on the live USB it exits 1 and tells you to copy new rule
+files to
+.I /persistence/rules
+instead.
 .TP
 .BR \-x ", " \-\-expert\-firmware
 CLI mode, as root only. Also scan UEFI variables for large high-entropy blobs
