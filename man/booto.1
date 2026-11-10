@@ -199,7 +199,23 @@ and hands them back to
 .BR gpm (8)
 in the root shell. Elsewhere (a desktop terminal, SSH) the terminal's own
 mouse reporting is used.
+.PP
+A tab strip under the top bar switches pages:
+.B 1 Panes
+(the tiled panes),
+.B 2 Findings
+(every finding of the last scan, with the selected one's rule, hash and detail),
+.B 3 Firmware
+(this machine's firmware checks) and
+.B 4 Evidence
+(target, mount, before/after hash of the first 1 MiB, quarantine and what each
+engine read). Press the digit or click the tab;
+.B Esc
+returns to the panes.
 .SS Keys
+.TP
+.BR 1 ", " 2 ", " 3 ", " 4
+Show the Panes, Findings, Firmware or Evidence page.
 .TP
 .B F5
 Scan the drive selected in Storage.

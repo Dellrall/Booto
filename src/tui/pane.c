@@ -140,6 +140,10 @@ static uint32_t status_attr(scan_status_t s) {
     }
 }
 
+static uint32_t severity_attr(booto_severity_t s) {
+    return s >= SEVERITY_HIGH ? A_BAD : s == SEVERITY_MEDIUM ? A_WARN : A_MUTED;
+}
+
 /* ---- panes ---- */
 
 static void render_storage_pane(wm_node_t *n, bool focused, tui_app_state_t *app) {
@@ -414,16 +418,16 @@ static void render_findings_pane(wm_node_t *n, bool focused, tui_app_state_t *ap
         if (show_note) term_puts_clip(nx, y, right - nx, r->note[m], A_MUTED);
     }
 
-    if (r->total_threats > 0) {
+    scan_finding_t f;
+    if (forensic_scan_finding(r, 0, &f)) {
         y++;
-        char sha[80];
-        snprintf(sha, sizeof(sha), "SHA-256 %s", app->threat.sha256);
-        put_row(x0, &y, bottom, iw, "First finding", A_MUTED);
-        put_row(x0, &y, bottom, iw, app->threat.threat_name, A_STRONG);
-        put_row(x0, &y, bottom, iw, app->threat.severity, A_BAD);
-        put_row(x0, &y, bottom, iw, app->threat.infected_file, A_TEXT);
-        put_row(x0, &y, bottom, iw, app->threat.hook_type, A_TEXT);
-        put_row(x0, &y, bottom, iw, sha, A_MUTED);
+        char line[64];
+        int nf = forensic_scan_finding_count(r);
+        snprintf(line, sizeof(line), "%d finding%s. Press 2 to list them all.", nf, nf == 1 ? "" : "s");
+        put_row(x0, &y, bottom, iw, line, A_MUTED);
+        put_row(x0, &y, bottom, iw, f.name, A_STRONG);
+        put_row(x0, &y, bottom, iw, booto_severity_str(f.severity), severity_attr(f.severity));
+        put_row(x0, &y, bottom, iw, f.where, A_TEXT);
         if (r->inspect.path[0]) {
             app->inspect_hint_y = y >= top && y < bottom ? y : -1;
             put_row(x0, &y, bottom, iw, "Enter  Inspect bytes and map", A_STRONG);
@@ -431,22 +435,14 @@ static void render_findings_pane(wm_node_t *n, bool focused, tui_app_state_t *ap
     }
 
     if (r->firmware_ran) {
+        int cnt[FW_RESULT_NA + 1] = {0};
+        for (int c = 0; c < FW_CHECK_COUNT; c++)
+            if ((unsigned)r->firmware.checks[c].result <= FW_RESULT_NA) cnt[r->firmware.checks[c].result]++;
+        char line[96];
+        snprintf(line, sizeof(line), "Firmware: %d fail, %d unknown, %d pass. Press 3.", cnt[FW_RESULT_FAIL],
+                 cnt[FW_RESULT_UNKNOWN], cnt[FW_RESULT_PASS]);
         y++;
-        put_row(x0, &y, bottom, iw, "Firmware of this machine (not part of the verdict)", A_MUTED);
-        /* Check names run to 27 columns, wider than the engine column. */
-        int frx = x0 + 29, fdx = frx + 9;
-        bool show_fres = frx + 4 <= right, show_fdet = fdx + 4 <= right;
-        int fnw = show_fres ? frx - x0 - 1 : iw;
-        for (int c = 0; c < FW_CHECK_COUNT; c++, y++) {
-            const fw_check_t *k = &r->firmware.checks[c];
-            uint32_t ra = k->result == FW_RESULT_PASS ? A_OK : k->result == FW_RESULT_FAIL ? A_BAD
-                        : k->result == FW_RESULT_UNKNOWN ? A_WARN : A_MUTED;
-            term_puts_clip(x0, y, fnw, firmware_check_name((fw_check_id_t)c), A_TEXT);
-            if (show_fres) term_puts_clip(frx, y, fdx - frx - 1, firmware_result_str(k->result), ra);
-            if (show_fdet) term_puts_clip(fdx, y, right - fdx, k->detail, A_MUTED);
-        }
-        if (r->firmware.chipset_unconfirmed)
-            put_row(x0, &y, bottom, iw, "Chipset not confirmed yet: run booto -c -t <disk> to see how to help.", A_WARN);
+        put_row(x0, &y, bottom, iw, line, cnt[FW_RESULT_FAIL] ? A_BAD : cnt[FW_RESULT_UNKNOWN] ? A_WARN : A_OK);
     }
     scroll_end(n, app, top, bottom, y);
 }
@@ -487,6 +483,201 @@ static void render_persistence_pane(wm_node_t *n, bool focused, tui_app_state_t 
     scroll_end(n, app, top, bottom, y);
 }
 
+/* ---- pages: full-screen panes for the last scan ---- */
+
+/* Wraps s over rows from *y up to bottom at width w, breaking at spaces when it can. */
+static void put_wrapped(int x, int *y, int bottom, int w, const char *s, uint32_t attr) {
+    if (w > 400) w = 400;
+    while (*s && *y < bottom && w > 0) {
+        int take = (int)strnlen(s, (size_t)w + 1);
+        if (take > w) {
+            take = w;
+            int sp = take;
+            while (sp > 0 && s[sp] != ' ') sp--;
+            if (sp > 0) take = sp;
+        }
+        char buf[404];
+        snprintf(buf, sizeof(buf), "%.*s", take, s);
+        term_puts_clip(x, *y, w, buf, attr);
+        (*y)++;
+        s += take;
+        while (*s == ' ') s++;
+    }
+}
+
+static void render_findings_list(wm_node_t *n, bool focused, tui_app_state_t *app) {
+    const forensic_scan_report_t *r = app->last_scan;
+    int count = forensic_scan_finding_count(r);
+    char title[40];
+    snprintf(title, sizeof(title), "All findings (%d)", count);
+    draw_frame(n, focused, title);
+    int x0 = n->x + 2, iw = n->w - 4, right = x0 + iw, top = n->y + 1, bottom = n->y + n->h - 1;
+    app->finding_vis = 0;
+    if (iw <= 0 || bottom <= top) return;
+    if (count == 0) {
+        const char *msg = !r ? "No scan yet. Press F5 to scan the target."
+                        : r->verdict == SCAN_VERDICT_INCOMPLETE ? "No findings, but some engines could not run: see Evidence (4)."
+                                                                 : "No findings: every engine that ran came back clean.";
+        term_puts_clip(x0, top, iw, msg, A_MUTED);
+        return;
+    }
+    if (app->finding_cursor >= count) app->finding_cursor = count - 1;
+    if (app->finding_cursor < 0) app->finding_cursor = 0;
+
+    /* The selected finding's detail takes the lower rows when the pane is tall enough. */
+    int detail_h = n->h >= 16 ? 8 : 0, list_bottom = bottom - detail_h;
+    int sev_w = 10, eng_w = 14, name_x = x0 + sev_w + eng_w, name_w = (right - name_x) / 2;
+    if (name_w < 16) name_w = right - name_x;
+    int where_x = name_x + name_w;
+    term_puts_clip(x0, top, sev_w - 1, "Severity", A_MUTED);
+    term_puts_clip(x0 + sev_w, top, eng_w - 1, "Engine", A_MUTED);
+    term_puts_clip(name_x, top, name_w - 1, "Finding", A_MUTED);
+    if (where_x < right) term_puts_clip(where_x, top, right - where_x, "Where", A_MUTED);
+
+    int vis = list_bottom - (top + 1);
+    if (vis <= 0) return;
+    int first = list_first(app->finding_cursor, vis), cursor_row = -1;
+    app->finding_first = first;
+    app->finding_list_y = top + 1;
+    app->finding_vis = vis;
+    scan_finding_t f;
+    for (int row = 0; row < vis && forensic_scan_finding(r, first + row, &f); row++) {
+        int y = top + 1 + row;
+        bool cur = focused && first + row == app->finding_cursor;
+        if (cur) {
+            cursor_row = y;
+            term_fill(n->x + 1, y, n->w - 2, 1, A_CURSOR);
+        }
+        term_puts_clip(x0, y, sev_w - 1, booto_severity_str(f.severity), row_attr(cur, severity_attr(f.severity)));
+        term_puts_clip(x0 + sev_w, y, eng_w - 1, forensic_scan_module_name(f.engine), row_attr(cur, A_TEXT));
+        term_puts_clip(name_x, y, name_w - 1, f.name, row_attr(cur, A_STRONG));
+        if (where_x < right) term_puts_clip(where_x, y, right - where_x, f.where, row_attr(cur, A_TEXT));
+    }
+    draw_scroll_marks(n, top + 1, vis, first > 0, first + vis < count, cursor_row);
+
+    if (!detail_h || !forensic_scan_finding(r, app->finding_cursor, &f)) return;
+    int y = list_bottom;
+    term_hline(n->x + 1, y++, n->w - 2, A_MUTED);
+    static const char *const LABEL[] = {"Finding", "Where", "Rule", "Hash", "Detail"};
+    const char *val[] = {f.name, f.where, f.rule[0] ? f.rule : "-", f.hash[0] ? f.hash : "-", f.detail[0] ? f.detail : "-"};
+    for (int k = 0; k < 5 && y < bottom; k++) {
+        term_puts_clip(x0, y, iw, LABEL[k], A_MUTED);
+        if (k < 4) term_puts_clip(x0 + 9, y++, iw - 9, val[k], k == 0 ? A_STRONG : A_TEXT);
+        else put_wrapped(x0 + 9, &y, bottom, iw - 9, val[k], A_TEXT);
+    }
+}
+
+static void render_firmware_page(wm_node_t *n, bool focused, tui_app_state_t *app) {
+    draw_frame(n, focused, "Firmware of this machine");
+    int x0 = n->x + 2, iw = n->w - 4, right = x0 + iw, top = n->y + 1, bottom = n->y + n->h - 1;
+    if (iw <= 0 || bottom <= top) return;
+    const forensic_scan_report_t *r = app->last_scan;
+    if (!r || !r->firmware_ran) {
+        term_puts_clip(x0, top, iw, r ? "The firmware audit did not run for this scan."
+                                      : "No scan yet. F5 scans the target and also audits this machine's firmware.", A_MUTED);
+        return;
+    }
+    int y = top + scroll_begin(app, n->pane_type, top, bottom);
+    put_row(x0, &y, bottom, iw, "Checks the machine Booto runs on, not the target disk. Never part of the verdict.", A_MUTED);
+    y++;
+    /* Check names run to 27 columns. */
+    int frx = x0 + 29, fdx = frx + 9;
+    bool show_fres = frx + 4 <= right, show_fdet = fdx + 4 <= right;
+    int fnw = show_fres ? frx - x0 - 1 : iw;
+    term_puts_clip(x0, y, fnw, "Check", A_MUTED);
+    if (show_fres) term_puts_clip(frx, y, fdx - frx - 1, "Result", A_MUTED);
+    if (show_fdet) term_puts_clip(fdx, y, right - fdx, "Detail", A_MUTED);
+    y++;
+    for (int c = 0; c < FW_CHECK_COUNT; c++, y++) {
+        const fw_check_t *k = &r->firmware.checks[c];
+        uint32_t ra = k->result == FW_RESULT_PASS ? A_OK : k->result == FW_RESULT_FAIL ? A_BAD
+                    : k->result == FW_RESULT_UNKNOWN ? A_WARN : A_MUTED;
+        term_puts_clip(x0, y, fnw, firmware_check_name((fw_check_id_t)c), A_TEXT);
+        if (show_fres) term_puts_clip(frx, y, fdx - frx - 1, firmware_result_str(k->result), ra);
+        if (show_fdet) term_puts_clip(fdx, y, right - fdx, k->detail, A_MUTED);
+    }
+    if (r->firmware.chipset_unconfirmed) {
+        y++;
+        put_row(x0, &y, bottom, iw, "Chipset not confirmed yet: run booto -c -t <disk> to see how to help.", A_WARN);
+    }
+    scroll_end(n, app, top, bottom, y);
+}
+
+/* One "label  value" row of the Evidence page. */
+static void put_kv(int x0, int *y, int bottom, int iw, const char *k, const char *v, uint32_t attr) {
+    if (*y < bottom) {
+        term_puts_clip(x0, *y, iw, k, A_MUTED);
+        term_puts_clip(x0 + 18, *y, iw - 18, v, attr);
+    }
+    (*y)++;
+}
+
+static void render_evidence_page(wm_node_t *n, bool focused, tui_app_state_t *app) {
+    draw_frame(n, focused, "Evidence");
+    int x0 = n->x + 2, iw = n->w - 4, right = x0 + iw, top = n->y + 1, bottom = n->y + n->h - 1;
+    if (iw <= 0 || bottom <= top) return;
+    const forensic_scan_report_t *r = app->last_scan;
+    if (!r) {
+        term_puts_clip(x0, top, iw, "No scan yet. After a scan this page shows what was read and whether the target changed.", A_MUTED);
+        return;
+    }
+    int y = top + scroll_begin(app, n->pane_type, top, bottom);
+    char v[384];
+    put_kv(x0, &y, bottom, iw, "Target", r->target_dev[0] ? r->target_dev : "-", A_TARGET);
+    snprintf(v, sizeof(v), "%.255s%s", r->scan_root[0] ? r->scan_root : "-", r->mounted ? " (mounted read-only by Booto)" : "");
+    put_kv(x0, &y, bottom, iw, "Scanned at", v, A_TEXT);
+    put_kv(x0, &y, bottom, iw, "EFI partition", r->esp_dev[0] ? r->esp_dev : "none found", r->esp_dev[0] ? A_TEXT : A_MUTED);
+    y++;
+    bool hashed = r->head_before[0] && r->head_after[0];
+    bool same = hashed && strcmp(r->head_before, r->head_after) == 0;
+    put_kv(x0, &y, bottom, iw, "First 1 MiB", hashed ? (same ? "unchanged by the scan" : "CHANGED during the scan")
+                                                 : "not checked (could not read the disk)",
+           hashed ? (same ? A_OK : A_BAD) : A_WARN);
+    put_kv(x0, &y, bottom, iw, "  SHA-256 before", r->head_before[0] ? r->head_before : "-", A_MUTED);
+    put_kv(x0, &y, bottom, iw, "  SHA-256 after", r->head_after[0] ? r->head_after : "-", A_MUTED);
+    y++;
+    if (r->quarantined < 0) snprintf(v, sizeof(v), "archive could not be finished");
+    else if (r->quarantine_zip[0]) snprintf(v, sizeof(v), "%d file%s in %.300s", r->quarantined, r->quarantined == 1 ? "" : "s", r->quarantine_zip);
+    else snprintf(v, sizeof(v), "nothing exported (off, or nothing flagged)");
+    put_kv(x0, &y, bottom, iw, "Quarantine", v, r->quarantined < 0 ? A_BAD : r->quarantine_zip[0] ? A_WARN : A_MUTED);
+    put_kv(x0, &y, bottom, iw, "Measured boot", r->measured_note[0] ? r->measured_note : "not checked", A_TEXT);
+    y++;
+    put_row(x0, &y, bottom, iw, "What each engine read", A_STRONG);
+    for (int m = 0; m < SCAN_MOD_COUNT; m++) {
+        switch ((scan_module_id_t)m) {
+            case SCAN_MOD_MBR:
+                snprintf(v, sizeof(v), "%d sectors, %d VBRs; boot code: %.60s", r->mbr.sectors_scanned, r->mbr.vbr_scanned,
+                         r->mbr.mbr_info.bootloader_name ? r->mbr.mbr_info.bootloader_name : "unknown");
+                break;
+            case SCAN_MOD_UEFI: snprintf(v, sizeof(v), "%d EFI files", r->uefi.efi_files_scanned); break;
+            case SCAN_MOD_KERNEL: snprintf(v, sizeof(v), "%d modules", r->kernel.modules_scanned); break;
+            case SCAN_MOD_INITRAMFS:
+                snprintf(v, sizeof(v), "%d archives (%.15s), %d files, %d scripts", r->initramfs.segments_parsed,
+                         r->initramfs.compression[0] ? r->initramfs.compression : "-", r->initramfs.files_extracted,
+                         r->initramfs.scripts_audited);
+                break;
+            case SCAN_MOD_PRELOAD: snprintf(v, sizeof(v), "%d files", r->preload.files_scanned); break;
+            case SCAN_MOD_PKG:
+                snprintf(v, sizeof(v), "%d packages, %d files hashed, %d missing, %d unreadable", r->pkg.packages_checked,
+                         r->pkg.files_checked, r->pkg.files_missing, r->pkg.files_unreadable);
+                break;
+            default:
+                snprintf(v, sizeof(v), "%d files, %d boot-start drivers, %d unsigned, %d third-party, %d not checked",
+                         r->winboot.files_checked, r->winboot.boot_start, r->winboot.drivers_unsigned,
+                         r->winboot.drivers_third_party, r->winboot.not_checked);
+                break;
+        }
+        if (y < bottom) {
+            term_puts_clip(x0, y, iw, forensic_scan_module_name((scan_module_id_t)m), A_TEXT);
+            term_puts_clip(x0 + 14, y, iw - 14, status_word(r->status[m]), status_attr(r->status[m]));
+            if (r->status[m] == SCAN_STATUS_OK) term_puts_clip(x0 + 23, y, right - (x0 + 23), v, A_MUTED);
+        }
+        y++;
+        if (r->note[m][0]) put_row(x0 + 23, &y, bottom, right - (x0 + 23), r->note[m], A_MUTED);
+    }
+    scroll_end(n, app, top, bottom, y);
+}
+
 void pane_render(wm_node_t *node, bool is_focused, tui_app_state_t *app) {
     if (!node || node->type != NODE_LEAF) return;
 
@@ -505,6 +696,15 @@ void pane_render(wm_node_t *node, bool is_focused, tui_app_state_t *app) {
             break;
         case PANE_PERSISTENCE:
             render_persistence_pane(node, is_focused, app);
+            break;
+        case PANE_FINDINGS_LIST:
+            render_findings_list(node, is_focused, app);
+            break;
+        case PANE_FIRMWARE:
+            render_firmware_page(node, is_focused, app);
+            break;
+        case PANE_EVIDENCE:
+            render_evidence_page(node, is_focused, app);
             break;
         default:
             draw_frame(node, is_focused, "Empty");
@@ -527,6 +727,11 @@ bool pane_handle_click(wm_node_t *node, int x, int y, tui_app_state_t *app) {
         if (vis <= 0 || y < node->y + 1 || i >= app->module_count) return false;
         app->module_cursor = i;
         if (on_glyph) pane_handle_input(node, &(input_event_t){.type = KEY_CHAR, .ch = ' '}, app);
+        return true;
+    } else if (node->pane_type == PANE_FINDINGS_LIST) {
+        int row = y - app->finding_list_y, i = app->finding_first + row;
+        if (row < 0 || row >= app->finding_vis || i >= forensic_scan_finding_count(app->last_scan)) return false;
+        app->finding_cursor = i;
         return true;
     } else if (node->pane_type == PANE_THREAT_INSPECTOR && y == app->inspect_hint_y) {
         pane_handle_input(node, &(input_event_t){.type = KEY_ENTER}, app);
@@ -603,7 +808,17 @@ bool pane_handle_input(wm_node_t *node, const input_event_t *event, tui_app_stat
             snprintf(app->status_msg, sizeof(app->status_msg), "Toggled module: %.200s", app->modules[app->module_cursor].name);
             return true;
         }
-    } else if (node->pane_type == PANE_THREAT_INSPECTOR || node->pane_type == PANE_PERSISTENCE) {
+    } else if (node->pane_type == PANE_FINDINGS_LIST) {
+        if (event->type == KEY_UP || (event->type == KEY_CHAR && event->ch == 'k')) {
+            if (app->finding_cursor > 0) app->finding_cursor--;
+            return true;
+        }
+        if (event->type == KEY_DOWN || (event->type == KEY_CHAR && event->ch == 'j')) {
+            if (app->finding_cursor < forensic_scan_finding_count(app->last_scan) - 1) app->finding_cursor++;
+            return true;
+        }
+    } else if (node->pane_type == PANE_THREAT_INSPECTOR || node->pane_type == PANE_PERSISTENCE ||
+               node->pane_type == PANE_FIRMWARE || node->pane_type == PANE_EVIDENCE) {
         int *s = &app->pane_scroll[node->pane_type];
         if (event->type == KEY_ENTER && node->pane_type == PANE_THREAT_INSPECTOR) {
             if (app->last_scan && app->last_scan->inspect.path[0]) {
