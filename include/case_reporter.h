@@ -34,6 +34,8 @@ typedef struct {
     char highest_severity[16];
     bool firmware_ran;                /**< Host firmware audit ran (device mode only) */
     firmware_report_t firmware;       /**< Machine running Booto; not part of the verdict */
+    char head_before[65];             /**< SHA-256 of the target's first 1 MiB before the scan; "" if not hashed */
+    char head_after[65];              /**< The same after the scan */
 } forensic_case_summary_t;
 
 /**

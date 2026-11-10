@@ -129,6 +129,8 @@ booto_error_t case_report_generate_json(const forensic_case_summary_t *summary,
     fputs(",\"examiner\":", fp); json_put_string(fp, summary->examiner);
     fputs(",\"target_disk\":", fp); json_put_string(fp, summary->target_disk);
     fputs(",\"target_fs\":", fp); json_put_string(fp, summary->target_fs);
+    fputs(",\"target_first_mib_sha256_before\":", fp); json_put_string(fp, summary->head_before);
+    fputs(",\"target_first_mib_sha256_after\":", fp); json_put_string(fp, summary->head_after);
     fprintf(fp, "},\"findings_summary\":{\"total_threats\":%d,\"highest_severity\":", summary->total_threats);
     json_put_string(fp, summary->highest_severity);
     fprintf(fp, ",\"mbr_bootkit_threats\":%d,\"kernel_lkm_threats\":%d,\"uefi_bootkit_threats\":%d,"
@@ -210,6 +212,10 @@ booto_error_t case_report_generate_markdown(const forensic_case_summary_t *summa
     fputs("**Verdict:** ", fp); md_put_cell(fp, summary->verdict);
     fprintf(fp, ", **threats:** %d (", summary->total_threats); md_put_cell(fp, summary->highest_severity);
     fputs("), **target:** ", fp); md_put_cell(fp, summary->target_disk);
+    if (summary->head_before[0])
+        fprintf(fp, "\n\n**First 1 MiB of the target, SHA-256:** before `%s`, after `%s` (%s)", summary->head_before,
+                summary->head_after[0] ? summary->head_after : "unreadable",
+                strcmp(summary->head_before, summary->head_after) == 0 ? "unchanged" : "CHANGED");
     fputs("\n\n| Engine | Threats | Status |\n| :--- | ---: | :--- |\n", fp);
     for (int i = 0; i < SCAN_MOD_COUNT; i++) {
         fprintf(fp, "| %s | %d | ", forensic_scan_module_name((scan_module_id_t)i),

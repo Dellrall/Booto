@@ -49,7 +49,7 @@ Research date: 2026-11-03. Every claim below links its primary source. Three sur
 | 4 | Known-rootkit path and string rules | paths done (`rules/rootkit_file_iocs.json`). YARA engine done, but it only scans EFI binaries with 2 rules (`rules/bootkits.yar`). Still to do: YARA over `.ko`, ELF binaries and the initramfs, with Linux rootkit string rules |
 | 5 | Boot-chain anomaly checks | done: shadow loaders, BlackLotus ESP layout, MOK list, SBAT level, Authenticode hash, Microsoft signer check, Windows boot files (`winload`, `ntoskrnl`, drivers). Still to do: judging non-Microsoft signers (distro shim and GRUB) |
 | 6 | Persistence sweep | done: systemd, cron, rc.local, udev, modprobe.d, shell profiles, `authorized_keys`. `modules-load.d` not needed: modprobe only loads from `/lib/modules`, which the LKM scan walks in full |
-| 7 | Read-only disks, before/after hashes, case metadata | case metadata (examiner) done; a disk is set read-only (`BLKROSET`) when Booto mounts it. Still to do: read-only for every disk at boot, before/after hashes |
+| 7 | Read-only disks, before/after hashes, case metadata | done: a udev rule sets every disk except the Booto USB read-only at boot (`assets/udev`); reports carry the SHA-256 of the target's first 1 MiB before and after the scan; examiner in the case metadata |
 | 8 | Cheap HSI gaps | done: BIOSWE, BLE, SMM_BWP, 2023 Microsoft CA in db, dbx freshness (every x64 hash in Microsoft's list) |
 
 Also shipped since: a boot chain baseline (`baseline.h`), BitLocker volume detection (reported as encrypted, not scanned), LUKS unlock, LVM in LUKS (branch `fix/luks-lvm-fs`).

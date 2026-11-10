@@ -15,6 +15,7 @@
 #include "quarantine.h"
 #include "inspect.h"
 #include "baseline.h"
+#include "crypto_utils.h"
 
 #include <dirent.h>
 #include <inttypes.h>
@@ -308,6 +309,7 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
         snprintf(out->scan_root, sizeof(out->scan_root), "%.255s", rootfs_dir);
     } else {
         snprintf(out->scan_root, sizeof(out->scan_root), "%s", SCAN_MOUNT_POINT);
+        if (!sha256_head_hex(target_dev, SCAN_HEAD_BYTES, out->head_before)) out->head_before[0] = '\0';
         out->mount_err = disk_mount_ro(target_dev, SCAN_MOUNT_POINT, NULL);
         out->mounted = (out->mount_err == BOOTO_OK);
         if (!out->mounted) LOG_ERROR("Cannot mount %s read-only: %s", target_dev, err_name(out->mount_err));
@@ -434,6 +436,7 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
         booto_error_t ue = disk_unmount(SCAN_MOUNT_POINT);
         if (ue != BOOTO_OK) LOG_WARN("Failed to unmount %s: %s", SCAN_MOUNT_POINT, err_name(ue));
     }
+    if (out->head_before[0] && !sha256_head_hex(target_dev, SCAN_HEAD_BYTES, out->head_after)) out->head_after[0] = '\0';
 
     if (target_dev) {
         firmware_audit(NULL, &out->firmware);
@@ -504,4 +507,6 @@ void forensic_scan_fill_case_summary(const forensic_scan_report_t *r, const char
     }
     sum->firmware_ran = r->firmware_ran;
     sum->firmware = r->firmware;
+    snprintf(sum->head_before, sizeof(sum->head_before), "%s", r->head_before);
+    snprintf(sum->head_after, sizeof(sum->head_after), "%s", r->head_after);
 }
