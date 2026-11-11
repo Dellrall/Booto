@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- An unsigned Windows resource file on the EFI partition (such as `EFI/Microsoft/Boot/Resources/*/bootres.dll.mui`) is no longer reported as an unsigned bootloader: only images the firmware can run (EFI subsystem) need a signature.
+
 ## [1.9.6-beta] - 2026-11-11
 
 ### Added
