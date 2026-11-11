@@ -209,6 +209,6 @@ Releases tagged `-beta` are pre-releases: Booto has not yet been validated again
 
 Copyright (c) 2026 Lye Wei Lun and Booto contributors. Booto is free software under the GNU General Public License, version 3 or (at your option) any later version; see [LICENSE](LICENSE). Releases up to and including 1.6.0-beta were published under MIT.
 
-The UEFI dbx rules (`rules/uefi_dbx_revocations.json`, `src/dbx_builtin.inc`) are generated from Microsoft's [secureboot_objects](https://github.com/microsoft/secureboot_objects) dbx list, © Microsoft Corporation, BSD-2-Clause-Patent; see `rules/sources/secureboot_objects-License.txt`. To update them, replace `rules/sources/dbx_info_msft_latest.json` with the latest `PreSignedObjects/DBX/dbx_info_msft_latest.json` and run `scripts/update_rules.sh rules`.
+The UEFI dbx rules (`rules/uefi_dbx_revocations.json`, `src/dbx_builtin.inc`) are generated from Microsoft's [secureboot_objects](https://github.com/microsoft/secureboot_objects) dbx list, © Microsoft Corporation, BSD-2-Clause-Patent; see `rules/sources/secureboot_objects-License.txt`. To update them, replace `rules/sources/dbx_info_msft_latest.json` with the latest `PreSignedObjects/DBX/dbx_info_msft_latest.json` and run `scripts/update_rules.sh rules`. The weekly `Upstream Rules Check` workflow does this and opens an unsigned PR when Microsoft changes the list; re-sign it before merging.
 
 

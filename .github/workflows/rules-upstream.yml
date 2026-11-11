@@ -1,0 +1,46 @@
+name: Upstream Rules Check
+
+# Weekly: refresh the vendored Microsoft dbx list and, when it changed, open a PR with the
+# regenerated rules. The PR is unsigned: the maintainer re-signs it (scripts/update_rules.sh with
+# BOOTO_RULES_SIGNING_KEY) before merging, since booto refuses rules whose .sig does not match.
+on:
+  schedule:
+    - cron: '0 3 * * 1' # Mondays 03:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  dbx:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Fetch Microsoft's dbx list
+        run: |
+          base=https://raw.githubusercontent.com/microsoft/secureboot_objects/main
+          curl -sfL -o rules/sources/dbx_info_msft_latest.json "$base/PreSignedObjects/DBX/dbx_info_msft_latest.json"
+          curl -sfL -o rules/sources/secureboot_objects-License.txt "$base/License.txt"
+          python3 -c 'import json,sys; json.load(open(sys.argv[1]))' rules/sources/dbx_info_msft_latest.json
+
+      - name: Regenerate rules and open a PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if git diff --quiet rules/sources; then echo "dbx list unchanged"; exit 0; fi
+          scripts/update_rules.sh rules
+          branch=chore/dbx-upstream
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$branch"
+          git add rules src/dbx_builtin.inc
+          git commit -m "chore(rules): update dbx list from microsoft/secureboot_objects"
+          git push -f origin "$branch"
+          if [ -z "$(gh pr list --head "$branch" --state open --json number --jq '.[].number')" ]; then
+            gh pr create --head "$branch" --title "chore(rules): update dbx list from microsoft/secureboot_objects" --body \
+              "Microsoft's dbx list changed upstream. The rules are regenerated but **not signed**: before merging, run
+          \`BOOTO_RULES_SIGNING_KEY=<key.pem> scripts/update_rules.sh rules\`, commit the \`.sig\` files and push to this branch.
+          Pushing also runs CI, which a bot-opened PR does not trigger."
+          fi
