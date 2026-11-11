@@ -443,7 +443,7 @@ static void render_help_modal(int rows, int cols) {
         {"Enter", "Mount a drive read-only; inspect a finding"}, {"F5", "Scan the selected drive"},
         {"F3", "Unlock an encrypted drive (read-only)"}, {"F6", "Save the report"},
         {"F4", "Booto storage: where reports are kept"}, {"1 2 3 4", "Panes, Findings, Firmware, Evidence pages"},
-        {"f", "Findings page: show only MEDIUM or HIGH"}, {"E", "Expert view: engines, log, pane layout"},
+        {"f  /", "Findings: show only MEDIUM or HIGH; search by word"}, {"E", "Expert view: engines, log, pane layout"},
         {"Mouse", "Click to select, double-click to open, wheel to scroll"}, {"F10", "Power off, reboot, shell or quit"},
     };
     enum { N = (int)(sizeof(keys) / sizeof(keys[0])) };
@@ -1032,6 +1032,25 @@ int tui_app_run(booto_context_t *ctx) {
                 continue;
             }
 
+            if (app.finding_searching && !mouse && event.type != KEY_NONE && event.type != KEY_RESIZE) {
+                /* / on Findings: printable keys type the search; Enter keeps it, Esc clears it. */
+                char *q = app.finding_query;
+                size_t len = strlen(q);
+                if (event.type == KEY_BACKSPACE) {
+                    if (len) q[len - 1] = '\0';
+                } else if (event.type == KEY_CHAR && event.ch >= 32 && event.ch <= 126) {
+                    if (len < sizeof(app.finding_query) - 1) q[len] = (char)event.ch, q[len + 1] = '\0';
+                } else if (event.type == KEY_ESC) {
+                    q[0] = '\0';
+                    app.finding_searching = false;
+                    snprintf(app.status_msg, sizeof(app.status_msg), "Search cleared.");
+                } else if (event.type == KEY_ENTER) {
+                    app.finding_searching = false;
+                }
+                app.finding_cursor = 0;
+                continue;
+            }
+
             if (event.type == KEY_CHAR && event.ch == '?') {
                 app.show_help = true;
                 continue;
@@ -1049,6 +1068,10 @@ int tui_app_run(booto_context_t *ctx) {
                                     : "Simple view: pick a drive and press F5. E shows the engines and log.");
             } else if (event.type == KEY_CHAR && event.ch >= '1' && event.ch <= '4') {
                 app.page = event.ch - '1';
+            } else if (event.type == KEY_ESC && app.finding_query[0]) {
+                app.finding_query[0] = '\0';
+                app.finding_cursor = 0;
+                snprintf(app.status_msg, sizeof(app.status_msg), "Search cleared.");
             } else if (page && event.type == KEY_ESC) {
                 app.page = 0;
             } else if (page && (event.type == KEY_MOUSE_WHEEL_UP || event.type == KEY_MOUSE_WHEEL_DOWN)) {

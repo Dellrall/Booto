@@ -14,6 +14,7 @@
 #include <pthread.h>
 #include <stdatomic.h>
 #include <string.h>
+#include <strings.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -91,18 +92,45 @@ static inline int pane_pick_target(const drive_item_t *d, int n) {
     return locked;
 }
 
-/* The k-th finding of r at or above min: its index in r (copied to *f), or -1 past the end. */
-static inline int pane_finding_index(const forensic_scan_report_t *r, booto_severity_t min, int k, scan_finding_t *f) {
+/* s contains q, ignoring case; an empty q matches. */
+static inline bool pane_has_text(const char *s, const char *q) {
+    size_t n = strlen(q);
+    for (; n && *s; s++)
+        if (strncasecmp(s, q, n) == 0) return true;
+    return n == 0;
+}
+
+/* The k-th finding of r at or above min whose name, place, rule or detail holds q: its index in r
+ * (copied to *f), or -1 past the end. */
+static inline int pane_finding_index(const forensic_scan_report_t *r, booto_severity_t min, const char *q, int k,
+                                     scan_finding_t *f) {
     for (int i = 0; forensic_scan_finding(r, i, f); i++)
-        if (f->severity >= min && k-- == 0) return i;
+        if (f->severity >= min &&
+            (pane_has_text(f->name, q) || pane_has_text(f->where, q) || pane_has_text(f->rule, q) || pane_has_text(f->detail, q)) &&
+            k-- == 0)
+            return i;
     return -1;
 }
 
-static inline int pane_finding_shown(const forensic_scan_report_t *r, booto_severity_t min) {
+static inline int pane_finding_shown(const forensic_scan_report_t *r, booto_severity_t min, const char *q) {
     int n = 0;
     scan_finding_t f;
-    while (pane_finding_index(r, min, n, &f) >= 0) n++;
+    while (pane_finding_index(r, min, q, n, &f) >= 0) n++;
     return n;
+}
+
+/* What a finding's engine looked at, in plain words, so its rule ID needs no lookup. */
+static inline const char *pane_engine_meaning(scan_module_id_t e) {
+    static const char *const m[SCAN_MOD_COUNT] = {
+        "Boot code in the disk's first sectors (MBR) or at a partition start (VBR)",
+        "Boot files on the EFI partition and the firmware's boot settings",
+        "Linux kernel modules: code that runs with full control of the system",
+        "The initramfs, the small system that starts Linux before the disk",
+        "Programs and libraries set to run on every boot or in every program",
+        "Installed files that no longer match the package they came from",
+        "The Windows boot loader and kernel files and their signatures",
+    };
+    return (unsigned)e < SCAN_MOD_COUNT ? m[e] : "-";
 }
 
 /* What a new user should do about a finding of this severity. */
@@ -154,6 +182,8 @@ typedef struct {
     int page;
     int finding_cursor;                 // selected row of the Findings page (among the rows the filter shows)
     booto_severity_t finding_min_sev;   // f: Findings page shows this severity and above
+    char finding_query[48];             // /: Findings page shows only findings holding this text
+    bool finding_searching;             // / typed: keys edit finding_query until Enter or Esc
     int finding_first, finding_list_y, finding_vis; // listed rows: first index, screen row, count (last render)
 
     // Background scan (F5). Worker owns pending_scan/pending_err/scan_target/scan_enabled until scan_done;
