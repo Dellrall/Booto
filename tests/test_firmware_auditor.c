@@ -973,6 +973,33 @@ static void test_spi_analyze(void) {
     TEST_PASS("test_spi_analyze");
 }
 
+static void test_hv_probe(void) {
+    TEST_START("test_hv_probe");
+    fw_hv_report_t r;
+    memset(&r, 0, sizeof(r));
+    ASSERT_INT_EQ(firmware_hv_classify(&r), FW_HV_NONE, "Nothing seen is clean");
+    r.cpuid_ticks = 150;
+    ASSERT_INT_EQ(firmware_hv_classify(&r), FW_HV_NONE, "Bare-metal CPUID speed is clean");
+    r.cpuid_ticks = 1800;
+    ASSERT_INT_EQ(firmware_hv_classify(&r), FW_HV_HIDDEN, "Slow CPUID with no hypervisor announced is suspicious");
+    r.hv_bit = true;
+    ASSERT_INT_EQ(firmware_hv_classify(&r), FW_HV_ANNOUNCED, "Announced VM is not a hidden hypervisor");
+    memset(&r, 0, sizeof(r));
+    snprintf(r.sys_type, sizeof(r.sys_type), "xen");
+    ASSERT_INT_EQ(firmware_hv_classify(&r), FW_HV_ANNOUNCED, "/sys/hypervisor/type counts as announced");
+
+    make_root(false, false, false);
+    char path[512];
+    snprintf(path, sizeof(path), "%s/hv_type", g_root);
+    write_file(path, "kvm\n", 4);
+    ASSERT_INT_EQ(firmware_hv_probe(path, &r), BOOTO_OK, "Probe runs");
+    ASSERT_STR_EQ(r.sys_type, "kvm", "Hypervisor type read without newline");
+    ASSERT_INT_EQ(firmware_hv_probe(NULL, NULL), BOOTO_ERR_INVALID_ARG, "NULL out rejected");
+    ASSERT_INT_EQ(firmware_hv_classify(NULL), FW_HV_NONE, "NULL report is none");
+    remove_tree(g_root);
+    TEST_PASS("test_hv_probe");
+}
+
 int main(void) {
     printf("\n--- Running Firmware Auditor Tests ---\n");
     test_good_machine();
@@ -994,6 +1021,7 @@ int main(void) {
     test_nvram_scan();
     test_spi_dump();
     test_spi_analyze();
+    test_hv_probe();
     TEST_SUMMARY();
     return 0;
 }

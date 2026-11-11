@@ -135,7 +135,11 @@ files to
 instead.
 .TP
 .BR \-x ", " \-\-expert\-firmware
-CLI mode, as root only. Also scan UEFI variables for large high-entropy blobs
+CLI mode, as root only. First look for a hypervisor under Booto: the CPUID
+hypervisor bit and vendor, and how long CPUID takes. An announced VM is normal;
+slow CPUID with no hypervisor announced is flagged as a possible hidden
+(firmware-implanted) hypervisor. A hypervisor can fake this, so a clean result
+proves nothing. Also scan UEFI variables for large high-entropy blobs
 (hidden code) and dump the SPI flash read-only with
 .BR flashrom (8).
 Slower; off by default.
