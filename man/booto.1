@@ -235,7 +235,15 @@ system most likely to need a scan (a readable Linux or Windows root first, else
 a locked one). The Contents column names what each drive holds.
 .TP
 .B F5
-Scan the drive selected in Storage.
+Scan the drive selected in Storage. While it runs the Findings pane shows the
+engine and the time elapsed; after it, a line under the verdict says what the
+verdict means and what to press next. On the Findings page each finding has a
+.B Next
+line: what a new user should do about a finding of that severity.
+.TP
+.B f
+On the Findings page, show only MEDIUM and above, then only HIGH and above,
+then all again.
 .TP
 .B F6
 Export the case report (JSON and Markdown, with SHA-256 seals) to report storage.

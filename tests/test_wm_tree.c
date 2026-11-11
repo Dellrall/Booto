@@ -5,6 +5,7 @@
 #include "test_framework.h"
 #include "tui/wm.h"
 #include "tui/pane.h"
+#include <stdlib.h>
 
 static void test_wm_tree_creation(void) {
     TEST_START("test_wm_tree_creation");
@@ -184,8 +185,27 @@ static void test_drive_priority(void) {
     TEST_PASS("test_drive_priority");
 }
 
+static void test_finding_filter(void) {
+    forensic_scan_report_t *r = calloc(1, sizeof(*r));
+    ASSERT_TRUE(r != NULL, "report allocates");
+    r->mbr.threats_detected = 2;
+    r->mbr.findings[0].severity = SEVERITY_HIGH;
+    r->mbr.findings[1].severity = SEVERITY_LOW;
+    r->uefi.bootkits_detected = 1;
+    r->uefi.findings[0].severity = SEVERITY_MEDIUM;
+    scan_finding_t f;
+    ASSERT_INT_EQ(pane_finding_shown(r, SEVERITY_INFO), 3, "No filter shows all");
+    ASSERT_INT_EQ(pane_finding_shown(r, SEVERITY_MEDIUM), 2, "MEDIUM and above drops LOW");
+    ASSERT_INT_EQ(pane_finding_index(r, SEVERITY_MEDIUM, 1, &f), 2, "Second shown row is the UEFI finding");
+    ASSERT_INT_EQ(pane_finding_index(r, SEVERITY_HIGH, 1, &f), -1, "Past the end");
+    ASSERT_TRUE(strstr(pane_next_step(SEVERITY_MEDIUM), "normal setup") != NULL, "MEDIUM says a normal setup can do this");
+    free(r);
+    TEST_PASS("test_finding_filter");
+}
+
 int main(void) {
     test_drive_priority();
+    test_finding_filter();
     test_wm_resize();
     printf("\n--- Running BSP Window Manager Tests ---\n");
     test_wm_tree_creation();
