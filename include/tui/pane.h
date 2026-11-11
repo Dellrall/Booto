@@ -152,6 +152,8 @@ typedef struct {
     persistence_mgr_t persist;
 
     // Status bar & modal state
+    bool show_welcome;                  // first screen: what Booto does and the four steps
+    bool exported;                      // F6 saved the report of last_scan
     bool show_exit_modal;
     bool show_luks_modal;
     bool show_encrypted_modal;          // F5 on a locked target: unlock first, or scan anyway

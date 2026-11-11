@@ -168,6 +168,22 @@ static void render_tab_strip(const tui_app_state_t *app, int cols) {
         term_add_click_zone(x0, x, 1, KEY_CHAR, '1' + i);
         x++;
     }
+
+    /* Right of the tabs: the four steps, the current one highlighted; dropped when it does not fit. */
+    static const struct { const char *label; key_type_t key; } steps[] = {
+        {" 1 Pick a drive ", KEY_NONE}, {" 2 Scan F5 ", KEY_F5}, {" 3 Read findings ", KEY_CHAR}, {" 4 Save F6 ", KEY_F6}};
+    int cur = !target_drive(app) ? 0 : !app->last_scan ? 1 : !app->exported ? 2 : 3;
+    int w = 0;
+    for (int i = 0; i < 4; i++) w += (int)strlen(steps[i].label) + (i ? 1 : 0);
+    int sx = cols - 1 - w;
+    if (sx < x + 2) return;
+    for (int i = 0; i < 4; i++) {
+        int x0 = sx;
+        put_clip(&sx, 1, cols - 1, steps[i].label, i == cur ? A_KEYCAP : i < cur ? A_OK : A_MUTED);
+        if (steps[i].key == KEY_CHAR) term_add_click_zone(x0, sx, 1, KEY_CHAR, '2'); /* opens the Findings page */
+        else if (steps[i].key != KEY_NONE) term_add_click_zone(x0, sx, 1, steps[i].key, 0);
+        sx++;
+    }
 }
 
 /* Centres a w x h modal (clamped to the screen), clears it and draws its frame. */
@@ -391,6 +407,30 @@ static void render_encrypted_modal(tui_app_state_t *app, int rows, int cols) {
     modal_key(x, my + 6, end, " Esc ", " Cancel", KEY_ESC);
 }
 
+static void render_welcome_modal(int rows, int cols) {
+    static const char *const lines[] = {
+        "Booto checks this computer for bootkits and rootkits.",
+        "It only reads the disks: nothing on them is changed.",
+        "",
+        "1  Pick the drive to scan. Booto already picked the likeliest.",
+        "2  Press F5 to scan it.",
+        "3  Read the findings: red is a threat, yellow is worth a look.",
+        "4  Press F6 to save the report.",
+    };
+    int mx, my, mw;
+    modal_frame(rows, cols, 68, 12, "Welcome to Booto", &mx, &my, &mw);
+    int end = mx + mw - 2;
+    for (int i = 0; i < 7; i++) {
+        int x = mx + 3;
+        put_clip(&x, my + 2 + i, end, lines[i], i < 2 ? A_STRONG : A_TEXT);
+    }
+    int x = modal_key(mx + 3, my + 10, end, " Enter ", " Start", KEY_ENTER) + 3;
+    int x0 = x;
+    put_clip(&x, my + 10, end, " E ", A_KEYCAP);
+    put_clip(&x, my + 10, end, " Expert view", A_TEXT);
+    term_add_click_zone(x0, x, my + 10, KEY_CHAR, 'e');
+}
+
 static void render_luks_modal(tui_app_state_t *app, int rows, int cols) {
     bool persist = app->luks_modal_for_persist;
     int mx, my, mw;
@@ -527,6 +567,7 @@ static void finish_forensic_scan(tui_app_state_t *app) {
 
     forensic_scan_report_t *r = app->pending_scan;
     app->pending_scan = NULL;
+    app->exported = false;
     char log_buf[256];
     booto_error_t err = app->pending_err;
     if (err != BOOTO_OK) {
@@ -597,6 +638,7 @@ static void export_case_report(tui_app_state_t *app) {
         tui_app_append_log(app, LOG_LEVEL_ERROR, NULL, app->status_msg);
         return;
     }
+    app->exported = true;
     char log_buf[512];
     snprintf(log_buf, sizeof(log_buf), "Exported case report %.63s to %.200s", sum.case_id, saved_md);
     tui_app_append_log(app, LOG_LEVEL_INFO, NULL, log_buf);
@@ -703,6 +745,7 @@ int tui_app_run(booto_context_t *ctx) {
     logger_set_callback(tui_logger_hook, NULL);
 
     attach_storage(&app);
+    app.show_welcome = true;
 
     bool resize_mode = false;
     wm_node_t *drag_split = NULL; /* split whose border the mouse is dragging */
@@ -741,7 +784,7 @@ int tui_app_run(booto_context_t *ctx) {
         }
 
         // Border under the pointer: <-> or up-down arrow pointer; the dragged one also lights up.
-        bool modal = app.show_exit_modal || app.show_luks_modal || app.show_encrypted_modal || app.show_inspect || menu_n > 0;
+        bool modal = app.show_exit_modal || app.show_luks_modal || app.show_encrypted_modal || app.show_inspect || app.show_welcome || menu_n > 0;
         int px, py;
         wm_node_t *hover = drag_split;
         if (!hover && !modal && !page && !app.wm->zoomed_leaf && term_get_pointer(&px, &py))
@@ -760,6 +803,8 @@ int tui_app_run(booto_context_t *ctx) {
             render_luks_modal(&app, rows, cols);
         } else if (app.show_encrypted_modal) {
             render_encrypted_modal(&app, rows, cols);
+        } else if (app.show_welcome) {
+            render_welcome_modal(rows, cols);
         } else if (app.show_inspect) {
             render_inspect_modal(&app, rows, cols);
         } else if (menu_n > 0) {
@@ -899,6 +944,16 @@ int tui_app_run(booto_context_t *ctx) {
                     app.drive_cursor = (int)(t - app.drives); /* the F3 handler below unlocks the drive under the cursor */
                 }
                 if (app.show_encrypted_modal || event.type != KEY_F3) continue;
+            }
+
+            if (app.show_welcome) {
+                /* Any key or click closes it; Enter, Esc and clicks stop there, other keys (E, F5) then act. */
+                key_type_t t = event.type;
+                if (t == KEY_NONE || t == KEY_RESIZE || t == KEY_MOUSE_DRAG || t == KEY_MOUSE_RELEASE ||
+                    t == KEY_MOUSE_WHEEL_UP || t == KEY_MOUSE_WHEEL_DOWN)
+                    continue;
+                app.show_welcome = false;
+                if (t == KEY_ENTER || t == KEY_ESC || t == KEY_MOUSE_CLICK) continue;
             }
 
             if (menu_n > 0) {
