@@ -9,6 +9,7 @@ boot=$([ -n "$med" ] && lsblk -no PKNAME "$med" 2>/dev/null | head -n1)
 disk=$(lsblk -no PKNAME "$dev" 2>/dev/null | head -n1)
 [ -n "$disk" ] || disk=${dev#/dev/}
 [ -n "$boot" ] && [ "$disk" = "$boot" ] && exit 0
+# Labels only when the boot disk is unknown (toram, early boot): a suspect disk can carry any label.
 # A stick written by booto-writer: its partitions are labelled BOOTO_LIVE / BOOTO_DATA.
-lsblk -nro PARTLABEL,LABEL "/dev/$disk" 2>/dev/null | grep -Eq '(^| )(BOOTO_[A-Z]+|persistence)( |$)' && exit 0
+[ -z "$med" ] && lsblk -nro PARTLABEL,LABEL "/dev/$disk" 2>/dev/null | grep -Eq '(^| )(BOOTO_[A-Z]+|persistence)( |$)' && exit 0
 exec blockdev --setro "$dev"
