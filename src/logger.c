@@ -11,6 +11,9 @@
 
 #include "logger.h"
 
+#include <execinfo.h>
+#include <fcntl.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -127,4 +130,55 @@ void log_message(log_level_t level, const char *fmt, ...) {
         g_callback(level, time_buf, msg_buf, g_callback_user_data);
     }
     pthread_mutex_unlock(&g_lock);
+}
+
+/* Crash report: everything below runs in a signal handler, so only write(), open() and backtrace. */
+static const char *g_crash_version = "?", *g_crash_primary, *g_crash_fallback;
+static const int CRASH_SIGNALS[] = { SIGSEGV, SIGBUS, SIGFPE, SIGILL, SIGABRT };
+
+static void crash_puts(int fd, const char *s) {
+    if (fd >= 0 && s) { ssize_t w = write(fd, s, strlen(s)); (void)w; }
+}
+
+static void crash_report(int fd, int sig) {
+    char num[4] = { (char)('0' + sig / 10 % 10), (char)('0' + sig % 10), '\n', 0 };
+    crash_puts(fd, "\n=== Booto crash ===\nversion: ");
+    crash_puts(fd, g_crash_version);
+    crash_puts(fd, "\nsignal: ");
+    crash_puts(fd, sig < 10 ? num + 1 : num);
+    void *frames[48];
+    int n = backtrace(frames, 48);
+    crash_puts(fd, "backtrace:\n");
+    if (fd >= 0) backtrace_symbols_fd(frames, n, fd);
+}
+
+static void handle_crash(int sig) {
+    const char *path = g_crash_primary;
+    int fd = path ? open(path, O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW | O_CLOEXEC, 0600) : -1;
+    if (fd < 0 && (path = g_crash_fallback) != NULL)
+        fd = open(path, O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW | O_CLOEXEC, 0600);
+    crash_report(STDERR_FILENO, sig);
+    if (fd >= 0) {
+        crash_report(fd, sig);
+        close(fd);
+        crash_puts(STDERR_FILENO, "\nBooto crashed. Report saved to ");
+        crash_puts(STDERR_FILENO, path);
+        crash_puts(STDERR_FILENO, "\nPlease attach it to an issue: https://github.com/Dellrall/Booto/issues\n");
+    }
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+
+void logger_install_crash_handler(const char *version, const char *primary, const char *fallback) {
+    g_crash_version = version ? version : "?";
+    g_crash_primary = primary;
+    g_crash_fallback = fallback;
+    void *warm[1];
+    backtrace(warm, 1); /* loads libgcc now: its first call may allocate, which a handler must not */
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = handle_crash;
+    sigemptyset(&sa.sa_mask);
+    for (size_t i = 0; i < sizeof(CRASH_SIGNALS) / sizeof(CRASH_SIGNALS[0]); i++)
+        sigaction(CRASH_SIGNALS[i], &sa, NULL);
 }

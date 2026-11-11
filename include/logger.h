@@ -36,6 +36,13 @@ typedef void (*log_callback_fn)(log_level_t level, const char *timestamp, const 
 int logger_init(log_level_t min_level, const char *log_file);
 
 /**
+ * @brief On SIGSEGV, SIGBUS, SIGFPE, SIGILL or SIGABRT: append a crash report (signal, version,
+ *        backtrace) to `primary`, else to `fallback`, print it and where it went to stderr, then die
+ *        with the same signal. Paths are kept, not copied.
+ */
+void logger_install_crash_handler(const char *version, const char *primary, const char *fallback);
+
+/**
  * @brief Set a custom UI callback to receive streaming log lines.
  */
 void logger_set_callback(log_callback_fn callback, void *user_data);

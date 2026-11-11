@@ -12,6 +12,7 @@
 #include "booto.h"
 #include "logger.h"
 #include "version.h"
+#include "persistence_mgr.h"
 #include "disk_mount.h"
 #include "forensic_scan.h"
 #include "tui/tui_app.h"
@@ -362,6 +363,9 @@ int main(int argc, char *argv[]) {
     }
 
     logger_init(ctx.verbose ? LOG_LEVEL_DEBUG : LOG_LEVEL_INFO, NULL);
+    // On the report partition when it is mounted (also after a later F4 unlock), else in RAM.
+    logger_install_crash_handler(BOOTO_VERSION_STRING " (" BOOTO_GIT_HASH ")",
+                                 DEFAULT_PERSISTENCE_MOUNT "/logs/booto-crash.txt", "/tmp/booto-crash.txt");
     int rc;
     if (ctx.mode == BOOTO_MODE_DRY_RUN) {
         LOG_INFO("Booto Engine initialized (Version: %s, Mode: Dry-Run)", BOOTO_VERSION_STRING);
