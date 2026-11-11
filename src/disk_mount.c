@@ -26,11 +26,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <grp.h>
+#include <linux/sched.h>
 #include <sys/ioctl.h>
 #include <sys/mount.h>
 #include <sys/prctl.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -99,7 +101,7 @@ booto_error_t disk_exec_argv(const char *const argv[], const char *stdin_data, s
 }
 
 /* Limits for a child that parses suspect data: CPU time, address space, no files written, no core,
-   no privilege gain, and not root. Returns false if any step fails; the child must then not exec. */
+   no privilege gain, no network, and not root. Returns false if any step fails; the child must then not exec. */
 #define EXEC_SANDBOX_CPU_SECONDS 60
 #define EXEC_SANDBOX_MEMORY_BYTES (1024UL * 1024 * 1024)
 #define EXEC_SANDBOX_UID 65534 /* nobody */
@@ -109,6 +111,8 @@ static bool exec_sandbox_child(void) {
     struct rlimit none = { 0, 0 };
     if (setrlimit(RLIMIT_CPU, &cpu) != 0 || setrlimit(RLIMIT_AS, &mem) != 0 ||
         setrlimit(RLIMIT_FSIZE, &none) != 0 || setrlimit(RLIMIT_CORE, &none) != 0) return false;
+    // Own empty network namespace (loopback down): a hostile parser cannot phone home. Needs root.
+    if (geteuid() == 0 && syscall(SYS_unshare, CLONE_NEWNET) != 0) return false;
     if (geteuid() == 0 && (setgroups(0, NULL) != 0 || setgid(EXEC_SANDBOX_UID) != 0 ||
                            setuid(EXEC_SANDBOX_UID) != 0)) return false;
     return prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) == 0;

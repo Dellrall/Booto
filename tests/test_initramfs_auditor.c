@@ -240,6 +240,8 @@ static void test_exec_capture_escape_attempts(void) {
         chmod(path, 0600);
         snprintf(script, sizeof(script), "cat %s", path);
         ASSERT_TRUE(sandbox_run(script) != BOOTO_OK, "Child must not read a root-only file");
+        // /proc/net follows the reader's namespace: only "lo" is listed in the child's own one.
+        ASSERT_TRUE(sandbox_run("[ \"$(grep -c : /proc/net/dev)\" = 1 ]") == BOOTO_OK, "Child has no network");
     }
     unlink(path);
 
