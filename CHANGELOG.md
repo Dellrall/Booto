@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - An unsigned Windows resource file on the EFI partition (such as `EFI/Microsoft/Boot/Resources/*/bootres.dll.mui`) is no longer reported as an unsigned bootloader: only images the firmware can run (EFI subsystem) need a signature.
+- The boot splash now shows on real Intel-graphics machines, not only in VMs: the Intel display driver is in the initrd and plymouth waits 2 s instead of 8 s for a display.
 
 ## [1.9.6-beta] - 2026-11-11
 
