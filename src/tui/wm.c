@@ -110,6 +110,19 @@ wm_tree_t *wm_tree_create_default(int screen_w, int screen_h) {
     return tree;
 }
 
+/* New-user layout: Storage beside the Threat inspector; the engines and log live in the full dashboard. */
+wm_tree_t *wm_tree_create_simple(int screen_w, int screen_h) {
+    wm_tree_t *tree = calloc(1, sizeof(wm_tree_t));
+    if (!tree) return NULL;
+    tree->next_id = 1;
+    wm_node_t *p1 = create_leaf(tree->next_id++, PANE_STORAGE_DEVICES);
+    wm_node_t *p2 = create_leaf(tree->next_id++, PANE_THREAT_INSPECTOR);
+    tree->root = create_split(SPLIT_VERTICAL, 0.45f, p1, p2);
+    tree->focused_leaf = p1;
+    wm_recalculate_layout(tree, 0, 1, screen_w, screen_h - 2);
+    return tree;
+}
+
 static void collect_leaves(wm_node_t *node, wm_node_t **leaves, int *count, int max) {
     if (!node || *count >= max) return;
     if (node->type == NODE_LEAF) {
