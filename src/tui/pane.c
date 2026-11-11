@@ -42,7 +42,6 @@ void tui_app_state_init(tui_app_state_t *app, booto_context_t *ctx) {
     app->ctx = ctx;
     app->running = true;
     app->luks_unlocked = false;
-    snprintf(app->status_msg, sizeof(app->status_msg), "Select a target in Storage, then press F5 to scan.");
 
     // Dynamic Storage Discovery via disk_mount.c
     disk_discovery_result_t disk_res;
@@ -56,7 +55,6 @@ void tui_app_state_init(tui_app_state_t *app, booto_context_t *ctx) {
         snprintf(app->drives[i].size, sizeof(app->drives[i].size), "%s", disk_res.partitions[i].size_str);
         snprintf(app->drives[i].fs_type, sizeof(app->drives[i].fs_type), "%s", disk_res.partitions[i].fs_type);
         snprintf(app->drives[i].label, sizeof(app->drives[i].label), "%s", disk_res.partitions[i].label);
-        app->drives[i].is_target = disk_res.partitions[i].is_target;
         app->drives[i].is_ro_mounted = false;
         app->drives[i].is_boot_media = disk_res.partitions[i].is_boot_media;
     }
@@ -69,6 +67,16 @@ void tui_app_state_init(tui_app_state_t *app, booto_context_t *ctx) {
         app->modules[i].enabled = true;
     }
 
+    /* One target, preselected: the installed system most likely to be infected. */
+    int pick = pane_pick_target(app->drives, app->drive_count);
+    if (pick >= 0) {
+        app->drives[pick].is_target = true;
+        app->drive_cursor = pick;
+        snprintf(app->status_msg, sizeof(app->status_msg), "%.120s (%s) is selected. Press F5 to scan it.",
+                 app->drives[pick].name, pane_drive_kind(&app->drives[pick]));
+    } else {
+        snprintf(app->status_msg, sizeof(app->status_msg), "Pick the drive to scan with the arrows and Space, then press F5.");
+    }
     int priority = 0;
     for (int i = 0; i < app->drive_count; i++) priority += pane_drive_is_priority(&app->drives[i]);
     char found[128];
@@ -181,7 +189,7 @@ static void render_storage_pane(wm_node_t *n, bool focused, tui_app_state_t *app
     term_puts_clip(x0, top, 2 + dev_w - 1, "Device", A_MUTED);
     if (fs_w) term_puts_clip(fs_x, top, fs_w - 1, "FS", A_MUTED);
     term_puts_clip(size_x, top, size_cw, "Size", A_MUTED);
-    if (label_w) term_puts_clip(label_x, top, right - label_x, "Label", A_MUTED);
+    if (label_w) term_puts_clip(label_x, top, right - label_x, "Contents", A_MUTED);
 
     int vis = n->h - 3;
     if (vis <= 0) return;
@@ -204,8 +212,11 @@ static void render_storage_pane(wm_node_t *n, bool focused, tui_app_state_t *app
         }
         term_puts_clip(size_x, y, size_cw, d->size, row_attr(cur, A_MUTED));
         if (label_w) {
-            term_puts_clip(label_x, y, right - label_x, d->is_ro_mounted ? "mounted RO" : d->label,
-                           row_attr(cur, d->is_ro_mounted ? A_OK : A_TEXT));
+            int lx = label_x;
+            lx += term_puts_clip(lx, y, right - lx, pane_drive_kind(d), row_attr(cur, A_TEXT));
+            const char *extra = d->is_ro_mounted ? "mounted read-only" : d->label;
+            if (extra[0] && lx + 2 < right)
+                term_puts_clip(lx + 2, y, right - lx - 2, extra, row_attr(cur, d->is_ro_mounted ? A_OK : A_MUTED));
         }
     }
     draw_scroll_marks(n, top + 1, vis, first > 0, first + vis < app->drive_count, cursor_row);
@@ -756,8 +767,16 @@ bool pane_handle_input(wm_node_t *node, const input_event_t *event, tui_app_stat
             return true;
         }
         if (event->type == KEY_CHAR && event->ch == ' ') {
-            app->drives[app->drive_cursor].is_target = !app->drives[app->drive_cursor].is_target;
-            snprintf(app->status_msg, sizeof(app->status_msg), "Toggled target flag for %.200s", app->drives[app->drive_cursor].name);
+            /* One target at a time: Space selects this drive, or clears it when it is already selected. */
+            drive_item_t *d = &app->drives[app->drive_cursor];
+            bool on = !d->is_target;
+            for (int i = 0; i < app->drive_count; i++) app->drives[i].is_target = false;
+            d->is_target = on;
+            if (on)
+                snprintf(app->status_msg, sizeof(app->status_msg), "%.120s (%s) is selected. Press F5 to scan it.", d->name,
+                         pane_drive_kind(d));
+            else
+                snprintf(app->status_msg, sizeof(app->status_msg), "No drive selected. Press Space on the drive to scan.");
             return true;
         }
         if (event->type == KEY_ENTER) {

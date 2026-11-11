@@ -154,7 +154,7 @@ These numbers cover synthetic look-alikes only: one or two cases per engine, no 
 | `Alt + H` | **Split Horizontal** | Split focused pane into top & bottom |
 | `Alt + V` | **Split Vertical** | Split focused pane into left & right |
 | `Alt + [` / `Alt + ]` | **Resize Split** | Adjust split ratio of the active node |
-| `Space` | **Toggle Target** | Toggle target disk flag / toggle scanner module |
+| `Space` | **Select Target** | Select the drive to scan (one at a time; Booto preselects the likeliest installed system) / toggle scanner module |
 | `Enter` | **Mount / Unmount** | Mount target storage strictly READ-ONLY |
 | `Mouse Click` | **Click to Focus** | Focus a pane and select the row under the pointer; clicking a row's checkbox toggles it |
 | `Double-Click` | **Activate** | Mount or unlock the drive, or switch the engine on or off |

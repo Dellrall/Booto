@@ -67,6 +67,30 @@ static inline bool pane_drive_is_locked(const drive_item_t *d) {
     return strcmp(d->fs_type, "crypto_LUKS") == 0 || strcmp(d->fs_type, "BitLocker") == 0;
 }
 
+/* What the drive holds, in words a new user knows. */
+static inline const char *pane_drive_kind(const drive_item_t *d) {
+    static const struct { const char *fs, *kind; } k[] = {
+        {"ext4", "Linux"}, {"xfs", "Linux"}, {"btrfs", "Linux"}, {"ntfs", "Windows"},
+        {"crypto_LUKS", "Encrypted Linux"}, {"BitLocker", "Encrypted Windows"}, {"vfat", "Boot files"},
+        {"LVM2_member", "Linux volumes"}, {"swap", "Swap"},
+    };
+    if (d->is_boot_media) return "Booto USB";
+    for (size_t i = 0; i < sizeof(k) / sizeof(k[0]); i++)
+        if (strcmp(d->fs_type, k[i].fs) == 0) return k[i].kind;
+    return "Other";
+}
+
+/* The drive to preselect: the first priority one that can be read now, else the first locked one; -1 if none. */
+static inline int pane_pick_target(const drive_item_t *d, int n) {
+    int locked = -1;
+    for (int i = 0; i < n; i++) {
+        if (!pane_drive_is_priority(&d[i])) continue;
+        if (!pane_drive_is_locked(&d[i])) return i;
+        if (locked < 0) locked = i;
+    }
+    return locked;
+}
+
 typedef struct {
     char name[64];
     char target_path[64];
