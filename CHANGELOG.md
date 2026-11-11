@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The bottom bar shows `F4 Storage`, a shortcut to the Booto storage manager.
 
 ### Fixed
+- `man booto` and `man booto-checks` on the live system now scroll with the arrow keys, `j`/`k`, PgUp/PgDn and the mouse wheel (`less` was missing, so man fell back to `more`).
 - An unsigned Windows resource file on the EFI partition (such as `EFI/Microsoft/Boot/Resources/*/bootres.dll.mui`) is no longer reported as an unsigned bootloader: only images the firmware can run (EFI subsystem) need a signature.
 - The boot splash now shows on real Intel-graphics machines, not only in VMs: the Intel display driver is in the initrd and plymouth waits 2 s instead of 8 s for a display.
 - A boot script that only downloads with `curl` or `wget` (dracut's network boot does) is no longer flagged; it counts only when the download is piped into a shell.
