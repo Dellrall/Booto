@@ -208,8 +208,16 @@ static int modal_key(int x, int y, int end, const char *key, const char *label, 
 }
 
 static void render_exit_modal(tui_app_state_t *app, int rows, int cols) {
-    (void)app;
     int mx, my, mw;
+    if (app->exit_confirm) {
+        bool off = app->exit_confirm == 'p';
+        modal_frame(rows, cols, 40, 7, off ? "Power off" : "Reboot", &mx, &my, &mw);
+        int end = mx + mw - 2, x = mx + 3;
+        put_clip(&x, my + 2, end, off ? "Power off this computer?" : "Reboot this computer?", A_STRONG);
+        x = modal_key(mx + 3, my + 4, end, " Enter ", off ? " Power off" : " Reboot", KEY_ENTER);
+        modal_key(x + 3, my + 4, end, " Esc ", " Back", KEY_ESC);
+        return;
+    }
     modal_frame(rows, cols, 40, 9, "Exit", &mx, &my, &mw);
     int end = mx + mw - 2;
     static const struct {
@@ -853,19 +861,28 @@ int tui_app_run(booto_context_t *ctx) {
         input_event_t event;
         if (term_poll_event(&event, 50)) {
             term_apply_click_zone(&event); /* bottom-bar hints and modal buttons act as their keys */
+            if (app.show_exit_modal && app.exit_confirm) {
+                char c = app.exit_confirm;
+                if (event.type == KEY_ENTER || (event.type == KEY_CHAR && (event.ch == 'y' || event.ch == 'Y' || event.ch == c || event.ch == c - 32))) {
+                    prepare_exit(&app, rows, cols);
+                    term_shutdown();
+                    /* systemd takes a few seconds to stop services: say so instead of a frozen screen */
+                    printf(c == 'p' ? "Powering off...\n" : "Rebooting...\n");
+                    fflush(stdout);
+                    int res = system(c == 'p' ? "systemctl poweroff -i 2>/dev/null || poweroff -f 2>/dev/null || halt -p 2>/dev/null"
+                                              : "systemctl reboot -i 2>/dev/null || reboot -f 2>/dev/null");
+                    (void)res;
+                    exit(0);
+                } else if (event.type == KEY_ESC || event.type == KEY_F10 || (event.type == KEY_CHAR && (event.ch == 'n' || event.ch == 'N'))) {
+                    app.exit_confirm = 0;
+                }
+                continue;
+            }
             if (app.show_exit_modal) {
                 if (event.type == KEY_CHAR && (event.ch == 'p' || event.ch == 'P' || event.ch == '1')) {
-                    prepare_exit(&app, rows, cols);
-                    term_shutdown();
-                    int res = system("systemctl poweroff -i 2>/dev/null || poweroff -f 2>/dev/null || halt -p 2>/dev/null");
-                    (void)res;
-                    exit(0);
+                    app.exit_confirm = 'p';
                 } else if (event.type == KEY_CHAR && (event.ch == 'r' || event.ch == 'R' || event.ch == '2')) {
-                    prepare_exit(&app, rows, cols);
-                    term_shutdown();
-                    int res = system("systemctl reboot -i 2>/dev/null || reboot -f 2>/dev/null");
-                    (void)res;
-                    exit(0);
+                    app.exit_confirm = 'r';
                 } else if (event.type == KEY_CHAR && (event.ch == 's' || event.ch == 'S' || event.ch == '3')) {
                     app.show_exit_modal = false;
                     if (!run_shell(NULL)) app.running = false;
@@ -1086,6 +1103,7 @@ int tui_app_run(booto_context_t *ctx) {
                          "Resize: h/j/k/l move the border, H/J/K/L by 5, Esc when done.");
             } else if (event.type == KEY_F10 || (event.type == KEY_CHAR && (event.ch == 'q' || event.ch == 'Q'))) {
                 app.show_exit_modal = true;
+                app.exit_confirm = 0;
             } else if (event.type == KEY_F3 && atomic_load(&app.scan_active)) {
                 snprintf(app.status_msg, sizeof(app.status_msg), "LUKS unlock is disabled while a scan runs.");
             } else if (event.type == KEY_F3 && app.luks_unlocked) {

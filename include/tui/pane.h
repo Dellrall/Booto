@@ -209,6 +209,7 @@ typedef struct {
     bool show_welcome;                  // first screen: what Booto does and the four steps
     bool exported;                      // F6 saved the report of last_scan
     bool show_exit_modal;
+    char exit_confirm;                  // 'p' or 'r': exit menu asks before powering off or rebooting
     bool show_luks_modal;
     bool show_encrypted_modal;          // F5 on a locked target: unlock first, or scan anyway
     bool show_inspect;                  // Inspect view of last_scan->inspect (Enter on Findings)
