@@ -120,7 +120,11 @@ chroot "${ROOTFS_DIR}" systemctl enable gpm.service
 # Boot splash between GRUB and the TUI; getty@tty1 waits for plymouth to quit, so Booto starts on a clean screen.
 install -d -m 755 "${ROOTFS_DIR}/usr/share/plymouth/themes/booto"
 install -m 644 "${REPO_ROOT}"/assets/plymouth/* "${ROOTFS_DIR}/usr/share/plymouth/themes/booto/"
-chroot "${ROOTFS_DIR}" plymouth-set-default-theme -R booto
+# Real GPUs: without a KMS driver in the initrd, plymouth waits 8 s for one, then the driver loading from the rootfs wipes the boot framebuffer.
+# i915 runs without firmware; amdgpu/nouveau need non-free firmware the ISO does not ship, so they keep the framebuffer fallback.
+echo "i915" >> "${ROOTFS_DIR}/etc/initramfs-tools/modules"
+printf '[Daemon]\nTheme=booto\nDeviceTimeout=2\n' > "${ROOTFS_DIR}/etc/plymouth/plymouthd.conf"
+chroot "${ROOTFS_DIR}" update-initramfs -u
 
 # Configure Hostname and Network
 echo "booto-live" > "${ROOTFS_DIR}/etc/hostname"
