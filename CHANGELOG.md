@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - The TUI starts in a simple view: Storage beside the Threat inspector. Press `E` for the expert view with the Engines and Log panes and the pane layout keys.
 - Storage preselects the installed system most likely to need a scan, and its Contents column says what each drive holds (Linux, Windows, Encrypted Linux, Boot files, Booto USB). `Space` selects one drive to scan instead of toggling several.
+- A welcome box at start explains what Booto does in four steps, and the tab row shows those steps (pick a drive, scan, read findings, save) with the current one highlighted; click a step to run it.
 - The TUI shows the drives most likely to hold the installed OS (Linux root, EFI, LUKS) in orange so you scan them first.
 - Scanning a locked LUKS target now asks you to unlock it first (F3); if you skip, the scan runs with a warning that its result may be incomplete.
 - The bottom bar shows `F4 Storage`, a shortcut to the Booto storage manager.

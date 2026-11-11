@@ -177,6 +177,12 @@ The list does not change the verdict or the exit code.
 .BR \-V ", " \-\-verbose
 Show debug messages.
 .SH TUI
+At start a welcome box says what Booto does and lists the four steps; any key
+or click closes it. Row two shows the same steps on the right
+.RB ( "1 Pick a drive" ", " "2 Scan F5" ", " "3 Read findings" ", " "4 Save F6" ):
+the current step is highlighted and finished ones turn green. Click a step to
+scan, open the Findings page or save the report.
+.PP
 The TUI shows tiled panes: Storage, Scanner modules, Live logs, Threat
 inspector and Case report. Click to focus a pane or select a row, click a bar
 button, and use the wheel to scroll. Drag a border to resize the panes on
