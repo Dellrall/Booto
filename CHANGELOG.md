@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Storage: the drive Booto runs from can no longer be opened or selected as a target, and a CD boot shows `Booto CD` instead of `Booto USB`. A disk with no filesystem shows `No filesystem`, and `Enter` on it explains there is nothing to open instead of logging a mount error.
+
 ### Added
 - The `F10` exit menu asks before powering off or rebooting (`Enter` to go ahead, `Esc` to go back), and the console says "Powering off..." or "Rebooting..." while systemd stops services.
 - A weekly `Upstream Rules Check` workflow pulls Microsoft's latest dbx list and opens a PR with the regenerated rules when it changed; the maintainer re-signs before merging.

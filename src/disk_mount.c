@@ -558,6 +558,8 @@ booto_error_t disk_discover_partitions(disk_discovery_result_t *result, bool inc
                         snprintf(p->label, sizeof(p->label), "Windows (NTFS)");
                     } else if (strcmp(probed_fs, "xfs") == 0 || strcmp(probed_fs, "btrfs") == 0) {
                         snprintf(p->label, sizeof(p->label), "Linux Filesystem");
+                    } else if (strcmp(probed_fs, "unknown") == 0) {
+                        p->label[0] = '\0';
                     } else {
                         snprintf(p->label, sizeof(p->label), "Storage Volume");
                     }
@@ -604,7 +606,7 @@ booto_error_t disk_discover_partitions(disk_discovery_result_t *result, bool inc
                 continue;
             p->is_boot_media = true;
             p->is_target = false;
-            snprintf(p->label, sizeof(p->label), "Booto USB");
+            snprintf(p->label, sizeof(p->label), "Booto runs from here");
         }
     }
 
