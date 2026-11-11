@@ -113,6 +113,8 @@ rm -f "${ROOTFS_DIR}"/lib/udev/rules.d/69-lvm*.rules
 # Its initramfs hook copies those rules and fails without them; the live initramfs needs no LVM.
 rm -f "${ROOTFS_DIR}"/usr/share/initramfs-tools/hooks/lvm2 "${ROOTFS_DIR}"/usr/share/initramfs-tools/scripts/*/lvm2
 chroot "${ROOTFS_DIR}" systemctl mask lvm2-monitor.service lvm2-lvmpolld.socket
+# Timers that write to or snapshot mounted filesystems (e2scrub on LVM, fstrim) or fetch from the net.
+chroot "${ROOTFS_DIR}" systemctl mask e2scrub_all.timer e2scrub_reap.service fstrim.timer apt-daily.timer apt-daily-upgrade.timer man-db.timer
 # gpm passes the mouse to the text console, which forwards it to the TUI as X10 reports
 chroot "${ROOTFS_DIR}" systemctl enable gpm.service
 # Boot splash between GRUB and the TUI; getty@tty1 waits for plymouth to quit, so Booto starts on a clean screen.
