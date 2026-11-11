@@ -124,6 +124,23 @@ static void write_reports(const forensic_scan_report_t *rep, const char *dir) {
 /* Host-machine checks like firmware_audit, so they are reported but never change the verdict. */
 static void run_expert_firmware(const char *dir) {
     printf("\nExpert firmware (this machine, not part of the verdict)\n");
+    fw_hv_report_t hv;
+    firmware_hv_probe(NULL, &hv);
+    switch (firmware_hv_classify(&hv)) {
+    case FW_HV_ANNOUNCED:
+        printf("Hypervisor: running inside a VM (%s); expected in VirtualBox, QEMU or VMware\n",
+               hv.vendor[0] ? hv.vendor : hv.sys_type[0] ? hv.sys_type : "CPUID hypervisor bit");
+        break;
+    case FW_HV_HIDDEN:
+        printf("Hypervisor: SUSPICIOUS (medium): none announced, but CPUID takes %u ticks (bare metal stays under %u); "
+               "a firmware implant may be running Booto inside a hidden hypervisor. Re-run to confirm\n",
+               hv.cpuid_ticks, FW_HV_SLOW_TICKS);
+        break;
+    case FW_HV_NONE:
+        if (hv.cpuid_ticks) printf("Hypervisor: none seen (CPUID %u ticks)\n", hv.cpuid_ticks);
+        else printf("Hypervisor: not checked on this CPU type\n");
+        break;
+    }
     fw_nvram_report_t *nv = calloc(1, sizeof(*nv));
     if (!nv) {
         LOG_ERROR("Out of memory allocating NVRAM report");

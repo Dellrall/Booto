@@ -128,6 +128,31 @@ typedef struct {
  */
 booto_error_t firmware_spi_analyze(const char *image_path, fw_spi_report_t *out);
 
+typedef enum {
+    FW_HV_NONE,        /* no hypervisor seen */
+    FW_HV_ANNOUNCED,   /* a hypervisor says so (VirtualBox, KVM, ...): normal inside a VM */
+    FW_HV_HIDDEN       /* none announced, yet CPUID is as slow as a VM exit: possible hidden hypervisor */
+} fw_hv_state_t;
+
+#define FW_HV_SLOW_TICKS 1000u   /* median TSC ticks per CPUID; bare metal stays well under, a VM exit goes over */
+
+typedef struct {
+    bool hv_bit;               /* CPUID.1:ECX[31] */
+    char vendor[13];           /* CPUID 0x40000000 signature, "" if none */
+    char sys_type[32];         /* /sys/hypervisor/type, "" if absent */
+    uint32_t cpuid_ticks;      /* median TSC ticks per CPUID, 0 = not measured (not x86) */
+} fw_hv_report_t;
+
+/**
+ * @brief Look for a hypervisor under Booto: the CPUID hypervisor bit and vendor, /sys/hypervisor/type,
+ *        and how long CPUID takes (it always exits to a VT-x/AMD-V hypervisor). Read-only, about 0.1 s.
+ *        A hypervisor can fake all of this, so a clean result proves nothing.
+ * @param sys_type_path NULL = /sys/hypervisor/type.
+ * @return BOOTO_OK; BOOTO_ERR_INVALID_ARG if out is NULL.
+ */
+booto_error_t firmware_hv_probe(const char *sys_type_path, fw_hv_report_t *out);
+fw_hv_state_t firmware_hv_classify(const fw_hv_report_t *r);
+
 const char *firmware_check_name(fw_check_id_t id);
 const char *firmware_result_str(fw_result_t r);   /* "pass" "fail" "unknown" "n/a" */
 

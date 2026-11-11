@@ -21,6 +21,10 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#if defined(__x86_64__) || defined(__i386__)
+#include <cpuid.h>
+#include <x86intrin.h>
+#endif
 
 #define EFI_GLOBAL_GUID         "8be4df61-93ca-11d2-aa0d-00e098032b8c"
 #define EFI_IMAGE_SECURITY_GUID "d719b2cb-3d3a-4596-a3bc-dad00e67656f"
@@ -1262,4 +1266,63 @@ const char *firmware_result_str(fw_result_t r) {
     case FW_RESULT_NA: return "n/a";
     }
     return "?";
+}
+
+static int cmp_u32(const void *a, const void *b) {
+    uint32_t x = *(const uint32_t *)a, y = *(const uint32_t *)b;
+    return (x > y) - (x < y);
+}
+
+#if defined(__x86_64__) || defined(__i386__)
+static uint32_t cpuid_median_ticks(void) {
+    /* Spin first: an idle core runs below the TSC rate, which inflates ticks per CPUID. */
+    uint64_t end = __rdtsc() + 200000000ULL;
+    while (__rdtsc() < end) {}
+    uint32_t s[65];
+    for (size_t i = 0; i < 65; i++) {
+        unsigned int a, b, c, d, aux;
+        _mm_lfence();
+        uint64_t t0 = __rdtsc();
+        __cpuid(0, a, b, c, d);
+        uint64_t t1 = __rdtscp(&aux);
+        (void)a; (void)b; (void)c; (void)d;
+        uint64_t dt = t1 - t0;
+        s[i] = dt > UINT32_MAX ? UINT32_MAX : (uint32_t)dt;
+    }
+    qsort(s, 65, sizeof(s[0]), cmp_u32);
+    return s[32];
+}
+#endif
+
+/* shortcut: timing uses only the TSC, which a hypervisor can offset; add an HPET cross-check if this ever flags real machines */
+booto_error_t firmware_hv_probe(const char *sys_type_path, fw_hv_report_t *out) {
+    if (!out) return BOOTO_ERR_INVALID_ARG;
+    memset(out, 0, sizeof(*out));
+    FILE *f = fopen(sys_type_path ? sys_type_path : "/sys/hypervisor/type", "r");
+    if (f) {
+        if (fgets(out->sys_type, sizeof(out->sys_type), f)) out->sys_type[strcspn(out->sys_type, "\r\n")] = '\0';
+        fclose(f);
+    }
+#if defined(__x86_64__) || defined(__i386__)
+    unsigned int a, b, c, d;
+    if (__get_cpuid(1, &a, &b, &c, &d)) out->hv_bit = (c >> 31) & 1u;
+    if (out->hv_bit) {
+        __cpuid(0x40000000, a, b, c, d);
+        memcpy(out->vendor, &b, 4);
+        memcpy(out->vendor + 4, &c, 4);
+        memcpy(out->vendor + 8, &d, 4);
+        out->vendor[12] = '\0';
+        for (size_t i = 0; i < 12; i++)
+            if (out->vendor[i] && (out->vendor[i] < 0x20 || out->vendor[i] > 0x7e)) out->vendor[i] = '?';
+    }
+    out->cpuid_ticks = cpuid_median_ticks();
+#endif
+    return BOOTO_OK;
+}
+
+fw_hv_state_t firmware_hv_classify(const fw_hv_report_t *r) {
+    if (!r) return FW_HV_NONE;
+    if (r->hv_bit || r->vendor[0] || r->sys_type[0]) return FW_HV_ANNOUNCED;
+    if (r->cpuid_ticks > FW_HV_SLOW_TICKS) return FW_HV_HIDDEN;
+    return FW_HV_NONE;
 }
