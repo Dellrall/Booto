@@ -28,7 +28,8 @@ jobs:
 
       - name: Install ISO Build Dependencies
         run: |
-          sudo apt-get update
+          sudo sed -i "/azure.archive/d" /etc/apt/apt-mirrors.txt 2>/dev/null || true  # runner Azure mirror stalls apt for minutes
+          sudo apt-get update -o Acquire::http::Timeout=10 -o Acquire::Retries=2
           sudo apt-get install -y \
             build-essential \
             debootstrap \

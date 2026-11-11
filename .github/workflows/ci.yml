@@ -41,7 +41,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          sudo apt-get update
+          sudo sed -i "/azure.archive/d" /etc/apt/apt-mirrors.txt 2>/dev/null || true  # runner Azure mirror stalls apt for minutes
+          sudo apt-get update -o Acquire::http::Timeout=10 -o Acquire::Retries=2
           sudo apt-get install -y build-essential clang libncurses-dev libblkid-dev libudev-dev libssl-dev libsqlite3-dev libyara-dev cpio python3
 
       - name: Build with Makefile (${{ matrix.compiler }})
@@ -75,7 +76,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          sudo apt-get update
+          sudo sed -i "/azure.archive/d" /etc/apt/apt-mirrors.txt 2>/dev/null || true  # runner Azure mirror stalls apt for minutes
+          sudo apt-get update -o Acquire::http::Timeout=10 -o Acquire::Retries=2
           sudo apt-get install -y build-essential clang libncurses-dev libblkid-dev libudev-dev libssl-dev libsqlite3-dev libyara-dev
 
       - name: Run ASan & UBSan Test Suite
@@ -95,7 +97,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          sudo apt-get update
+          sudo sed -i "/azure.archive/d" /etc/apt/apt-mirrors.txt 2>/dev/null || true  # runner Azure mirror stalls apt for minutes
+          sudo apt-get update -o Acquire::http::Timeout=10 -o Acquire::Retries=2
           sudo apt-get install -y build-essential lcov libncurses-dev libblkid-dev libudev-dev libssl-dev libsqlite3-dev libyara-dev
 
       - name: Run Coverage Evaluation
@@ -110,7 +113,8 @@ jobs:
 
       - name: Install Analysis Tools
         run: |
-          sudo apt-get update
+          sudo sed -i "/azure.archive/d" /etc/apt/apt-mirrors.txt 2>/dev/null || true  # runner Azure mirror stalls apt for minutes
+          sudo apt-get update -o Acquire::http::Timeout=10 -o Acquire::Retries=2
           sudo apt-get install -y cppcheck libncurses-dev libblkid-dev
 
       - name: Generate Version Header
@@ -139,7 +143,8 @@ jobs:
 
       - name: Install CBMC
         run: |
-          sudo apt-get update
+          sudo sed -i "/azure.archive/d" /etc/apt/apt-mirrors.txt 2>/dev/null || true  # runner Azure mirror stalls apt for minutes
+          sudo apt-get update -o Acquire::http::Timeout=10 -o Acquire::Retries=2
           sudo apt-get install -y cbmc
           cbmc --version
 
@@ -155,7 +160,8 @@ jobs:
 
       - name: Install Valgrind
         run: |
-          sudo apt-get update
+          sudo sed -i "/azure.archive/d" /etc/apt/apt-mirrors.txt 2>/dev/null || true  # runner Azure mirror stalls apt for minutes
+          sudo apt-get update -o Acquire::http::Timeout=10 -o Acquire::Retries=2
           sudo apt-get install -y build-essential valgrind libncurses-dev libblkid-dev libssl-dev libsqlite3-dev libyara-dev
 
       - name: Build Project
