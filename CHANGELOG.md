@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.6-beta] - 2026-11-11
+
 ### Added
 - When Booto crashes it now writes a short crash report (version, signal, backtrace) to `logs/booto-crash.txt` on the report partition, or `/tmp/booto-crash.txt` without one, and tells you where it is so you can attach it to an issue. The TUI restores the terminal first.
 
