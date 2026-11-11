@@ -42,7 +42,7 @@ mkdir -p "${WORK_DIR}" "${CD_DIR}/live" "${CD_DIR}/boot/grub" "${OUTPUT_DIR}"
 echo "[+] Step 1/6: Bootstrapping Debian 12 (Bookworm) minimal rootfs..."
 debootstrap --arch=amd64 \
             --variant=minbase \
-            --include=linux-image-amd64,live-boot,systemd,systemd-sysv,libncurses6,libblkid1,libudev1,libssl3,libsqlite3-0,libyara9,cryptsetup,lvm2,util-linux,gdisk,e2fsprogs,gzip,xz-utils,zstd,lz4,bzip2,flashrom,gpm,plymouth,plymouth-label,console-setup-linux,vim-tiny,nano,man-db \
+            --include=linux-image-amd64,live-boot,systemd,systemd-sysv,libncurses6,libblkid1,libudev1,libssl3,libsqlite3-0,libyara9,cryptsetup,lvm2,util-linux,gdisk,e2fsprogs,gzip,xz-utils,zstd,lz4,bzip2,flashrom,gpm,plymouth,plymouth-label,console-setup-linux,vim-tiny,nano,man-db,less \
             "${DEBIAN_VERSION}" "${ROOTFS_DIR}" "${DEBIAN_MIRROR}"
 
 # The kernel and every library must carry Debian's security fixes, not only the last point release:
@@ -99,6 +99,8 @@ install -m 644 "${REPO_ROOT}"/rules/*.json "${REPO_ROOT}"/rules/*.json.sig \
 install -m 644 "${REPO_ROOT}/LICENSE" "${ROOTFS_DIR}/usr/share/booto/LICENSE"
 install -D -m 644 "${REPO_ROOT}/man/booto.1" "${ROOTFS_DIR}/usr/share/man/man1/booto.1"
 install -D -m 644 "${REPO_ROOT}/man/booto-checks.7" "${ROOTFS_DIR}/usr/share/man/man7/booto-checks.7"
+# man pages and logs page through less: arrows, j/k, PgUp/PgDn and the mouse wheel scroll; q quits.
+printf 'PAGER=less\nMANPAGER=less\nLESS="-R --mouse --wheel-lines=3"\n' >> "${ROOTFS_DIR}/etc/environment"
 # The dbx rules derive from Microsoft's secureboot_objects (BSD-2-Clause-Patent): ship its notice.
 install -m 644 "${REPO_ROOT}/rules/sources/secureboot_objects-License.txt" "${ROOTFS_DIR}/usr/share/booto/rules/"
 # The firmware audit reads SMM/SMRR lock bits through /dev/cpu/N/msr (read-only).
