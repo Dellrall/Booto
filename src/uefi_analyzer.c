@@ -293,6 +293,12 @@ booto_error_t uefi_inspect_efi_file(const char *efi_path, uefi_scan_result_t *re
                         "EFI executable matches a known revoked bootkit or vulnerable loader in the Secure Boot DBX");
     }
 
+    // First-stage loaders (BOOTX64.EFI, shim, bootmgfw) are what the firmware itself runs, and on a stock machine
+    // only Microsoft's keys are trusted there. Later stages (grub, kernels) are signed by the distro: not checked.
+    const char *base = strrchr(efi_path, '/');
+    base = base ? base + 1 : efi_path;
+    bool first_stage = strncasecmp(base, "boot", 4) == 0 || strncasecmp(base, "shim", 4) == 0;
+
     // 2. Unsigned image the firmware would run. Resource-only PEs (Windows bootres.dll.mui,
     // subsystem 2/3) are never loaded by firmware, so a missing signature there is not a finding.
     if (!pe.has_authenticode && pe.subsystem >= 10 && pe.subsystem <= 13) {
@@ -301,7 +307,7 @@ booto_error_t uefi_inspect_efi_file(const char *efi_path, uefi_scan_result_t *re
                         efi_path,
                         pe.sha256,
                         "UEFI_MISSING_AUTHENTICODE",
-                        SEVERITY_HIGH,
+                        first_stage ? SEVERITY_HIGH : SEVERITY_MEDIUM, // memtest, systemd-boot, rEFInd ship unsigned
                         "EFI executable does not contain an embedded Authenticode signature table");
     }
 
@@ -323,12 +329,7 @@ booto_error_t uefi_inspect_efi_file(const char *efi_path, uefi_scan_result_t *re
                         "Certificate table is malformed or its PKCS#7 signature does not verify");
     }
 
-    // First-stage loaders (BOOTX64.EFI, shim, bootmgfw) are what the firmware itself runs, and on a stock machine
-    // only Microsoft's keys are trusted there. Later stages (grub, kernels) are signed by the distro: not checked.
-    const char *base = strrchr(efi_path, '/');
-    base = base ? base + 1 : efi_path;
-    if (pe.authenticode_state == AUTHENTICODE_VALID && !pe.authenticode_microsoft &&
-        (strncasecmp(base, "boot", 4) == 0 || strncasecmp(base, "shim", 4) == 0)) {
+    if (pe.authenticode_state == AUTHENTICODE_VALID && !pe.authenticode_microsoft && first_stage) {
         add_uefi_threat(result,
                         "First-Stage Loader Not Signed By Microsoft",
                         efi_path,

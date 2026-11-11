@@ -315,6 +315,7 @@ static void test_esp_scan_by_magic(void) {
     rmdir(dir);
     ASSERT_INT_EQ(res.efi_files_scanned, 1, "Renamed PE scanned, text file skipped");
     ASSERT_STR_EQ(res.findings[0].rule_id, "UEFI_MISSING_AUTHENTICODE", "Renamed unsigned PE flagged");
+    ASSERT_INT_EQ(res.findings[0].severity, SEVERITY_MEDIUM, "Unsigned later-stage loader is MEDIUM");
     TEST_PASS("test_esp_scan_by_magic");
 }
 
