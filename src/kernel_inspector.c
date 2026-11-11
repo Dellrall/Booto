@@ -319,7 +319,7 @@ booto_error_t kernel_inspect_directory(const char *lib_modules_dir, kernel_scan_
         int shown = w->unsigned_count < LKM_UNSIGNED_CAP ? w->unsigned_count : LKM_UNSIGNED_CAP;
         for (int i = 0; i < shown; i++) {
             add_threat_finding(result, "Unsigned Kernel Module", w->unsigned_paths[i], w->unsigned_sha[i], "LKM_UNSIGNED",
-                               "", 0, SEVERITY_HIGH,
+                               "", 0, strstr(w->unsigned_paths[i], "/updates/dkms/") ? SEVERITY_MEDIUM : SEVERITY_HIGH,
                                "Module has no signature while the kernel's own modules are signed: added after install "
                                "(rootkit, or a DKMS driver built without the MOK key)");
         }

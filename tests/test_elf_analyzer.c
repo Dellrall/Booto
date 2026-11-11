@@ -185,6 +185,19 @@ static void test_unsigned_lkm_flagged(void) {
     for (int i = 0; i < res.threats_detected; i++) {
         if (strcmp(res.findings[i].detection_rule, "LKM_UNSIGNED") == 0) {
             ASSERT_TRUE(strstr(res.findings[i].file_path, "/b.ko") != NULL, "Flagged module is b.ko");
+            ASSERT_INT_EQ(res.findings[i].severity, SEVERITY_HIGH, "Unsigned module outside DKMS is HIGH");
+        }
+    }
+
+    // DKMS builds land in updates/dkms/ unsigned unless MOK-signed: still flagged, but MEDIUM.
+    snprintf(cmd, sizeof(cmd), "mkdir -p %s/updates/dkms && mv %s/b.ko %s/updates/dkms/", dir, dir, dir);
+    ASSERT_TRUE(system(cmd) == 0, "move to dkms");
+    memset(&res, 0, sizeof(res));
+    kernel_inspect_directory(dir, &res);
+    ASSERT_INT_EQ(count_rule(&res, "LKM_UNSIGNED"), 1, "DKMS module still flagged");
+    for (int i = 0; i < res.threats_detected; i++) {
+        if (strcmp(res.findings[i].detection_rule, "LKM_UNSIGNED") == 0) {
+            ASSERT_INT_EQ(res.findings[i].severity, SEVERITY_MEDIUM, "Unsigned DKMS module is MEDIUM");
         }
     }
 
