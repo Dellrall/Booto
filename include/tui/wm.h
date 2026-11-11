@@ -69,6 +69,11 @@ typedef struct {
 wm_tree_t *wm_tree_create_default(int screen_w, int screen_h);
 
 /**
+ * @brief Initialize the two-pane new-user layout (Storage, Threat inspector).
+ */
+wm_tree_t *wm_tree_create_simple(int screen_w, int screen_h);
+
+/**
  * @brief Recalculate dimensions across all nodes in the BSP tree.
  */
 void wm_recalculate_layout(wm_tree_t *tree, int x, int y, int w, int h);

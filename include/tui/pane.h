@@ -83,6 +83,7 @@ typedef struct {
     booto_context_t *ctx;
     wm_tree_t *wm;
     bool running;
+    bool expert;                        // E: full dashboard (engines, log) instead of the simple view
 
     // Storage state
     drive_item_t drives[MAX_DRIVES];

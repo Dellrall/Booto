@@ -19,6 +19,17 @@ static void test_wm_tree_creation(void) {
     TEST_PASS("test_wm_tree_creation");
 }
 
+static void test_wm_tree_simple(void) {
+    TEST_START("test_wm_tree_simple");
+    wm_tree_t *tree = wm_tree_create_simple(100, 40);
+    ASSERT_TRUE(tree && tree->root && tree->root->type == NODE_SPLIT, "Simple tree is one split");
+    ASSERT_INT_EQ(tree->root->left->pane_type, PANE_STORAGE_DEVICES, "Storage on the left");
+    ASSERT_INT_EQ(tree->root->right->pane_type, PANE_THREAT_INSPECTOR, "Threat inspector on the right");
+    ASSERT_TRUE(tree->focused_leaf == tree->root->left, "Storage has focus");
+    wm_tree_destroy(tree);
+    TEST_PASS("test_wm_tree_simple");
+}
+
 static void test_wm_splits_and_zoom(void) {
     TEST_START("test_wm_splits_and_zoom");
     wm_tree_t *tree = wm_tree_create_default(120, 50);
@@ -172,6 +183,7 @@ int main(void) {
     test_wm_resize();
     printf("\n--- Running BSP Window Manager Tests ---\n");
     test_wm_tree_creation();
+    test_wm_tree_simple();
     test_wm_splits_and_zoom();
     test_wm_find_leaf_at();
     test_wm_close_zoomed();

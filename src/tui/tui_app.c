@@ -110,7 +110,7 @@ static void render_top_bar(tui_app_state_t *app, int cols) {
 }
 
 static void render_bottom_bar(tui_app_state_t *app, int rows, int cols) {
-    static const struct {
+    const struct {
         const char *key;
         const char *label;
         key_type_t type;
@@ -119,20 +119,22 @@ static void render_bottom_bar(tui_app_state_t *app, int rows, int cols) {
         {" F5 ", " Scan", KEY_F5, 0},        {" F6 ", " Export", KEY_F6, 0},   {" F3 ", " Unlock", KEY_F3, 0},
         {" F4 ", " Storage", KEY_F4, 0},     {" Tab ", " Next pane", KEY_TAB, 0}, {" Alt+Z ", " Zoom", KEY_ALT_Z, 0},
         {" ^R ", " Resize", KEY_CHAR, CTRL_R},
+        {" E ", app->expert ? " Simple view" : " Expert view", KEY_CHAR, 'e'},
         {" F10 ", " Exit", KEY_F10, 0},
     };
     enum { HINT_COUNT = (int)(sizeof(hints) / sizeof(hints[0])) };
-    static const int drop_order[] = {6, 5, 4, 2, 3, 1}; /* Resize, Zoom, Tab, F3, F4, F6; F5 and F10 always stay */
+    static const int drop_order[] = {6, 5, 4, 2, 3, 1}; /* Resize, Zoom, Tab, F3, F4, F6; F5, E and F10 always stay */
     bool shown[HINT_COUNT];
     int hw = -2;
     for (int i = 0; i < HINT_COUNT; i++) {
-        shown[i] = true;
-        hw += (int)(strlen(hints[i].key) + strlen(hints[i].label)) + 2;
+        shown[i] = app->expert || i < 4 || i > 6; /* pane layout keys only in the expert view */
+        if (shown[i]) hw += (int)(strlen(hints[i].key) + strlen(hints[i].label)) + 2;
     }
     int status_w = (int)strlen(app->status_msg);
     for (size_t d = 0; d < sizeof(drop_order) / sizeof(drop_order[0]); d++) {
         if (1 + status_w + 2 + hw <= cols - 1) break;
         int i = drop_order[d];
+        if (!shown[i]) continue;
         shown[i] = false;
         hw -= (int)(strlen(hints[i].key) + strlen(hints[i].label)) + 2;
     }
@@ -561,7 +563,7 @@ static void finish_forensic_scan(tui_app_state_t *app) {
         int failed = SCAN_MOD_COUNT - ok_count;
         snprintf(log_buf, sizeof(log_buf), "Scan incomplete: %d of %d engines could not run.", failed, (int)SCAN_MOD_COUNT);
         tui_app_append_log(app, LOG_LEVEL_WARN, NULL, log_buf);
-        snprintf(app->status_msg, sizeof(app->status_msg), "Scan incomplete: %d engine%s could not run. See Log.",
+        snprintf(app->status_msg, sizeof(app->status_msg), "Scan incomplete: %d engine%s could not run. Press E for the log.",
                  failed, failed == 1 ? "" : "s");
     } else {
         tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "Scan finished: no threats found.");
@@ -694,7 +696,8 @@ int tui_app_run(booto_context_t *ctx) {
 
     tui_app_state_t app;
     tui_app_state_init(&app, ctx);
-    app.wm = wm_tree_create_default(cols, rows);
+    app.wm = wm_tree_create_simple(cols, rows);
+    wm_tree_t *other_wm = wm_tree_create_default(cols, rows); /* the layout E switches to */
 
     g_current_app = &app;
     logger_set_callback(tui_logger_hook, NULL);
@@ -932,7 +935,17 @@ int tui_app_run(booto_context_t *ctx) {
                 continue;
             }
 
-            if (event.type == KEY_CHAR && event.ch >= '1' && event.ch <= '4') {
+            if (event.type == KEY_CHAR && (event.ch == 'e' || event.ch == 'E')) {
+                wm_tree_t *t = app.wm;
+                app.wm = other_wm;
+                other_wm = t;
+                app.expert = !app.expert;
+                drag_split = NULL;
+                last_click_leaf = NULL;
+                snprintf(app.status_msg, sizeof(app.status_msg), "%s",
+                         app.expert ? "Expert view: engines and log shown; Tab, Alt+Z and Ctrl+R arrange the panes. E goes back."
+                                    : "Simple view: pick a drive and press F5. E shows the engines and log.");
+            } else if (event.type == KEY_CHAR && event.ch >= '1' && event.ch <= '4') {
                 app.page = event.ch - '1';
             } else if (page && event.type == KEY_ESC) {
                 app.page = 0;
@@ -1088,6 +1101,7 @@ int tui_app_run(booto_context_t *ctx) {
     g_current_app = NULL;
 
     wm_tree_destroy(app.wm);
+    wm_tree_destroy(other_wm);
     free(app.last_scan);
     pthread_mutex_destroy(&app.log_lock);
     term_shutdown();

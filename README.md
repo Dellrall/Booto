@@ -147,6 +147,7 @@ These numbers cover synthetic look-alikes only: one or two cases per engine, no 
 | Shortcut | Action | Description |
 | :--- | :--- | :--- |
 | `Alt + Arrow` | **Spatial Focus** | Move focus to adjacent pane |
+| `E` | **Expert View** | Switch between the simple view (Storage and Threat inspector) and the full dashboard with the Engines and Log panes |
 | `Tab` | **Cycle Focus** | Cycle focus through active leaf panes |
 | `Alt + M` | **Move / Swap** | Swap the focused pane with the next pane |
 | `Alt + Z` | **Zoom / Maximize** | Toggle full-screen on focused pane |
