@@ -91,6 +91,27 @@ static inline int pane_pick_target(const drive_item_t *d, int n) {
     return locked;
 }
 
+/* The k-th finding of r at or above min: its index in r (copied to *f), or -1 past the end. */
+static inline int pane_finding_index(const forensic_scan_report_t *r, booto_severity_t min, int k, scan_finding_t *f) {
+    for (int i = 0; forensic_scan_finding(r, i, f); i++)
+        if (f->severity >= min && k-- == 0) return i;
+    return -1;
+}
+
+static inline int pane_finding_shown(const forensic_scan_report_t *r, booto_severity_t min) {
+    int n = 0;
+    scan_finding_t f;
+    while (pane_finding_index(r, min, n, &f) >= 0) n++;
+    return n;
+}
+
+/* What a new user should do about a finding of this severity. */
+static inline const char *pane_next_step(booto_severity_t s) {
+    if (s >= SEVERITY_HIGH) return "What a bootkit does. Save the report (F6) and do not trust this system until it is checked.";
+    if (s == SEVERITY_MEDIUM) return "A normal setup can do this too (DKMS module, custom loader). Check that you installed it.";
+    return "For information. No action needed unless it is unexpected.";
+}
+
 typedef struct {
     char name[64];
     char target_path[64];
@@ -131,7 +152,8 @@ typedef struct {
     // Scan result and pages (0 = panes, 1 = Findings, 2 = Firmware, 3 = Evidence)
     forensic_scan_report_t *last_scan;  // heap-allocated on first scan, freed at exit
     int page;
-    int finding_cursor;                 // selected row of the Findings page
+    int finding_cursor;                 // selected row of the Findings page (among the rows the filter shows)
+    booto_severity_t finding_min_sev;   // f: Findings page shows this severity and above
     int finding_first, finding_list_y, finding_vis; // listed rows: first index, screen row, count (last render)
 
     // Background scan (F5). Worker owns pending_scan/pending_err/scan_target/scan_enabled until scan_done;
@@ -139,6 +161,7 @@ typedef struct {
     pthread_t scan_thread;
     atomic_bool scan_active;            // set by main before spawn, cleared by main after join
     atomic_bool scan_done;              // set by worker when forensic_scan_run returns
+    long scan_started_ms;               // CLOCK_MONOTONIC ms at F5, for the elapsed time
     _Atomic int scan_step;              // 0..SCAN_MOD_COUNT, from the progress callback
     forensic_scan_report_t *pending_scan;
     booto_error_t pending_err;

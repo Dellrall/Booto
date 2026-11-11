@@ -575,6 +575,9 @@ static void finish_forensic_scan(tui_app_state_t *app) {
         snprintf(log_buf, sizeof(log_buf), "Forensic scan could not run (error %d)", (int)err);
         tui_app_append_log(app, LOG_LEVEL_ERROR, NULL, log_buf);
         snprintf(app->status_msg, sizeof(app->status_msg), "Scan failed to run (error %d).", (int)err);
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    app->scan_started_ms = ts.tv_sec * 1000L + ts.tv_nsec / 1000000L;
         return;
     }
     free(app->last_scan);
