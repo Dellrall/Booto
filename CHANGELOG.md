@@ -13,9 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - When Booto crashes it now writes a short crash report (version, signal, backtrace) to `logs/booto-crash.txt` on the report partition, or `/tmp/booto-crash.txt` without one, and tells you where it is so you can attach it to an issue. The TUI restores the terminal first.
 
 ### Security
-- A symlink, FIFO or device file on a scanned disk is no longer read as a file: hashing, PE and kernel-module checks skip it instead of hanging on `/dev/zero` or reading the live system, and scans never follow a symlinked folder off the target.
+- A FIFO or device file on a scanned disk, or a symlink to one, is no longer read: hashing, PE and kernel-module checks skip it instead of hanging on `/dev/zero`, and scans never follow a symlinked folder off the target.
 - The sandboxed decompressors and parsers now run in their own empty network namespace.
-- The write blocker trusts the `BOOTO_*` and `persistence` partition labels only when it cannot tell which disk Booto booted from; before, a suspect disk with such a label stayed writable.
+- The write blocker trusts the `BOOTO_*` and `persistence` partition labels only when it cannot tell which disk Booto booted from; before, a suspect disk with such a label stayed writable. A stick whose live system is mounted from the whole disk stays writable too.
 - The live system masks `e2scrub_all`, `fstrim`, `apt-daily` and `man-db` timers, so nothing snapshots, trims or rewrites a mounted disk in the background.
 - The live kernel boots with hardening options (`slab_nomerge`, `init_on_alloc=1`, `page_alloc.shuffle=1`, `randomize_kstack_offset=on`, `vsyscall=none`, `debugfs=off`) and `systemd.gpt_auto=0`, so systemd never auto-mounts a suspect disk's partitions.
 
