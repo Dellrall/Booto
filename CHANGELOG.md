@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - After a scan, a line under the verdict says what it means and what to press next; each finding on the Findings page has a `Next` line saying what to do about it.
 - `f` on the Findings page filters to MEDIUM and above or HIGH and above. The Findings pane shows the time elapsed while a scan runs.
 - `?` opens a help box listing what each key does; the bottom bar shows `? Help`.
+- `/` on the Findings page searches findings by word (file, rule, engine, detail); `Enter` keeps the search, `Esc` clears it. Each finding's detail has a `Checked` line saying in plain words what its engine looked at.
 - The TUI shows the drives most likely to hold the installed OS (Linux root, EFI, LUKS) in orange so you scan them first.
 - Scanning a locked LUKS target now asks you to unlock it first (F3); if you skip, the scan runs with a warning that its result may be incomplete.
 - The bottom bar shows `F4 Storage`, a shortcut to the Booto storage manager.

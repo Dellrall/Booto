@@ -194,11 +194,16 @@ static void test_finding_filter(void) {
     r->uefi.bootkits_detected = 1;
     r->uefi.findings[0].severity = SEVERITY_MEDIUM;
     scan_finding_t f;
-    ASSERT_INT_EQ(pane_finding_shown(r, SEVERITY_INFO), 3, "No filter shows all");
-    ASSERT_INT_EQ(pane_finding_shown(r, SEVERITY_MEDIUM), 2, "MEDIUM and above drops LOW");
-    ASSERT_INT_EQ(pane_finding_index(r, SEVERITY_MEDIUM, 1, &f), 2, "Second shown row is the UEFI finding");
-    ASSERT_INT_EQ(pane_finding_index(r, SEVERITY_HIGH, 1, &f), -1, "Past the end");
+    ASSERT_INT_EQ(pane_finding_shown(r, SEVERITY_INFO, ""), 3, "No filter shows all");
+    ASSERT_INT_EQ(pane_finding_shown(r, SEVERITY_MEDIUM, ""), 2, "MEDIUM and above drops LOW");
+    ASSERT_INT_EQ(pane_finding_index(r, SEVERITY_MEDIUM, "", 1, &f), 2, "Second shown row is the UEFI finding");
+    ASSERT_INT_EQ(pane_finding_index(r, SEVERITY_HIGH, "", 1, &f), -1, "Past the end");
     ASSERT_TRUE(strstr(pane_next_step(SEVERITY_MEDIUM), "normal setup") != NULL, "MEDIUM says a normal setup can do this");
+    snprintf(r->uefi.findings[0].file_path, sizeof(r->uefi.findings[0].file_path), "/EFI/Boot/BOOTX64.EFI");
+    ASSERT_INT_EQ(pane_finding_shown(r, SEVERITY_INFO, "bootx64"), 1, "Search matches the place, ignoring case");
+    ASSERT_INT_EQ(pane_finding_shown(r, SEVERITY_HIGH, "bootx64"), 0, "Search and severity filter combine");
+    ASSERT_INT_EQ(pane_finding_shown(r, SEVERITY_INFO, "nothing-like-this"), 0, "No match shows none");
+    ASSERT_TRUE(strstr(pane_engine_meaning(SCAN_MOD_UEFI), "EFI partition") != NULL, "UEFI engine reads in plain words");
     free(r);
     TEST_PASS("test_finding_filter");
 }

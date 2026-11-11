@@ -539,18 +539,22 @@ static void put_wrapped(int x, int *y, int bottom, int w, const char *s, uint32_
 static void render_findings_list(wm_node_t *n, bool focused, tui_app_state_t *app) {
     const forensic_scan_report_t *r = app->last_scan;
     booto_severity_t min = app->finding_min_sev;
-    int total = forensic_scan_finding_count(r), count = pane_finding_shown(r, min);
-    char title[64];
-    if (min > SEVERITY_INFO)
-        snprintf(title, sizeof(title), "Findings: %s and above (%d of %d, f: filter)", booto_severity_str(min), count, total);
+    const char *q = app->finding_query;
+    int total = forensic_scan_finding_count(r), count = pane_finding_shown(r, min, q);
+    char title[128];
+    if (app->finding_searching || q[0])
+        snprintf(title, sizeof(title), "Search: %s%s (%d of %d, Esc clears)", q, app->finding_searching ? "_" : "", count, total);
+    else if (min > SEVERITY_INFO)
+        snprintf(title, sizeof(title), "Findings: %s and above (%d of %d, f: filter, /: search)", booto_severity_str(min), count, total);
     else
-        snprintf(title, sizeof(title), "All findings (%d, f: filter)", count);
+        snprintf(title, sizeof(title), "All findings (%d, f: filter, /: search)", count);
     draw_frame(n, focused, title);
     int x0 = n->x + 2, iw = n->w - 4, right = x0 + iw, top = n->y + 1, bottom = n->y + n->h - 1;
     app->finding_vis = 0;
     if (iw <= 0 || bottom <= top) return;
     if (count == 0) {
         const char *msg = !r ? "No scan yet. Press F5 to scan the target."
+                        : total > 0 && q[0] ? "No finding holds that text. Esc clears the search."
                         : total > 0 ? "No findings at this severity. Press f to show more."
                         : r->verdict == SCAN_VERDICT_INCOMPLETE ? "No findings, but some engines could not run: see Evidence (4)."
                                                                  : "No findings: every engine that ran came back clean.";
@@ -561,7 +565,7 @@ static void render_findings_list(wm_node_t *n, bool focused, tui_app_state_t *ap
     if (app->finding_cursor < 0) app->finding_cursor = 0;
 
     /* The selected finding's detail takes the lower rows when the pane is tall enough. */
-    int detail_h = n->h >= 17 ? 9 : 0, list_bottom = bottom - detail_h;
+    int detail_h = n->h >= 18 ? 10 : 0, list_bottom = bottom - detail_h;
     int sev_w = 10, eng_w = 14, name_x = x0 + sev_w + eng_w, name_w = (right - name_x) / 2;
     if (name_w < 16) name_w = right - name_x;
     int where_x = name_x + name_w;
@@ -577,7 +581,7 @@ static void render_findings_list(wm_node_t *n, bool focused, tui_app_state_t *ap
     app->finding_list_y = top + 1;
     app->finding_vis = vis;
     scan_finding_t f;
-    for (int row = 0; row < vis && pane_finding_index(r, min, first + row, &f) >= 0; row++) {
+    for (int row = 0; row < vis && pane_finding_index(r, min, q, first + row, &f) >= 0; row++) {
         int y = top + 1 + row;
         bool cur = focused && first + row == app->finding_cursor;
         if (cur) {
@@ -591,15 +595,15 @@ static void render_findings_list(wm_node_t *n, bool focused, tui_app_state_t *ap
     }
     draw_scroll_marks(n, top + 1, vis, first > 0, first + vis < count, cursor_row);
 
-    if (!detail_h || pane_finding_index(r, min, app->finding_cursor, &f) < 0) return;
+    if (!detail_h || pane_finding_index(r, min, q, app->finding_cursor, &f) < 0) return;
     int y = list_bottom;
     term_hline(n->x + 1, y++, n->w - 2, A_MUTED);
-    static const char *const LABEL[] = {"Finding", "Where", "Next", "Rule", "Hash", "Detail"};
-    const char *val[] = {f.name, f.where, pane_next_step(f.severity), f.rule[0] ? f.rule : "-", f.hash[0] ? f.hash : "-",
-                         f.detail[0] ? f.detail : "-"};
-    for (int k = 0; k < 6 && y < bottom; k++) {
+    static const char *const LABEL[] = {"Finding", "Where", "Checked", "Next", "Rule", "Hash", "Detail"};
+    const char *val[] = {f.name, f.where, pane_engine_meaning(f.engine), pane_next_step(f.severity), f.rule[0] ? f.rule : "-",
+                         f.hash[0] ? f.hash : "-", f.detail[0] ? f.detail : "-"};
+    for (int k = 0; k < 7 && y < bottom; k++) {
         term_puts_clip(x0, y, iw, LABEL[k], A_MUTED);
-        if (k < 5) term_puts_clip(x0 + 9, y++, iw - 9, val[k], k == 0 ? A_STRONG : k == 2 ? severity_attr(f.severity) : A_TEXT);
+        if (k < 6) term_puts_clip(x0 + 9, y++, iw - 9, val[k], k == 0 ? A_STRONG : k == 3 ? severity_attr(f.severity) : A_TEXT);
         else put_wrapped(x0 + 9, &y, bottom, iw - 9, val[k], A_TEXT);
     }
 }
@@ -767,7 +771,7 @@ bool pane_handle_click(wm_node_t *node, int x, int y, tui_app_state_t *app) {
         return true;
     } else if (node->pane_type == PANE_FINDINGS_LIST) {
         int row = y - app->finding_list_y, i = app->finding_first + row;
-        if (row < 0 || row >= app->finding_vis || i >= pane_finding_shown(app->last_scan, app->finding_min_sev)) return false;
+        if (row < 0 || row >= app->finding_vis || i >= pane_finding_shown(app->last_scan, app->finding_min_sev, app->finding_query)) return false;
         app->finding_cursor = i;
         return true;
     } else if (node->pane_type == PANE_THREAT_INSPECTOR && y == app->inspect_hint_y) {
@@ -859,7 +863,14 @@ bool pane_handle_input(wm_node_t *node, const input_event_t *event, tui_app_stat
             return true;
         }
         if (event->type == KEY_DOWN || (event->type == KEY_CHAR && event->ch == 'j')) {
-            if (app->finding_cursor < pane_finding_shown(app->last_scan, app->finding_min_sev) - 1) app->finding_cursor++;
+            if (app->finding_cursor < pane_finding_shown(app->last_scan, app->finding_min_sev, app->finding_query) - 1) app->finding_cursor++;
+            return true;
+        }
+        if (event->type == KEY_CHAR && event->ch == '/') {
+            app->finding_searching = true;
+            app->finding_query[0] = '\0';
+            app->finding_cursor = 0;
+            snprintf(app->status_msg, sizeof(app->status_msg), "Search: type a word (file, rule, engine), Enter keeps it, Esc clears.");
             return true;
         }
         if (event->type == KEY_CHAR && (event->ch == 'f' || event->ch == 'F')) {
