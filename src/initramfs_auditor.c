@@ -23,19 +23,20 @@ typedef struct {
     const char *pattern;
     const char *threat_name;
     const char *description;
+    bool needs_shell_pipe; /* also needs "| sh" / "| bash" on the line: a download alone is normal (dracut livenet) */
 } script_audit_rule_t;
 
 static const script_audit_rule_t G_SCRIPT_RULES[] = {
-    { "/dev/tcp/",               "Reverse Shell Payload",           "Network socket redirection (/dev/tcp/) in boot script" },
-    { "/dev/udp/",               "Reverse Shell Payload",           "Network socket redirection (/dev/udp/) in boot script" },
-    { "bash -i",                 "Interactive Reverse Shell",       "Spawning interactive bash shell in initramfs" },
-    { "nc -e",                   "Netcat Backdoor",                 "Netcat executable execution flag in boot script" },
-    { "mkfifo /tmp/",            "FIFO Pipe Shell Backdoor",        "Named pipe allocation in temp space for reverse shell" },
-    { "curl -s",                 "Silent Remote Payload Fetcher",   "Silent curl invocation during early boot" },
-    { "wget -q",                 "Silent Remote Payload Fetcher",   "Silent wget invocation during early boot" },
-    { "insmod /dev/shm",         "Ramdisk LKM Injection",           "Direct kernel module loading from shared memory" },
-    { "insmod /tmp",             "Temp LKM Injection",              "Direct kernel module loading from temporary directory" },
-    { "kexec -l",                "Untrusted Kernel Re-execution",   "kexec dynamic kernel swap during boot sequence" }
+    { "/dev/tcp/",               "Reverse Shell Payload",           "Network socket redirection (/dev/tcp/) in boot script", false },
+    { "/dev/udp/",               "Reverse Shell Payload",           "Network socket redirection (/dev/udp/) in boot script", false },
+    { "bash -i",                 "Interactive Reverse Shell",       "Spawning interactive bash shell in initramfs", false },
+    { "nc -e",                   "Netcat Backdoor",                 "Netcat executable execution flag in boot script", false },
+    { "mkfifo /tmp/",            "FIFO Pipe Shell Backdoor",        "Named pipe allocation in temp space for reverse shell", false },
+    { "curl ",                   "Remote Payload Fetcher",          "Boot script downloads a script and runs it in a shell", true },
+    { "wget ",                   "Remote Payload Fetcher",          "Boot script downloads a script and runs it in a shell", true },
+    { "insmod /dev/shm",         "Ramdisk LKM Injection",           "Direct kernel module loading from shared memory", false },
+    { "insmod /tmp",             "Temp LKM Injection",              "Direct kernel module loading from temporary directory", false },
+    { "kexec -l",                "Untrusted Kernel Re-execution",   "kexec dynamic kernel swap during boot sequence", false }
 };
 
 static const size_t G_SCRIPT_RULES_COUNT = sizeof(G_SCRIPT_RULES) / sizeof(G_SCRIPT_RULES[0]);
@@ -108,6 +109,20 @@ static void add_initramfs_threat(initramfs_scan_result_t *result,
                  f->threat_name, f->file_path, f->matched_pattern, f->line_number);
 }
 
+// True when the line pipes into sh or bash ("| sh", "|/bin/bash -s"), not into sha256sum or shuf.
+static bool pipes_to_shell(const char *line, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        if (line[i] != '|' || (i + 1 < len && line[i + 1] == '|')) continue;
+        size_t j = i + 1;
+        while (j < len && (line[j] == ' ' || line[j] == '\t')) j++;
+        if (len - j >= 5 && memcmp(&line[j], "/bin/", 5) == 0) j += 5;
+        else if (len - j >= 9 && memcmp(&line[j], "/usr/bin/", 9) == 0) j += 9;
+        size_t n = (len - j >= 4 && memcmp(&line[j], "bash", 4) == 0) ? 4 : (len - j >= 2 && memcmp(&line[j], "sh", 2) == 0) ? 2 : 0;
+        if (n && (j + n == len || !isalnum((unsigned char)line[j + n]))) return true;
+    }
+    return false;
+}
+
 static void audit_script_content(const char *file_name, const char *content, size_t len, initramfs_scan_result_t *result) {
     result->scripts_audited++;
 
@@ -125,7 +140,8 @@ static void audit_script_content(const char *file_name, const char *content, siz
         if (lead < line_len && ptr[lead] != '#') {
             for (size_t r = 0; r < G_SCRIPT_RULES_COUNT; r++) {
                 const script_audit_rule_t *rule = &G_SCRIPT_RULES[r];
-                if (mem_contains(ptr, line_len, rule->pattern)) {
+                if (mem_contains(ptr, line_len, rule->pattern) &&
+                    (!rule->needs_shell_pipe || pipes_to_shell(ptr, line_len))) {
                     add_initramfs_threat(result, file_name, rule->threat_name, rule->pattern, line_no, rule->description);
                 }
             }
