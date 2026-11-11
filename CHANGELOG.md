@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- The `F10` exit menu asks before powering off or rebooting (`Enter` to go ahead, `Esc` to go back), and the console says "Powering off..." or "Rebooting..." while systemd stops services.
 - A weekly `Upstream Rules Check` workflow pulls Microsoft's latest dbx list and opens a PR with the regenerated rules when it changed; the maintainer re-signs before merging.
 
 ## [1.9.7-beta] - 2026-11-11
