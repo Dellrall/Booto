@@ -293,8 +293,9 @@ booto_error_t uefi_inspect_efi_file(const char *efi_path, uefi_scan_result_t *re
                         "EFI executable matches a known revoked bootkit or vulnerable loader in the Secure Boot DBX");
     }
 
-    // 2. Check for unsigned / missing Authenticode certificates
-    if (!pe.has_authenticode) {
+    // 2. Unsigned image the firmware would run. Resource-only PEs (Windows bootres.dll.mui,
+    // subsystem 2/3) are never loaded by firmware, so a missing signature there is not a finding.
+    if (!pe.has_authenticode && pe.subsystem >= 10 && pe.subsystem <= 13) {
         add_uefi_threat(result,
                         "Unsigned EFI Bootloader / Driver",
                         efi_path,

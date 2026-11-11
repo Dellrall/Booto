@@ -232,6 +232,33 @@ static void test_packed_code_section(void) {
     TEST_PASS("test_packed_code_section");
 }
 
+/* An unsigned EFI program is flagged; an unsigned Windows resource file (bootres.dll.mui) is not. */
+static bool unsigned_flagged(uint16_t subsystem) {
+    static uint8_t b[0x400];
+    size_t len = build_pe(b, sizeof(b), true, false);
+    b[0x84 + 20 + 68] = (uint8_t)subsystem;
+    const char *path = "/tmp/booto_unsigned_test.efi";
+    FILE *fp = fopen(path, "wb");
+    if (!fp) return false;
+    fwrite(b, 1, len, fp);
+    fclose(fp);
+    uefi_scan_result_t res;
+    memset(&res, 0, sizeof(res));
+    uefi_inspect_efi_file(path, &res);
+    unlink(path);
+    for (int i = 0; i < res.bootkits_detected; i++) {
+        if (strcmp(res.findings[i].rule_id, "UEFI_MISSING_AUTHENTICODE") == 0) return true;
+    }
+    return false;
+}
+
+static void test_unsigned_needs_efi_subsystem(void) {
+    TEST_START("test_unsigned_needs_efi_subsystem");
+    ASSERT_TRUE(unsigned_flagged(10), "Unsigned EFI application is flagged");
+    ASSERT_TRUE(!unsigned_flagged(2), "Unsigned Windows GUI resource PE is not flagged");
+    TEST_PASS("test_unsigned_needs_efi_subsystem");
+}
+
 static authenticode_state_t verify_state(const uint8_t *b, size_t len) {
     pe_efi_info_t info;
     if (uefi_parse_pe_buffer(b, len, &info) != BOOTO_OK) return (authenticode_state_t)-1;
@@ -366,6 +393,7 @@ int main(void) {
     test_pe32_parser();
     test_pe_wrapping_offset_rejected();
     test_packed_code_section();
+    test_unsigned_needs_efi_subsystem();
     test_authenticode_signature();
     test_esp_scan_by_magic();
     test_esp_layout_and_sbat();
