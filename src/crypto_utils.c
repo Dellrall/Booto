@@ -11,8 +11,11 @@
 
 #include "crypto_utils.h"
 
+#include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #define ROTR(x, n) (((x) >> (n)) | ((x) << (32 - (n))))
 #define CH(x, y, z) (((x) & (y)) ^ (~(x) & (z)))
@@ -144,10 +147,20 @@ void sha256_buffer_hex(const uint8_t *data, size_t len, char hex_out[65]) {
     hex_out[64] = '\0';
 }
 
+FILE *fopen_regular(const char *path) {
+    // O_NONBLOCK: a FIFO planted on the target must not hang the open; it is then refused below.
+    int fd = open(path, O_RDONLY | O_CLOEXEC | O_NONBLOCK);
+    if (fd < 0) return NULL;
+    struct stat st;
+    FILE *fp = (fstat(fd, &st) == 0 && S_ISREG(st.st_mode)) ? fdopen(fd, "rb") : NULL;
+    if (!fp) close(fd);
+    return fp;
+}
+
 bool sha256_file_hex(const char *file_path, char hex_out[65]) {
     if (!file_path || !hex_out) return false;
 
-    FILE *fp = fopen(file_path, "rb");
+    FILE *fp = fopen_regular(file_path);
     if (!fp) return false;
 
     sha256_ctx_t ctx;

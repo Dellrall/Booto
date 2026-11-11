@@ -94,7 +94,7 @@ static bool lkm_tail_signed(const uint8_t *buf, size_t len) {
 /* shortcut: reads the last 16 KiB; a signature larger than that reads as unsigned. Raise if one is seen. */
 static bool lkm_file_signed(const char *path) {
     uint8_t tail[16384];
-    FILE *fp = fopen(path, "rb");
+    FILE *fp = fopen_regular(path);
     if (!fp) return false;
     size_t got = 0;
     if (fseek(fp, 0, SEEK_END) == 0) {
@@ -215,7 +215,7 @@ static booto_error_t inspect_compressed_lkm(const char *ko_path, const lkm_codec
     result->modules_scanned++;
 
     /* Read here and pipe it in: the sandboxed decompressor runs as nobody and could not open a 0600 module. */
-    FILE *fp = fopen(ko_path, "rb");
+    FILE *fp = fopen_regular(ko_path);
     if (!fp) {
         LOG_WARN("Could not open kernel module '%s'", ko_path);
         return BOOTO_ERR_IO;
@@ -275,7 +275,8 @@ static void scan_dir_recursive(const char *base_path, kernel_scan_result_t *resu
         snprintf(full_path, sizeof(full_path), "%s/%s", base_path, entry->d_name);
 
         struct stat st;
-        if (stat(full_path, &st) == 0) {
+        // lstat first: never descend a symlinked directory, which can point outside the target.
+        if (lstat(full_path, &st) == 0 && (!S_ISLNK(st.st_mode) || (stat(full_path, &st) == 0 && !S_ISDIR(st.st_mode)))) {
             if (S_ISDIR(st.st_mode)) {
                 scan_dir_recursive(full_path, result, depth + 1, w);
             } else if (S_ISREG(st.st_mode)) {

@@ -8,6 +8,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdio.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -38,6 +39,12 @@ void sha256_final(sha256_ctx_t *ctx, uint8_t hash[32]);
  * @brief Compute SHA-256 of a memory buffer and return hex string (64 chars + null).
  */
 void sha256_buffer_hex(const uint8_t *data, size_t len, char hex_out[65]);
+
+/**
+ * @brief fopen(path, "rb") that refuses anything but a regular file, so a symlink on a target
+ *        that points at /dev/zero, a FIFO or a device cannot hang or flood a scan.
+ */
+FILE *fopen_regular(const char *path);
 
 /**
  * @brief Compute SHA-256 of a file path and return hex string (64 chars + null).
