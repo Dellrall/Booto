@@ -4,6 +4,7 @@
  */
 #include "test_framework.h"
 #include "tui/wm.h"
+#include "tui/pane.h"
 
 static void test_wm_tree_creation(void) {
     TEST_START("test_wm_tree_creation");
@@ -153,7 +154,21 @@ static void test_wm_resize(void) {
     TEST_PASS("test_wm_resize");
 }
 
+static void test_drive_priority(void) {
+    TEST_START("test_drive_priority");
+    drive_item_t d = {.fs_type = "ntfs"};
+    ASSERT_TRUE(pane_drive_is_priority(&d), "An NTFS system partition is a priority");
+    d.is_boot_media = true;
+    ASSERT_TRUE(!pane_drive_is_priority(&d), "The Booto stick never is");
+    drive_item_t esp = {.fs_type = "vfat"};
+    ASSERT_TRUE(!pane_drive_is_priority(&esp) && !pane_drive_is_locked(&esp), "An ESP is neither");
+    drive_item_t bl = {.fs_type = "BitLocker"};
+    ASSERT_TRUE(pane_drive_is_priority(&bl) && pane_drive_is_locked(&bl), "BitLocker is a locked priority");
+    TEST_PASS("test_drive_priority");
+}
+
 int main(void) {
+    test_drive_priority();
     test_wm_resize();
     printf("\n--- Running BSP Window Manager Tests ---\n");
     test_wm_tree_creation();
