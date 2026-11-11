@@ -68,6 +68,11 @@ static inline bool pane_drive_is_locked(const drive_item_t *d) {
     return strcmp(d->fs_type, "crypto_LUKS") == 0 || strcmp(d->fs_type, "BitLocker") == 0;
 }
 
+/* No filesystem Booto knows: a blank disk, or one it cannot read. Nothing to mount. */
+static inline bool pane_drive_is_blank(const drive_item_t *d) {
+    return d->fs_type[0] == '\0' || strcmp(d->fs_type, "unknown") == 0;
+}
+
 /* What the drive holds, in words a new user knows. */
 static inline const char *pane_drive_kind(const drive_item_t *d) {
     static const struct { const char *fs, *kind; } k[] = {
@@ -75,7 +80,9 @@ static inline const char *pane_drive_kind(const drive_item_t *d) {
         {"crypto_LUKS", "Encrypted Linux"}, {"BitLocker", "Encrypted Windows"}, {"vfat", "Boot files"},
         {"LVM2_member", "Linux volumes"}, {"swap", "Swap"},
     };
-    if (d->is_boot_media) return "Booto USB";
+    const char *base = strrchr(d->name, '/');
+    if (d->is_boot_media) return strncmp(base ? base + 1 : d->name, "sr", 2) == 0 ? "Booto CD" : "Booto USB";
+    if (pane_drive_is_blank(d)) return "No filesystem";
     for (size_t i = 0; i < sizeof(k) / sizeof(k[0]); i++)
         if (strcmp(d->fs_type, k[i].fs) == 0) return k[i].kind;
     return "Other";

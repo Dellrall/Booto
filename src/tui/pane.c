@@ -792,6 +792,17 @@ bool pane_handle_input(wm_node_t *node, const input_event_t *event, tui_app_stat
             if (app->drive_cursor < app->drive_count - 1) app->drive_cursor++;
             return true;
         }
+        drive_item_t *sel = app->drive_count > 0 ? &app->drives[app->drive_cursor] : NULL;
+        if (sel && sel->is_boot_media && (event->type == KEY_ENTER || (event->type == KEY_CHAR && event->ch == ' '))) {
+            snprintf(app->status_msg, sizeof(app->status_msg), "%.120s is the drive Booto runs from, not evidence. Pick another drive.",
+                     sel->name);
+            return true;
+        }
+        if (sel && pane_drive_is_blank(sel) && event->type == KEY_ENTER) {
+            snprintf(app->status_msg, sizeof(app->status_msg),
+                     "%.120s has no filesystem Booto knows: nothing to open. Space then F5 still checks its boot sectors.", sel->name);
+            return true;
+        }
         if (event->type == KEY_CHAR && event->ch == ' ') {
             /* One target at a time: Space selects this drive, or clears it when it is already selected. */
             drive_item_t *d = &app->drives[app->drive_cursor];

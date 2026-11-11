@@ -182,6 +182,11 @@ static void test_drive_priority(void) {
     ASSERT_INT_EQ(pane_pick_target(list, 1), -1, "An ESP alone is not preselected");
     ASSERT_STR_EQ(pane_drive_kind(&list[2]), "Linux", "ext4 reads as Linux");
     ASSERT_STR_EQ(pane_drive_kind(&d), "Booto USB", "The boot stick is named");
+    drive_item_t cd = {.name = "/dev/sr0", .is_boot_media = true};
+    ASSERT_STR_EQ(pane_drive_kind(&cd), "Booto CD", "A CD boot is not called a USB");
+    drive_item_t blank = {.fs_type = "unknown"};
+    ASSERT_TRUE(pane_drive_is_blank(&blank) && !pane_drive_is_blank(&list[2]), "Only a disk with no known filesystem is blank");
+    ASSERT_STR_EQ(pane_drive_kind(&blank), "No filesystem", "A blank disk says so");
     TEST_PASS("test_drive_priority");
 }
 
