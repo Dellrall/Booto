@@ -35,7 +35,7 @@ static bool g_atexit_registered = false;
 static volatile sig_atomic_t g_tty_dirty = 0;
 static volatile sig_atomic_t g_resized = 0;
 
-static const int FATAL_SIGNALS[] = { SIGTERM, SIGHUP, SIGINT, SIGQUIT, SIGSEGV, SIGBUS, SIGABRT, SIGFPE };
+static const int FATAL_SIGNALS[] = { SIGTERM, SIGHUP, SIGINT, SIGQUIT, SIGSEGV, SIGBUS, SIGABRT, SIGFPE, SIGILL };
 #define FATAL_SIGNAL_COUNT (sizeof(FATAL_SIGNALS) / sizeof(FATAL_SIGNALS[0]))
 static struct sigaction g_old_fatal_sa[FATAL_SIGNAL_COUNT];
 static struct sigaction g_old_winch_sa;
@@ -79,12 +79,17 @@ static void restore_tty_atexit(void) {
 
 static void handle_fatal_signal(int sig) {
     restore_tty(TCSANOW);
-    struct sigaction dfl;
-    memset(&dfl, 0, sizeof(dfl));
-    dfl.sa_handler = SIG_DFL;
-    sigemptyset(&dfl.sa_mask);
-    sigaction(sig, &dfl, NULL);
-    raise(sig); /* delivered with the default action once this handler returns */
+    /* Hand on to the handler installed before ours (the crash reporter), else the default action. */
+    struct sigaction prev;
+    memset(&prev, 0, sizeof(prev));
+    prev.sa_handler = SIG_DFL;
+    sigemptyset(&prev.sa_mask);
+    for (size_t i = 0; i < FATAL_SIGNAL_COUNT; i++)
+        if (FATAL_SIGNALS[i] == sig && g_old_fatal_sa[i].sa_handler != handle_fatal_signal &&
+            g_old_fatal_sa[i].sa_handler != SIG_IGN) /* an ignored signal still ends the TUI */
+            prev = g_old_fatal_sa[i];
+    sigaction(sig, &prev, NULL);
+    raise(sig); /* delivered to that handler once this one returns */
 }
 
 static void handle_sigwinch(int sig) {

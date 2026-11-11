@@ -8,6 +8,9 @@
 
 #include <fcntl.h>
 #include <pthread.h>
+#include <signal.h>
+#include <stdio.h>
+#include <sys/wait.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -115,12 +118,42 @@ static void test_logger_use_color(void) {
     TEST_PASS("test_logger_use_color");
 }
 
+/* A crash writes its report to the fallback path when the primary cannot be opened, then dies with the signal. */
+static void test_crash_handler_report(void) {
+    TEST_START("test_crash_handler_report");
+    char dir[] = "/tmp/booto_crash_XXXXXX";
+    ASSERT_TRUE(mkdtemp(dir) != NULL, "temp dir");
+    char fallback[64];
+    snprintf(fallback, sizeof(fallback), "%s/crash.txt", dir);
+    pid_t pid = fork();
+    if (pid == 0) {
+        int devnull = open("/dev/null", O_WRONLY);
+        dup2(devnull, STDERR_FILENO);
+        logger_install_crash_handler("9.9.9-test", "/nonexistent/booto/crash.txt", fallback);
+        raise(SIGSEGV);
+        _exit(0);
+    }
+    int status = 0;
+    waitpid(pid, &status, 0);
+    ASSERT_TRUE(WIFSIGNALED(status) && WTERMSIG(status) == SIGSEGV, "child still dies with SIGSEGV");
+    char buf[4096] = {0};
+    FILE *f = fopen(fallback, "r");
+    ASSERT_TRUE(f != NULL, "report written to the fallback");
+    if (f) { size_t got = fread(buf, 1, sizeof(buf) - 1, f); (void)got; fclose(f); }
+    ASSERT_TRUE(strstr(buf, "version: 9.9.9-test") && strstr(buf, "signal: 11") && strstr(buf, "backtrace:"),
+                "report has version, signal and backtrace");
+    unlink(fallback);
+    rmdir(dir);
+    TEST_PASS("test_crash_handler_report");
+}
+
 int main(void) {
     printf("\n--- Running Logger Tests ---\n");
     test_logger_callback();
     test_logger_callback_silences_stderr();
     test_logger_two_threads();
     test_logger_use_color();
+    test_crash_handler_report();
     TEST_SUMMARY();
     return 0;
 }

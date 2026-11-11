@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- When Booto crashes it now writes a short crash report (version, signal, backtrace) to `logs/booto-crash.txt` on the report partition, or `/tmp/booto-crash.txt` without one, and tells you where it is so you can attach it to an issue. The TUI restores the terminal first.
+
 ### Security
 - A symlink, FIFO or device file on a scanned disk is no longer read as a file: hashing, PE and kernel-module checks skip it instead of hanging on `/dev/zero` or reading the live system, and scans never follow a symlinked folder off the target.
 - The sandboxed decompressors and parsers now run in their own empty network namespace.
