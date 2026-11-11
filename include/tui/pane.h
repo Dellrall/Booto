@@ -175,6 +175,7 @@ typedef struct {
     persistence_mgr_t persist;
 
     // Status bar & modal state
+    bool show_help;                     // ?: what each key does
     bool show_welcome;                  // first screen: what Booto does and the four steps
     bool exported;                      // F6 saved the report of last_scan
     bool show_exit_modal;
