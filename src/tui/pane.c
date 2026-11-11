@@ -58,6 +58,7 @@ void tui_app_state_init(tui_app_state_t *app, booto_context_t *ctx) {
         snprintf(app->drives[i].label, sizeof(app->drives[i].label), "%s", disk_res.partitions[i].label);
         app->drives[i].is_target = disk_res.partitions[i].is_target;
         app->drives[i].is_ro_mounted = false;
+        app->drives[i].is_boot_media = disk_res.partitions[i].is_boot_media;
     }
 
     app->module_count = (int)(sizeof(MODULE_DEFS) / sizeof(MODULE_DEFS[0]));
@@ -68,8 +69,11 @@ void tui_app_state_init(tui_app_state_t *app, booto_context_t *ctx) {
         app->modules[i].enabled = true;
     }
 
-    char found[96];
-    snprintf(found, sizeof(found), "Found %d disks and partitions. Select a target and press F5.", app->drive_count);
+    int priority = 0;
+    for (int i = 0; i < app->drive_count; i++) priority += pane_drive_is_priority(&app->drives[i]);
+    char found[128];
+    snprintf(found, sizeof(found), "Found %d disks and partitions; %d in orange hold an installed system. Select a target and press F5.",
+             app->drive_count, priority);
     tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "Booto started. Running from RAM; nothing is written to disks.");
     tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "Persistence is locked.");
     tui_app_append_log(app, LOG_LEVEL_INFO, NULL, found);
@@ -193,7 +197,7 @@ static void render_storage_pane(wm_node_t *n, bool focused, tui_app_state_t *app
         }
         if (d->is_target) term_put_glyph(x0, y, TERM_G_TARGET, row_attr(cur, A_TARGET));
         const char *name = strncmp(d->name, "/dev/", 5) == 0 ? d->name + 5 : d->name;
-        term_puts_clip(dev_x, y, dev_w - 1, name, row_attr(cur, d->is_target ? A_TARGET : A_TEXT));
+        term_puts_clip(dev_x, y, dev_w - 1, name, row_attr(cur, pane_drive_is_priority(d) ? A_PRIORITY : d->is_target ? A_TARGET : A_TEXT));
         if (fs_w) {
             bool unknown = strcmp(d->fs_type, "unknown") == 0 || d->fs_type[0] == '\0';
             term_puts_clip(fs_x, y, fs_w - 1, unknown ? "-" : d->fs_type, row_attr(cur, unknown ? A_MUTED : A_TEXT));

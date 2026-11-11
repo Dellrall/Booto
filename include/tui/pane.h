@@ -13,6 +13,7 @@
 
 #include <pthread.h>
 #include <stdatomic.h>
+#include <string.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -32,6 +33,7 @@ extern "C" {
 #define A_OK     MAKE_ATTR(COLOR_GREEN, COLOR_DEFAULT, ATTR_NONE)
 #define A_WARN   MAKE_ATTR(COLOR_YELLOW, COLOR_DEFAULT, ATTR_NONE)
 #define A_BAD    MAKE_ATTR(COLOR_RED, COLOR_DEFAULT, ATTR_BOLD)
+#define A_PRIORITY MAKE_ATTR(COLOR_YELLOW, COLOR_DEFAULT, ATTR_NONE) /* non-bold yellow: orange (brown) on the Linux console */
 #define A_DRAG   MAKE_ATTR(COLOR_CYAN, COLOR_DEFAULT, ATTR_BOLD) /* border being dragged */
 #define A_CURSOR MAKE_ATTR(COLOR_DEFAULT, COLOR_DEFAULT, ATTR_REVERSE)
 #define A_KEYCAP MAKE_ATTR(COLOR_BLACK, COLOR_CYAN, ATTR_NONE)
@@ -48,7 +50,22 @@ typedef struct {
     char label[64];
     bool is_target;
     bool is_ro_mounted;
+    bool is_boot_media;
 } drive_item_t;
+
+/* Worth scanning first: an installed system's filesystem or an encrypted volume, never the Booto stick. */
+static inline bool pane_drive_is_priority(const drive_item_t *d) {
+    static const char *const fs[] = {"ext4", "xfs", "btrfs", "ntfs", "crypto_LUKS", "BitLocker"};
+    if (d->is_boot_media) return false;
+    for (size_t i = 0; i < sizeof(fs) / sizeof(fs[0]); i++)
+        if (strcmp(d->fs_type, fs[i]) == 0) return true;
+    return false;
+}
+
+/* Still encrypted: a scan of it reads only ciphertext. */
+static inline bool pane_drive_is_locked(const drive_item_t *d) {
+    return strcmp(d->fs_type, "crypto_LUKS") == 0 || strcmp(d->fs_type, "BitLocker") == 0;
+}
 
 typedef struct {
     char name[64];
@@ -112,6 +129,7 @@ typedef struct {
     // Status bar & modal state
     bool show_exit_modal;
     bool show_luks_modal;
+    bool show_encrypted_modal;          // F5 on a locked target: unlock first, or scan anyway
     bool show_inspect;                  // Inspect view of last_scan->inspect (Enter on Findings)
     int inspect_tab;                    // 0 = Map, 1 = Hex
     int inspect_scroll;                 // first line shown in the current tab
