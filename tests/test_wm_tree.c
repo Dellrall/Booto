@@ -175,6 +175,12 @@ static void test_drive_priority(void) {
     ASSERT_TRUE(!pane_drive_is_priority(&esp) && !pane_drive_is_locked(&esp), "An ESP is neither");
     drive_item_t bl = {.fs_type = "BitLocker"};
     ASSERT_TRUE(pane_drive_is_priority(&bl) && pane_drive_is_locked(&bl), "BitLocker is a locked priority");
+    drive_item_t list[] = {{.fs_type = "vfat"}, {.fs_type = "crypto_LUKS"}, {.fs_type = "ext4"}};
+    ASSERT_INT_EQ(pane_pick_target(list, 3), 2, "A readable system beats a locked one");
+    ASSERT_INT_EQ(pane_pick_target(list, 2), 1, "A locked system beats none");
+    ASSERT_INT_EQ(pane_pick_target(list, 1), -1, "An ESP alone is not preselected");
+    ASSERT_STR_EQ(pane_drive_kind(&list[2]), "Linux", "ext4 reads as Linux");
+    ASSERT_STR_EQ(pane_drive_kind(&d), "Booto USB", "The boot stick is named");
     TEST_PASS("test_drive_priority");
 }
 
