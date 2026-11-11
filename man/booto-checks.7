@@ -171,9 +171,9 @@ manager BlackLotus downgrades to.
 The signature is intact but the file was changed after signing: a patched
 loader.
 .TP
-.BR UEFI_MISSING_AUTHENTICODE " (HIGH)"
+.BR UEFI_MISSING_AUTHENTICODE " (HIGH for BOOT*.EFI and shim; MEDIUM otherwise)"
 The file is not signed. Fine only if Secure Boot is off and the owner built
-it.
+it. memtest86+, systemd-boot and rEFInd usually ship unsigned.
 .TP
 .BR UEFI_AUTHENTICODE_INVALID " (HIGH)"
 The signature table is malformed or its PKCS#7 signature does not verify.
