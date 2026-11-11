@@ -152,6 +152,8 @@ cp "${initrd_path}" "${CD_DIR}/live/initrd.img"
 # per-build marker instead of /live/vmlinuz. setup_usb.sh copies it along with the ISO files.
 BOOT_ID="$(git -C "${REPO_ROOT}" rev-parse --short=12 HEAD 2>/dev/null || echo nogit)-${SOURCE_DATE_EPOCH}"
 BOOT_MARKER="/live/booto-${BOOT_ID}.id"
+# Kernel hardening that costs the scan nothing; no lockdown, which would block flashrom and /dev/cpu/N/msr.
+KERNEL_HARDEN="slab_nomerge init_on_alloc=1 page_alloc.shuffle=1 randomize_kstack_offset=on vsyscall=none debugfs=off systemd.gpt_auto=0"
 echo "${BOOT_ID}" > "${CD_DIR}${BOOT_MARKER}"
 
 echo "[+] Step 5/6: Compressing root filesystem into SquashFS..."
@@ -183,26 +185,26 @@ search --no-floppy --set=root --file ${BOOT_MARKER}
 
 menuentry "Booto - Live Rootkit & Bootkit Forensic System (Amnesic RAM Mode)" {
     search --no-floppy --set=root --file ${BOOT_MARKER}
-    linux  /live/vmlinuz boot=live components live-media=removable systemd.swap=no iomem=relaxed quiet splash systemd.show_status=0 loglevel=3
+    linux  /live/vmlinuz boot=live components live-media=removable systemd.swap=no iomem=relaxed ${KERNEL_HARDEN} quiet splash systemd.show_status=0 loglevel=3
     initrd /live/initrd.img
 }
 
 # Fallback for USB SSDs/enclosures that do not report removable: find this build's ISO by UUID (same trust as the GRUB search above).
 menuentry "Booto - USB not detected (non-removable USB drive)" {
     search --no-floppy --set=root --file ${BOOT_MARKER}
-    linux  /live/vmlinuz boot=live components live-media=/dev/disk/by-uuid/${ISO_UUID} systemd.swap=no iomem=relaxed quiet splash systemd.show_status=0 loglevel=3
+    linux  /live/vmlinuz boot=live components live-media=/dev/disk/by-uuid/${ISO_UUID} systemd.swap=no iomem=relaxed ${KERNEL_HARDEN} quiet splash systemd.show_status=0 loglevel=3
     initrd /live/initrd.img
 }
 
 menuentry "Booto - Live Rootkit & Bootkit Forensic System (Debug Verbose)" {
     search --no-floppy --set=root --file ${BOOT_MARKER}
-    linux  /live/vmlinuz boot=live components live-media=removable systemd.swap=no iomem=relaxed verbose
+    linux  /live/vmlinuz boot=live components live-media=removable systemd.swap=no iomem=relaxed ${KERNEL_HARDEN} verbose
     initrd /live/initrd.img
 }
 
 menuentry "Booto - Check the USB for corruption (reboots when done)" {
     search --no-floppy --set=root --file ${BOOT_MARKER}
-    linux  /live/vmlinuz boot=live components live-media=removable verify-checksums
+    linux  /live/vmlinuz boot=live components live-media=removable verify-checksums ${KERNEL_HARDEN}
     initrd /live/initrd.img
 }
 EOF_GRUB

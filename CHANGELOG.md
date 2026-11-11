@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The sandboxed decompressors and parsers now run in their own empty network namespace.
 - The write blocker trusts the `BOOTO_*` and `persistence` partition labels only when it cannot tell which disk Booto booted from; before, a suspect disk with such a label stayed writable.
 - The live system masks `e2scrub_all`, `fstrim`, `apt-daily` and `man-db` timers, so nothing snapshots, trims or rewrites a mounted disk in the background.
+- The live kernel boots with hardening options (`slab_nomerge`, `init_on_alloc=1`, `page_alloc.shuffle=1`, `randomize_kstack_offset=on`, `vsyscall=none`, `debugfs=off`) and `systemd.gpt_auto=0`, so systemd never auto-mounts a suspect disk's partitions.
 
 ## [1.9.5-beta] - 2026-11-11
 
