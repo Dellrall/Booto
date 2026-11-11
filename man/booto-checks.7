@@ -265,11 +265,15 @@ in a boot script.
 .B mkfifo /tmp/
 in a boot script, the usual reverse-shell pipe.
 .TP
-.B Silent Remote Payload Fetcher
-.B curl \-s
+.B Remote Payload Fetcher
+.B curl
 or
-.B wget \-q
-during early boot.
+.B wget
+piped into
+.B sh
+or
+.B bash
+during early boot. A download alone is normal (dracut's livenet module).
 .TP
 .BR "Ramdisk LKM Injection" ", " "Temp LKM Injection"
 .B insmod
