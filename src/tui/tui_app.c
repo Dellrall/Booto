@@ -120,14 +120,15 @@ static void render_bottom_bar(tui_app_state_t *app, int rows, int cols) {
         {" F4 ", " Storage", KEY_F4, 0},     {" Tab ", " Next pane", KEY_TAB, 0}, {" Alt+Z ", " Zoom", KEY_ALT_Z, 0},
         {" ^R ", " Resize", KEY_CHAR, CTRL_R},
         {" E ", app->expert ? " Simple view" : " Expert view", KEY_CHAR, 'e'},
+        {" ? ", " Help", KEY_CHAR, '?'},
         {" F10 ", " Exit", KEY_F10, 0},
     };
     enum { HINT_COUNT = (int)(sizeof(hints) / sizeof(hints[0])) };
-    static const int drop_order[] = {6, 5, 4, 2, 3, 1}; /* Resize, Zoom, Tab, F3, F4, F6; F5, E and F10 always stay */
+    static const int drop_order[] = {6, 5, 4, 2, 3, 8, 1}; /* Resize, Zoom, Tab, F3, F4, Help, F6; F5, E and F10 always stay */
     bool shown[HINT_COUNT];
     int hw = -2;
     for (int i = 0; i < HINT_COUNT; i++) {
-        shown[i] = app->expert || i < 4 || i > 6; /* pane layout keys only in the expert view */
+        shown[i] = app->expert || i < 4 || i > 6; /* pane layout keys (4-6) only in the expert view */
         if (shown[i]) hw += (int)(strlen(hints[i].key) + strlen(hints[i].label)) + 2;
     }
     int status_w = (int)strlen(app->status_msg);
@@ -426,9 +427,38 @@ static void render_welcome_modal(int rows, int cols) {
     }
     int x = modal_key(mx + 3, my + 10, end, " Enter ", " Start", KEY_ENTER) + 3;
     int x0 = x;
+    put_clip(&x, my + 10, end, " ? ", A_KEYCAP);
+    put_clip(&x, my + 10, end, " Help", A_TEXT);
+    term_add_click_zone(x0, x, my + 10, KEY_CHAR, '?');
+    x += 3;
+    x0 = x;
     put_clip(&x, my + 10, end, " E ", A_KEYCAP);
     put_clip(&x, my + 10, end, " Expert view", A_TEXT);
     term_add_click_zone(x0, x, my + 10, KEY_CHAR, 'e');
+}
+
+static void render_help_modal(int rows, int cols) {
+    static const char *const keys[][2] = {
+        {"Arrows, j k", "Move in a list"},           {"Space", "Select the drive to scan"},
+        {"Enter", "Mount a drive read-only; inspect a finding"}, {"F5", "Scan the selected drive"},
+        {"F3", "Unlock an encrypted drive (read-only)"}, {"F6", "Save the report"},
+        {"F4", "Booto storage: where reports are kept"}, {"1 2 3 4", "Panes, Findings, Firmware, Evidence pages"},
+        {"f", "Findings page: show only MEDIUM or HIGH"}, {"E", "Expert view: engines, log, pane layout"},
+        {"Mouse", "Click to select, double-click to open, wheel to scroll"}, {"F10", "Power off, reboot, shell or quit"},
+    };
+    enum { N = (int)(sizeof(keys) / sizeof(keys[0])) };
+    int mx, my, mw;
+    modal_frame(rows, cols, 74, N + 6, "Help", &mx, &my, &mw);
+    int end = mx + mw - 2;
+    for (int i = 0; i < N; i++) {
+        int x = mx + 3;
+        put_clip(&x, my + 2 + i, end, keys[i][0], A_STRONG);
+        x = mx + 17;
+        put_clip(&x, my + 2 + i, end, keys[i][1], A_TEXT);
+    }
+    int x = mx + 3;
+    put_clip(&x, my + N + 3, end, "man booto in the root shell has every option and finding.", A_MUTED);
+    modal_key(mx + 3, my + N + 4, end, " Esc ", " Close", KEY_ESC);
 }
 
 static void render_luks_modal(tui_app_state_t *app, int rows, int cols) {
@@ -545,6 +575,9 @@ static void start_forensic_scan(tui_app_state_t *app) {
 
     atomic_store(&app->scan_step, 0);
     atomic_store(&app->scan_done, false);
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    app->scan_started_ms = ts.tv_sec * 1000L + ts.tv_nsec / 1000000L;
     atomic_store(&app->scan_active, true);
     int rc = pthread_create(&app->scan_thread, NULL, scan_worker, app);
     if (rc != 0) {
@@ -575,9 +608,6 @@ static void finish_forensic_scan(tui_app_state_t *app) {
         snprintf(log_buf, sizeof(log_buf), "Forensic scan could not run (error %d)", (int)err);
         tui_app_append_log(app, LOG_LEVEL_ERROR, NULL, log_buf);
         snprintf(app->status_msg, sizeof(app->status_msg), "Scan failed to run (error %d).", (int)err);
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    app->scan_started_ms = ts.tv_sec * 1000L + ts.tv_nsec / 1000000L;
         return;
     }
     free(app->last_scan);
@@ -787,7 +817,7 @@ int tui_app_run(booto_context_t *ctx) {
         }
 
         // Border under the pointer: <-> or up-down arrow pointer; the dragged one also lights up.
-        bool modal = app.show_exit_modal || app.show_luks_modal || app.show_encrypted_modal || app.show_inspect || app.show_welcome || menu_n > 0;
+        bool modal = app.show_exit_modal || app.show_luks_modal || app.show_encrypted_modal || app.show_inspect || app.show_welcome || app.show_help || menu_n > 0;
         int px, py;
         wm_node_t *hover = drag_split;
         if (!hover && !modal && !page && !app.wm->zoomed_leaf && term_get_pointer(&px, &py))
@@ -808,6 +838,8 @@ int tui_app_run(booto_context_t *ctx) {
             render_encrypted_modal(&app, rows, cols);
         } else if (app.show_welcome) {
             render_welcome_modal(rows, cols);
+        } else if (app.show_help) {
+            render_help_modal(rows, cols);
         } else if (app.show_inspect) {
             render_inspect_modal(&app, rows, cols);
         } else if (menu_n > 0) {
@@ -959,6 +991,13 @@ int tui_app_run(booto_context_t *ctx) {
                 if (t == KEY_ENTER || t == KEY_ESC || t == KEY_MOUSE_CLICK) continue;
             }
 
+            if (app.show_help) {
+                /* Any key or click closes it. */
+                key_type_t t = event.type;
+                if (t != KEY_NONE && t != KEY_RESIZE && t != KEY_MOUSE_DRAG && t != KEY_MOUSE_RELEASE) app.show_help = false;
+                continue;
+            }
+
             if (menu_n > 0) {
                 /* Up/Down move, Enter or a click picks (then runs as its key); any other key or click closes it. */
                 int pick = event.type == KEY_ENTER ? menu_cur
@@ -990,6 +1029,11 @@ int tui_app_run(booto_context_t *ctx) {
                     resize_mode = false;
                     snprintf(app.status_msg, sizeof(app.status_msg), "Layout kept.");
                 }
+                continue;
+            }
+
+            if (event.type == KEY_CHAR && event.ch == '?') {
+                app.show_help = true;
                 continue;
             }
 
