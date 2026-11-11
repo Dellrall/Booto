@@ -45,6 +45,12 @@ static void put_clip(int *x, int y, int end, const char *s, uint32_t attr) {
     if (*x < end) *x += term_puts_clip(*x, y, end - *x, s, attr);
 }
 
+static const drive_item_t *target_drive(const tui_app_state_t *app) {
+    for (int i = 0; i < app->drive_count; i++)
+        if (app->drives[i].is_target) return &app->drives[i];
+    return NULL;
+}
+
 static void render_top_bar(tui_app_state_t *app, int cols) {
     char scan[32] = "";
     if (atomic_load(&app->scan_active)) {
@@ -81,13 +87,7 @@ static void render_top_bar(tui_app_state_t *app, int cols) {
     x++;
     put_clip(&x, 0, end, BOOTO_VERSION_STRING, A_MUTED);
 
-    const drive_item_t *t = NULL;
-    for (int i = 0; i < app->drive_count; i++) {
-        if (app->drives[i].is_target) {
-            t = &app->drives[i];
-            break;
-        }
-    }
+    const drive_item_t *t = target_drive(app);
     x += 2;
     if (!t) {
         put_clip(&x, 0, end, "No target selected", A_MUTED);
@@ -116,12 +116,13 @@ static void render_bottom_bar(tui_app_state_t *app, int rows, int cols) {
         key_type_t type;
         int ch;
     } hints[] = {
-        {" F5 ", " Scan", KEY_F5, 0},       {" F6 ", " Export", KEY_F6, 0}, {" F3 ", " Unlock", KEY_F3, 0},
-        {" Tab ", " Next pane", KEY_TAB, 0}, {" Alt+Z ", " Zoom", KEY_ALT_Z, 0}, {" ^R ", " Resize", KEY_CHAR, CTRL_R},
+        {" F5 ", " Scan", KEY_F5, 0},        {" F6 ", " Export", KEY_F6, 0},   {" F3 ", " Unlock", KEY_F3, 0},
+        {" F4 ", " Storage", KEY_F4, 0},     {" Tab ", " Next pane", KEY_TAB, 0}, {" Alt+Z ", " Zoom", KEY_ALT_Z, 0},
+        {" ^R ", " Resize", KEY_CHAR, CTRL_R},
         {" F10 ", " Exit", KEY_F10, 0},
     };
     enum { HINT_COUNT = (int)(sizeof(hints) / sizeof(hints[0])) };
-    static const int drop_order[] = {5, 4, 3, 2, 1}; /* Resize, Zoom, Tab, F3, F6; F5 and F10 always stay */
+    static const int drop_order[] = {6, 5, 4, 2, 3, 1}; /* Resize, Zoom, Tab, F3, F4, F6; F5 and F10 always stay */
     bool shown[HINT_COUNT];
     int hw = -2;
     for (int i = 0; i < HINT_COUNT; i++) {
@@ -369,6 +370,25 @@ static void inspect_input(tui_app_state_t *app, const input_event_t *ev, int row
     else if (ev->type == KEY_END || c == 'G') app->inspect_scroll = 1 << 30; /* clamped at the next render */
 }
 
+static void render_encrypted_modal(tui_app_state_t *app, int rows, int cols) {
+    const drive_item_t *t = target_drive(app);
+    bool luks = t && strcmp(t->fs_type, "crypto_LUKS") == 0;
+    int mx, my, mw;
+    modal_frame(rows, cols, 60, 9, "Target is encrypted", &mx, &my, &mw);
+    int end = mx + mw - 2, x = mx + 3;
+    char line[96];
+    snprintf(line, sizeof(line), "%.40s is %s.", t ? t->name : "The target", luks ? "a locked LUKS volume" : "BitLocker-encrypted");
+    put_clip(&x, my + 2, end, line, A_WARN);
+    x = mx + 3;
+    put_clip(&x, my + 3, end, luks ? "Unlock it first. A scan of the locked volume sees only" : "Booto cannot unlock BitLocker. A scan sees only", A_TEXT);
+    x = mx + 3;
+    put_clip(&x, my + 4, end, "ciphertext and may not produce correct results.", A_TEXT);
+    x = mx + 3;
+    if (luks) x = modal_key(x, my + 6, end, " F3 ", " Unlock", KEY_F3) + 3;
+    x = modal_key(x, my + 6, end, " Enter ", " Scan anyway", KEY_ENTER) + 3;
+    modal_key(x, my + 6, end, " Esc ", " Cancel", KEY_ESC);
+}
+
 static void render_luks_modal(tui_app_state_t *app, int rows, int cols) {
     bool persist = app->luks_modal_for_persist;
     int mx, my, mw;
@@ -442,14 +462,8 @@ static void start_forensic_scan(tui_app_state_t *app) {
         snprintf(app->status_msg, sizeof(app->status_msg), "A scan is already running.");
         return;
     }
-    const char *target_dev = NULL;
-    for (int i = 0; i < app->drive_count; i++) {
-        if (app->drives[i].is_target) {
-            target_dev = app->drives[i].name;
-            break;
-        }
-    }
-    if (!target_dev) {
+    const drive_item_t *target = target_drive(app);
+    if (!target) {
         tui_app_append_log(app, LOG_LEVEL_ERROR, NULL, "No target drive selected; scan not started");
         snprintf(app->status_msg, sizeof(app->status_msg), "No target selected. Mark a target in Storage first.");
         return;
@@ -462,7 +476,7 @@ static void start_forensic_scan(tui_app_state_t *app) {
         return;
     }
     // Copy inputs so the UI may keep editing drives/modules while the worker runs.
-    snprintf(app->scan_target, sizeof(app->scan_target), "%s", target_dev);
+    snprintf(app->scan_target, sizeof(app->scan_target), "%s", target->name);
     memset(app->scan_enabled, 0, sizeof(app->scan_enabled));
     for (int i = 0; i < app->module_count; i++) {
         scan_module_id_t id = pane_module_to_scan_id(app->modules[i].name);
@@ -724,7 +738,7 @@ int tui_app_run(booto_context_t *ctx) {
         }
 
         // Border under the pointer: <-> or up-down arrow pointer; the dragged one also lights up.
-        bool modal = app.show_exit_modal || app.show_luks_modal || app.show_inspect || menu_n > 0;
+        bool modal = app.show_exit_modal || app.show_luks_modal || app.show_encrypted_modal || app.show_inspect || menu_n > 0;
         int px, py;
         wm_node_t *hover = drag_split;
         if (!hover && !modal && !page && !app.wm->zoomed_leaf && term_get_pointer(&px, &py))
@@ -741,6 +755,8 @@ int tui_app_run(booto_context_t *ctx) {
             render_exit_modal(&app, rows, cols);
         } else if (app.show_luks_modal) {
             render_luks_modal(&app, rows, cols);
+        } else if (app.show_encrypted_modal) {
+            render_encrypted_modal(&app, rows, cols);
         } else if (app.show_inspect) {
             render_inspect_modal(&app, rows, cols);
         } else if (menu_n > 0) {
@@ -861,6 +877,27 @@ int tui_app_run(booto_context_t *ctx) {
                 continue;
             }
 
+            if (app.show_encrypted_modal) {
+                const drive_item_t *t = target_drive(&app);
+                if (event.type == KEY_ENTER) {
+                    app.show_encrypted_modal = false;
+                    char warn[200];
+                    snprintf(warn, sizeof(warn), "Scanning encrypted %.120s without unlocking it: results may be incomplete or wrong",
+                             t ? t->name : "target");
+                    tui_app_append_log(&app, LOG_LEVEL_WARN, NULL, warn);
+                    start_forensic_scan(&app);
+                    if (atomic_load(&app.scan_active))
+                        snprintf(app.status_msg, sizeof(app.status_msg), "Scanning a locked volume: results may not be correct.");
+                } else if (event.type == KEY_ESC) {
+                    app.show_encrypted_modal = false;
+                    snprintf(app.status_msg, sizeof(app.status_msg), "Scan cancelled. Press F3 to unlock the target first.");
+                } else if (event.type == KEY_F3 && t) {
+                    app.show_encrypted_modal = false;
+                    app.drive_cursor = (int)(t - app.drives); /* the F3 handler below unlocks the drive under the cursor */
+                }
+                if (app.show_encrypted_modal || event.type != KEY_F3) continue;
+            }
+
             if (menu_n > 0) {
                 /* Up/Down move, Enter or a click picks (then runs as its key); any other key or click closes it. */
                 int pick = event.type == KEY_ENTER ? menu_cur
@@ -972,7 +1009,9 @@ int tui_app_run(booto_context_t *ctx) {
             } else if (event.type == KEY_ALT_RBRACKET) {
                 wm_adjust_split_ratio(app.wm, +0.05f);
             } else if (event.type == KEY_F5) {
-                start_forensic_scan(&app);
+                const drive_item_t *t = target_drive(&app);
+                if (t && pane_drive_is_locked(t) && !atomic_load(&app.scan_active)) app.show_encrypted_modal = true;
+                else start_forensic_scan(&app);
             } else if (event.type == KEY_F7) {
                 app.quarantine = !app.quarantine;
                 snprintf(app.status_msg, sizeof(app.status_msg), "Quarantine %s for the next scan.",
