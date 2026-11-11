@@ -204,7 +204,7 @@ static void sbat_check(const uint8_t *sbat, uint32_t size, char *out, size_t out
 booto_error_t uefi_parse_pe_file(const char *path, pe_efi_info_t *info) {
     if (!path || !info) return BOOTO_ERR_INVALID_ARG;
 
-    FILE *fp = fopen(path, "rb");
+    FILE *fp = fopen_regular(path);
     if (!fp) return BOOTO_ERR_IO;
 
     fseek(fp, 0, SEEK_END);
@@ -413,13 +413,14 @@ static void scan_esp_dir_recursive(const char *base_path, size_t root_len, uefi_
         snprintf(full_path, sizeof(full_path), "%s/%s", base_path, entry->d_name);
 
         struct stat st;
-        if (stat(full_path, &st) == 0) {
+        // lstat first: never descend a symlinked directory, which can point outside the target.
+        if (lstat(full_path, &st) == 0 && (!S_ISLNK(st.st_mode) || (stat(full_path, &st) == 0 && !S_ISDIR(st.st_mode)))) {
             if (S_ISDIR(st.st_mode)) {
                 scan_esp_dir_recursive(full_path, root_len, result, depth + 1);
             } else if (S_ISREG(st.st_mode)) {
                 // By content, not name: a renamed payload (grubx64.bak) or a systemd-boot kernel is still a PE.
                 char magic[2] = { 0 };
-                FILE *fp = fopen(full_path, "rb");
+                FILE *fp = fopen_regular(full_path);
                 if (fp) {
                     size_t got = fread(magic, 1, sizeof(magic), fp);
                     fclose(fp);

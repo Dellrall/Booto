@@ -11,6 +11,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 static void test_sha256_known_vector(void) {
     TEST_START("test_sha256_known_vector");
@@ -191,6 +193,28 @@ static void test_unsigned_lkm_flagged(void) {
     TEST_PASS("test_unsigned_lkm_flagged");
 }
 
+/* A target symlink to /dev/zero or a FIFO must be refused, not read forever. */
+static void test_fopen_regular_refuses_special(void) {
+    TEST_START("test_fopen_regular_refuses_special");
+    char dir[] = "/tmp/booto_fopenreg_XXXXXX";
+    ASSERT_TRUE(mkdtemp(dir) != NULL, "temp dir");
+    char lnk[64], fifo[64], reg[64];
+    snprintf(lnk, sizeof(lnk), "%s/zero", dir);
+    snprintf(fifo, sizeof(fifo), "%s/fifo", dir);
+    snprintf(reg, sizeof(reg), "%s/reg", dir);
+    ASSERT_TRUE(symlink("/dev/zero", lnk) == 0, "symlink");
+    ASSERT_TRUE(mkfifo(fifo, 0600) == 0, "fifo");
+    FILE *f = fopen(reg, "wb");
+    ASSERT_TRUE(f != NULL, "regular file");
+    if (f) { fputs("x", f); fclose(f); }
+    char hex[65];
+    ASSERT_TRUE(fopen_regular(lnk) == NULL && !sha256_file_hex(lnk, hex), "symlink to a device refused");
+    ASSERT_TRUE(fopen_regular(fifo) == NULL, "FIFO refused without blocking");
+    ASSERT_TRUE(sha256_file_hex(reg, hex), "regular file still hashes");
+    unlink(lnk); unlink(fifo); unlink(reg); rmdir(dir);
+    TEST_PASS("test_fopen_regular_refuses_special");
+}
+
 int main(void) {
     printf("\n--- Running ELF Parser & Kernel Rootkit Scanner Tests ---\n");
     test_sha256_known_vector();
@@ -200,6 +224,7 @@ int main(void) {
     test_unsigned_lkm_flagged();
     test_elf_wrapping_shoff_rejected();
     test_elf_unterminated_shstrtab();
+    test_fopen_regular_refuses_special();
     TEST_SUMMARY();
     return 0;
 }
