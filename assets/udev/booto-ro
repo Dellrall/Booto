@@ -6,6 +6,8 @@ dev=$1
 # The live medium's disk (dd-written ISO); empty with toram or before live-boot mounts it.
 med=$(findmnt -no SOURCE /run/live/medium 2>/dev/null)
 boot=$([ -n "$med" ] && lsblk -no PKNAME "$med" 2>/dev/null | head -n1)
+# The medium can be the whole disk (dd-written hybrid ISO): then it has no parent.
+[ -n "$boot" ] || boot=${med#/dev/}
 disk=$(lsblk -no PKNAME "$dev" 2>/dev/null | head -n1)
 [ -n "$disk" ] || disk=${dev#/dev/}
 [ -n "$boot" ] && [ "$disk" = "$boot" ] && exit 0
