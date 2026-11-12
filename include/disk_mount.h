@@ -135,6 +135,12 @@ booto_error_t disk_exec_capture(const char *const argv[], const uint8_t *stdin_d
 booto_error_t disk_ensure_private_dir(const char *path);
 
 /**
+ * @brief disk_ensure_private_dir(), then mode 0755: report folders on the Booto stick stay readable
+ *        by any user of a host it is plugged into; a passphrase, not the mode, guards an encrypted one.
+ */
+booto_error_t disk_ensure_report_dir(const char *path);
+
+/**
  * @brief Helper to format bytes into human-readable string (KB, MB, GB, TB).
  */
 const char *disk_format_size(uint64_t bytes, char *buf, size_t buf_size);

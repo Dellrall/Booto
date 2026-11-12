@@ -327,6 +327,7 @@ static void test_ensure_private_dir(void) {
     struct stat st;
     bool is_0700 = lstat(created, &st) == 0 && S_ISDIR(st.st_mode) && (st.st_mode & 07777) == 0700;
     booto_error_t again = disk_ensure_private_dir(created);
+    bool is_0755 = disk_ensure_report_dir(created) == BOOTO_OK && lstat(created, &st) == 0 && (st.st_mode & 07777) == 0755;
 
     bool link_ok = symlink(created, link) == 0;
     booto_error_t l_err = disk_ensure_private_dir(link);
@@ -341,6 +342,7 @@ static void test_ensure_private_dir(void) {
 
     ASSERT_INT_EQ(c_err, BOOTO_OK, "Creates missing dir");
     ASSERT_TRUE(is_0700, "Created dir has mode 0700");
+    ASSERT_TRUE(is_0755, "Report dir is made readable (0755)");
     ASSERT_INT_EQ(again, BOOTO_OK, "Existing private dir accepted");
     ASSERT_TRUE(link_ok && open_ok, "Fixture setup");
     ASSERT_INT_EQ(l_err, BOOTO_ERR_PERMISSION_DENIED, "Symlink rejected");

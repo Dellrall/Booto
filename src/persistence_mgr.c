@@ -202,9 +202,9 @@ booto_error_t persistence_unlock(persistence_mgr_t *mgr, const char *passphrase)
         return BOOTO_ERR_MOUNT_FAILED;
     }
 
-    if (disk_ensure_private_dir(mgr->cases_dir) != BOOTO_OK ||
-        disk_ensure_private_dir(mgr->rules_dir) != BOOTO_OK ||
-        disk_ensure_private_dir(mgr->logs_dir) != BOOTO_OK) {
+    if (disk_ensure_report_dir(mgr->cases_dir) != BOOTO_OK ||
+        disk_ensure_report_dir(mgr->rules_dir) != BOOTO_OK ||
+        disk_ensure_report_dir(mgr->logs_dir) != BOOTO_OK) {
         LOG_WARN("Persistence subdirectories missing or unsafe under %s", DEFAULT_PERSISTENCE_MOUNT);
     }
 

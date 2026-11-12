@@ -273,6 +273,12 @@ booto_error_t disk_ensure_private_dir(const char *path) {
     return BOOTO_OK;
 }
 
+booto_error_t disk_ensure_report_dir(const char *path) {
+    booto_error_t err = disk_ensure_private_dir(path);
+    if (err == BOOTO_OK && chmod(path, 0755) != 0) err = BOOTO_ERR_IO;
+    return err;
+}
+
 static bool valid_mapper_name(const char *name) {
     size_t n = strlen(name);
     if (n == 0 || n > 63) return false;

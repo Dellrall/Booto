@@ -281,7 +281,7 @@ static int run_cli(booto_context_t *ctx) {
             return EXIT_INCOMPLETE;
         }
         snprintf(qdir, sizeof(qdir), "%s/quarantine", ctx->persistence_dir);
-        if (disk_ensure_private_dir(qdir) != BOOTO_OK) {
+        if (disk_ensure_report_dir(qdir) != BOOTO_OK) {
             LOG_ERROR("Unsafe or unusable quarantine directory %s", qdir);
             return EXIT_INCOMPLETE;
         }

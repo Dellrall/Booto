@@ -187,7 +187,7 @@ mount "${DATA_DEV}" "${MNT_PERSIST}"
 # Create Tails-style persistence configuration file and directory tree
 echo "/ union" > "${MNT_PERSIST}/persistence.conf"
 mkdir -p "${MNT_PERSIST}/cases" "${MNT_PERSIST}/rules" "${MNT_PERSIST}/logs"
-chmod 0700 "${MNT_PERSIST}"/*
+chmod 0755 "${MNT_PERSIST}"/*  # readable on any host; a LUKS passphrase guards an encrypted one
 
 umount "${MNT_PERSIST}"
 [ "${ENCRYPT}" -eq 1 ] && cryptsetup close booto_persistence_init
