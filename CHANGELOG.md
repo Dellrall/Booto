@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.11.0-beta] - 2026-11-12
+
 ### Added
 - `--undelete <dir>` (with `-t` on an NTFS partition) reads the MFT from the raw device and copies deleted files that still have data into `<dir>` as read-only `<record>_<name>.recovered`; not part of the verdict.
 - Windows event logs: a cleared Security or System log (events 1102 / 104) is flagged `WIN_EVTX_LOG_CLEARED`, and a missing or empty `Security.evtx` `WIN_EVTX_LOG_MISSING` (both MEDIUM).

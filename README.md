@@ -208,6 +208,7 @@ Set `NO_COLOR=1` (see [no-color.org](https://no-color.org)) for a monochrome TUI
 | **Stage 18** | `v1.9.0-beta` | Windows Boot Chain, Baselines, Signed Rules, YARA, Detection Zoo | **Completed** |
 | **Stage 18.x** | `v1.9.8-beta` | Write Blocker, Before/After Proof, YARA for Linux, TUI Pages, Secure Boot, In-OS Report Storage, Crash Reports, Beginner View, Hidden Hypervisor Probe | **Completed** |
 | **Stage 19** | `v1.10.0-beta` | YARA on ELF Binaries, FwHunt UEFI Rules, Shim Vendor Signing, Bodyfile Timeline, ME / Boot Guard / Debug Lock Checks | **Completed** |
+| **Stage 20** | `v1.11.0-beta` | BitLocker Unlock, Windows Persistence & Ransomware Triage, Event Log Tampering, Account Triage, NTFS Undelete, Disk Acquisition, Signed Reports, Volatility Import | **Completed** |
 
 Releases tagged `-beta` are pre-releases: Booto has not yet been validated against real bootkits on real hardware.
 
