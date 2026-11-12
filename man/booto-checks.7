@@ -18,6 +18,7 @@ A case report's
 is the highest one among its findings. Initramfs, preload/persistence and
 package findings carry no severity of their own and count as
 .BR CRITICAL ,
+except a YARA match on an installed program, which keeps its rule's severity,
 because each one is direct evidence of tampering.
 .PP
 Any finding makes the verdict
@@ -208,12 +209,15 @@ A copy of a boot loader renamed aside, how a replacement loader chainloads
 the original.
 .SS YARA rules
 Every PE image read by the UEFI and Windows boot checks, every kernel module,
-and every ELF file inside the initramfs is matched against
+every ELF file inside the initramfs, and every ELF file directly in the
+target's program, library and temp folders (/bin, /sbin, /usr/bin, /usr/sbin,
+/usr/local, /lib, /lib64, /usr/lib, /usr/lib64, /etc, /tmp, /var/tmp, /dev/shm,
+/root; symlinks are not followed, files over 64 MiB are skipped) is matched against
 .IR rules/bootkits.yar ,
 which must carry a valid Ed25519
 .I bootkits.yar.sig
 like the other rule files; an unsigned, altered or uncompilable file makes all
-four engines fail closed. Each rule needs string metas
+five engines fail closed. Each rule needs string metas
 .B severity
 and
 .BR description .

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- The signed YARA rules now also scan every ELF program and library directly in the target's bin, sbin, lib, /usr/local, /etc, /tmp, /var/tmp, /dev/shm and /root folders, so a rootkit dropped there is caught even when no hook points at it; a match keeps its rule's severity.
+
 ## [1.9.8-beta] - 2026-11-12
 
 ### Fixed

@@ -13,6 +13,7 @@
 #include "crypto_utils.h"
 #include "logger.h"
 #include "rules_loader.h"
+#include "yara_scan.h"
 
 #include <ctype.h>
 #include <dirent.h>
@@ -38,6 +39,7 @@ static void add_preload_threat(preload_scan_result_t *result,
     snprintf(f->sha256, sizeof(f->sha256), "%.64s", sha256 ? sha256 : "");
     snprintf(f->rule_id, sizeof(f->rule_id), "%.63s", rule_id ? rule_id : "RULE_UNKNOWN");
     snprintf(f->description, sizeof(f->description), "%.255s", description ? description : "");
+    f->severity = SEVERITY_CRITICAL;
 
     LOG_CRITICAL("[PRELOAD ALERT] %s in %s (Target: '%s', Rule: %s)",
                  f->threat_name, f->file_path, f->target_library, f->rule_id);
@@ -420,6 +422,59 @@ static booto_error_t scan_file_iocs(const char *rootfs, preload_scan_result_t *r
     return BOOTO_OK;
 }
 
+#define YARA_SWEEP_MAX_BYTES (64u * 1024u * 1024u)
+
+/* Signed YARA rules over each ELF file directly in rel_dir. lstat throughout: a symlinked folder or file may point
+ * outside the target (merged /usr links /bin to usr/bin, which is swept itself). */
+static void yara_dir(const char *rootfs, const char *rel_dir, preload_scan_result_t *result) {
+    char dir_path[1024];
+    snprintf(dir_path, sizeof(dir_path), "%.900s%s", rootfs, rel_dir);
+    struct stat st;
+    if (lstat(dir_path, &st) != 0 || !S_ISDIR(st.st_mode)) return;
+    DIR *d = opendir(dir_path);
+    if (!d) return;
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL) {
+        char path[1300];
+        snprintf(path, sizeof(path), "%s/%.255s", dir_path, e->d_name);
+        if (lstat(path, &st) != 0 || !S_ISREG(st.st_mode) || st.st_size < 4 || (uint64_t)st.st_size > YARA_SWEEP_MAX_BYTES)
+            continue;
+        FILE *fp = fopen(path, "rb");
+        unsigned char magic[4] = {0};
+        bool elf = fp && fread(magic, 1, 4, fp) == 4 && memcmp(magic, "\x7f" "ELF", 4) == 0;
+        if (fp) fclose(fp);
+        if (!elf) continue;
+        result->files_scanned++;
+        yara_match_t m[YARA_MAX_MATCHES];
+        int n = 0;
+        yara_scan_file(path, m, YARA_MAX_MATCHES, &n);
+        if (n == 0) continue;
+        char sha256[65] = "";
+        sha256_file_hex(path, sha256);
+        for (int i = 0; i < n; i++) {
+            add_preload_threat(result, path, "YARA Rule Match", "", sha256, m[i].rule, m[i].description);
+            if (result->threats_detected <= MAX_PRELOAD_THREATS)
+                result->findings[result->threats_detected - 1].severity = m[i].severity;
+        }
+    }
+    closedir(d);
+}
+
+static booto_error_t scan_yara_dirs(const char *rootfs, preload_scan_result_t *result) {
+    booto_error_t err = yara_rules_status();
+    if (err != BOOTO_OK) {
+        LOG_ERROR("YARA rules refused (err: %d); installed programs not matched", err);
+        return err;
+    }
+    /* Where rootkits drop programs and preload libraries; /usr/lib and lib64 trees are too large to walk in full. */
+    static const char *const dirs[] = { "/bin", "/sbin", "/usr/bin", "/usr/sbin", "/usr/local/bin", "/usr/local/sbin",
+                                        "/usr/local/lib", "/lib", "/lib64", "/usr/lib", "/usr/lib64",
+                                        "/lib/x86_64-linux-gnu", "/usr/lib/x86_64-linux-gnu", "/etc", "/tmp",
+                                        "/var/tmp", "/dev/shm", "/root" };
+    for (size_t i = 0; i < sizeof(dirs) / sizeof(dirs[0]); i++) yara_dir(rootfs, dirs[i], result);
+    return BOOTO_OK;
+}
+
 booto_error_t preload_scan_rootfs(const char *target_rootfs, preload_scan_result_t *result) {
     if (!target_rootfs || !result) return BOOTO_ERR_INVALID_ARG;
     memset(result, 0, sizeof(*result));
@@ -453,8 +508,10 @@ booto_error_t preload_scan_rootfs(const char *target_rootfs, preload_scan_result
     scan_conf_dir(target_rootfs, "/root/.ssh", "authorized_keys", ssh_key_line, result);
     scan_homes(target_rootfs, result);
     booto_error_t ioc_err = scan_file_iocs(target_rootfs, result);
+    booto_error_t yara_err = scan_yara_dirs(target_rootfs, result);
     if (err == BOOTO_OK) err = env_err;
     if (err == BOOTO_OK) err = ioc_err;
+    if (err == BOOTO_OK) err = yara_err;
 
     LOG_INFO("Preload scanner complete: %d config files audited, %d userland threats flagged",
              result->files_scanned, result->threats_detected);
