@@ -200,6 +200,23 @@ time fields are 0. Names with
 or control bytes are written as
 .BI \ex HH .
 .TP
+.BI \-\-acquire " image"
+CLI mode, with
+.BR \-t .
+Before the scan, copy the raw device to the new file
+.I image
+(never overwritten), reading it
+.B O_RDONLY
+and hashing it as it is read.
+The SHA-256 goes to
+.IR image .sha256
+in
+.BR sha256sum (1)
+format; unreadable 4 KiB blocks are written as zeros and listed in
+.IR image .log.
+Write the image to the report partition or another disk, never to the device being imaged.
+A failed copy makes the exit status INCOMPLETE.
+.TP
 .BI \-\-hashlist " file"
 CLI mode. Write the SHA-256 of every regular file with an execute bit under
 the scanned root to
