@@ -385,6 +385,47 @@ events (the sedexp technique).
 A file exists at a known install path of that rootkit (Jynx2, Reptile,
 Kinsing, Ebury, SucKIT, T0rn, Phalanx2). The paths are in
 .IR rootkit_file_iocs.json .
+.SS Accounts and logs
+Signs that an intruder kept access or covered their tracks.
+.TP
+.B ACCT_UID0_ALIAS
+(HIGH) An account other than
+.B root
+has UID 0 in
+.IR /etc/passwd :
+a second root login under a quieter name.
+.TP
+.B ACCT_EMPTY_PASSWORD
+(MEDIUM) An
+.I /etc/shadow
+entry has an empty password field, so that account logs in with no
+password. Locked accounts
+.RB ( * ", " ! )
+are not reported.
+.TP
+.B ACCT_SUDO_NOPASSWD_ALL
+(MEDIUM) A sudoers line grants every command as root with
+.BR "NOPASSWD: ALL" .
+Cloud images grant this to their default user; a rule limited to named
+commands is not reported.
+.TP
+.B ACCT_WTMP_ZEROED
+(HIGH)
+.I /var/log/wtmp
+has login records overwritten with zeros. Log wipers (zap, wipe) do this to
+erase a login; login, reboot and logrotate never do.
+.TP
+.B ACCT_HISTORY_DEVNULL
+(MEDIUM) A
+.IR .bash_history ,
+.I .zsh_history
+or
+.I .ash_history
+in
+.I /root
+or a home folder is a symlink to
+.IR /dev/null ,
+so the commands typed there are never kept.
 .SH PACKAGE INTEGRITY
 Packaged files are hashed and compared with the package database. Each
 finding names the file, its package and the reason:

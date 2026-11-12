@@ -23,7 +23,7 @@ typedef struct {
     char sha256[65];
     char rule_id[64];
     char description[256];
-    booto_severity_t severity; /* CRITICAL, except YARA matches, which carry their rule's severity */
+    booto_severity_t severity; /* CRITICAL, except YARA matches (their rule's severity) and ACCT_* rules */
 } preload_finding_t;
 
 typedef struct {
@@ -40,7 +40,10 @@ typedef struct {
  *        and authorized_keys forced commands (PERSIST_SSH_FORCED_COMMAND) that run temp/hidden-path programs
  *        or code fetched at run time (curl/wget/base64 piped into a shell), and known rootkit install
  *        paths from rootkit_file_iocs.json (IOC_*), and the signed YARA rules over every ELF file directly in the
- *        program, library and temp folders (bin, sbin, lib, usr/local, tmp, ...).
+ *        program, library and temp folders (bin, sbin, lib, usr/local, tmp, ...). Account triage: a second UID 0
+ *        account (ACCT_UID0_ALIAS), an empty shadow password (ACCT_EMPTY_PASSWORD), sudoers NOPASSWD: ALL
+ *        (ACCT_SUDO_NOPASSWD_ALL), zeroed wtmp records (ACCT_WTMP_ZEROED) and shell history linked to /dev/null
+ *        (ACCT_HISTORY_DEVNULL).
  * @param target_rootfs Path to mounted target rootfs (e.g. /tmp/booto_target_mnt).
  * @param result Output structure to record findings.
  * @return BOOTO_OK on success; BOOTO_ERR_IO if a present preload/environment file cannot be read,

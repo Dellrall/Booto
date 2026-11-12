@@ -305,6 +305,53 @@ static void test_yara_installed_programs(void) {
     TEST_PASS("test_yara_installed_programs");
 }
 
+static void test_account_triage(void) {
+    TEST_START("test_account_triage");
+    make_root();
+    write_etc_file("passwd", "root:x:0:0:root:/root:/bin/bash\ntoor:x:00:0::/root:/bin/sh\nalice:x:1000:1000::/home/alice:/bin/bash\n");
+    write_etc_file("shadow", "root:$y$j9T$abc:19000:0:99999:7:::\nbackup::19000:0:99999:7:::\ndaemon:*:19000::::::\n");
+    write_etc_file("gshadow", "sudo:::alice\n");  /* empty group password is normal and must not be read as shadow */
+    write_etc_file("sudoers", "Defaults env_reset\n%sudo ALL=(ALL:ALL) ALL\n");
+    write_file("/etc/sudoers.d/90-cloud", "ubuntu ALL=(ALL) NOPASSWD: ALL\nops ALL=(ALL) NOPASSWD: /usr/bin/systemctl\n");
+    write_file("/home/alice/.keep", "");
+    write_file("/home/bob/.bash_history", "ls\n");
+    char link[128];
+    snprintf(link, sizeof(link), "%s/home/alice/.bash_history", g_root);
+    ASSERT_INT_EQ(symlink("/dev/null", link), 0, "Plant history symlink");
+    unsigned char wtmp[3 * 384];
+    memset(wtmp, 'u', sizeof(wtmp));
+    memset(wtmp + 384, 0, 384);  /* the middle record wiped */
+    write_file("/var/log/wtmp", "");
+    char wp[128];
+    snprintf(wp, sizeof(wp), "%s/var/log/wtmp", g_root);
+    FILE *fp = fopen(wp, "wb");
+    ASSERT_TRUE(fp && fwrite(wtmp, 1, sizeof(wtmp), fp) == sizeof(wtmp), "Write wtmp");
+    fclose(fp);
+
+    preload_scan_result_t res;
+    booto_error_t err = preload_scan_rootfs(g_root, &res);
+    remove_tree();
+
+    ASSERT_INT_EQ(err, BOOTO_OK, "Scan must return BOOTO_OK");
+    static const struct { const char *rule, *target; booto_severity_t sev; } want[] = {
+        { "ACCT_UID0_ALIAS", "toor", SEVERITY_HIGH },
+        { "ACCT_EMPTY_PASSWORD", "backup", SEVERITY_MEDIUM },
+        { "ACCT_SUDO_NOPASSWD_ALL", "ubuntu", SEVERITY_MEDIUM },
+        { "ACCT_WTMP_ZEROED", "1 zeroed record(s)", SEVERITY_HIGH },
+        { "ACCT_HISTORY_DEVNULL", "/dev/null", SEVERITY_MEDIUM },
+    };
+    ASSERT_INT_EQ(res.threats_detected, 5, "root, locked accounts, gshadow, scoped NOPASSWD and real history are fine");
+    for (size_t w = 0; w < sizeof(want) / sizeof(want[0]); w++) {
+        bool found = false;
+        for (int i = 0; i < res.threats_detected; i++)
+            found |= strcmp(res.findings[i].rule_id, want[w].rule) == 0 &&
+                     strcmp(res.findings[i].target_library, want[w].target) == 0 && res.findings[i].severity == want[w].sev;
+        if (!found) printf("missing %s %s\n", want[w].rule, want[w].target);
+        ASSERT_TRUE(found, "Expected account finding with its grade");
+    }
+    TEST_PASS("test_account_triage");
+}
+
 static void test_full_table_keeps_severity(void) {
     TEST_START("test_full_table_keeps_severity");
     make_root();
@@ -342,6 +389,7 @@ int main(void) {
     test_known_rootkit_files();
     test_yara_installed_programs();
     test_full_table_keeps_severity();
+    test_account_triage();
     TEST_SUMMARY();
     return 0;
 }

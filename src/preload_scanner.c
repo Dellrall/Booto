@@ -22,6 +22,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 static void add_preload_threat(preload_scan_result_t *result,
                                const char *file_path,
@@ -335,6 +336,97 @@ static void ssh_key_line(const char *rootfs, const char *file, const char *line,
                       "authorized_keys entry forces a temp/hidden-path program or fetched code on login", result);
 }
 
+static bool file_is(const char *path, const char *name) {
+    const char *slash = strrchr(path, '/');
+    return strcmp(slash ? slash + 1 : path, name) == 0;
+}
+
+// Copies colon field idx (0-based) of line into out; false when the line has fewer fields.
+static bool colon_field(const char *line, int idx, char *out, size_t out_len) {
+    for (int i = 0; i < idx; i++) {
+        line = strchr(line, ':');
+        if (!line) return false;
+        line++;
+    }
+    snprintf(out, out_len, "%.*s", (int)strcspn(line, ":"), line);
+    return true;
+}
+
+// A second UID 0 account is a root backdoor with a name that does not stand out.
+static void passwd_line(const char *rootfs, const char *file, const char *line, preload_scan_result_t *result) {
+    (void)rootfs;
+    char name[64], uid[16];
+    if (!file_is(file, "passwd") || !colon_field(line, 0, name, sizeof(name)) || !colon_field(line, 2, uid, sizeof(uid)))
+        return;
+    if (uid[0] && strspn(uid, "0") == strlen(uid) && strcmp(name, "root") != 0)
+        add_graded_threat(result, file, "Second Root Account", name, "", "ACCT_UID0_ALIAS",
+                          "account other than root has UID 0", SEVERITY_HIGH);
+}
+
+// An empty shadow password lets anyone log in as that account with no password.
+static void shadow_line(const char *rootfs, const char *file, const char *line, preload_scan_result_t *result) {
+    (void)rootfs;
+    char name[64], hash[8];
+    if (!file_is(file, "shadow") || !colon_field(line, 0, name, sizeof(name)) || !colon_field(line, 1, hash, sizeof(hash)))
+        return;
+    if (hash[0] == '\0')
+        add_graded_threat(result, file, "Account Without Password", name, "", "ACCT_EMPTY_PASSWORD",
+                          "shadow entry has an empty password field: login needs no password", SEVERITY_MEDIUM);
+}
+
+// "<who> ... NOPASSWD: ALL": full root with no password. Cloud images grant it to their default user, so MEDIUM.
+static void sudoers_line(const char *rootfs, const char *file, const char *line, preload_scan_result_t *result) {
+    (void)rootfs;
+    const char *np = strstr(line, "NOPASSWD:");
+    if (!np || strncmp(line, "Defaults", 8) == 0) return;
+    np += 9;
+    while (*np && isspace((unsigned char)*np)) np++;
+    if (strcmp(np, "ALL") != 0) return;
+    char who[64];
+    snprintf(who, sizeof(who), "%.*s", (int)strcspn(line, " \t"), line);
+    add_graded_threat(result, file, "Passwordless Full sudo", who, "", "ACCT_SUDO_NOPASSWD_ALL",
+                      "sudoers grants every command as root with no password", SEVERITY_MEDIUM);
+}
+
+#define UTMP_RECORD_BYTES 384u  /* struct utmp on x86_64 glibc */
+#define WTMP_MAX_BYTES (256u * 1024u * 1024u)
+
+// Log wipers (zap, wipe, mig-logcleaner) overwrite a login record with zeros; login, reboot and logrotate never do.
+static void scan_wtmp(const char *rootfs, preload_scan_result_t *result) {
+    char path[512];
+    snprintf(path, sizeof(path), "%.400s/var/log/wtmp", rootfs);
+    struct stat st;
+    if (lstat(path, &st) != 0 || !S_ISREG(st.st_mode) || (uint64_t)st.st_size > WTMP_MAX_BYTES) return;
+    FILE *fp = fopen(path, "rb");
+    if (!fp) return;
+    result->files_scanned++;
+    unsigned char rec[UTMP_RECORD_BYTES];
+    static const unsigned char zero[UTMP_RECORD_BYTES];
+    unsigned zeroed = 0;
+    while (fread(rec, 1, sizeof(rec), fp) == sizeof(rec)) zeroed += memcmp(rec, zero, sizeof(rec)) == 0;
+    fclose(fp);
+    if (zeroed == 0) return;
+    char what[64];
+    snprintf(what, sizeof(what), "%u zeroed record(s)", zeroed);
+    add_graded_threat(result, path, "Wiped Login Record", what, "", "ACCT_WTMP_ZEROED",
+                      "wtmp has login records overwritten with zeros: a log wiper erased logins", SEVERITY_HIGH);
+}
+
+// Shell history linked to /dev/null: nothing typed in that account is ever kept.
+static void check_history(const char *rootfs, const char *home_rel, preload_scan_result_t *result) {
+    static const char *const names[] = { ".bash_history", ".zsh_history", ".ash_history" };
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+        char path[700], target[64];
+        snprintf(path, sizeof(path), "%.400s%.256s/%s", rootfs, home_rel, names[i]);
+        ssize_t n = readlink(path, target, sizeof(target) - 1);
+        if (n <= 0) continue;
+        target[n] = '\0';
+        if (strcmp(target, "/dev/null") == 0)
+            add_graded_threat(result, path, "Shell History Disabled", target, "", "ACCT_HISTORY_DEVNULL",
+                              "shell history is a symlink to /dev/null, so commands leave no trace", SEVERITY_MEDIUM);
+    }
+}
+
 // Per-user dotfiles; entries must be real directories so a planted /home/x -> / symlink cannot reach the live system.
 static void scan_homes(const char *rootfs, preload_scan_result_t *result) {
     char home[512];
@@ -350,6 +442,8 @@ static void scan_homes(const char *rootfs, preload_scan_result_t *result) {
         scan_conf_dir(rootfs, rel, "profile", profile_line, result);
         snprintf(rel, sizeof(rel), "/home/%.255s/.ssh", entry->d_name);
         scan_conf_dir(rootfs, rel, "authorized_keys", ssh_key_line, result);
+        snprintf(rel, sizeof(rel), "/home/%.255s", entry->d_name);
+        check_history(rootfs, rel, result);
     }
     closedir(dir);
 }
@@ -513,6 +607,12 @@ booto_error_t preload_scan_rootfs(const char *target_rootfs, preload_scan_result
     scan_conf_dir(target_rootfs, "/root", "profile", profile_line, result);
     scan_conf_dir(target_rootfs, "/root/.ssh", "authorized_keys", ssh_key_line, result);
     scan_homes(target_rootfs, result);
+    scan_conf_dir(target_rootfs, "/etc", "passwd", passwd_line, result);
+    scan_conf_dir(target_rootfs, "/etc", "shadow", shadow_line, result);
+    scan_conf_dir(target_rootfs, "/etc", "sudoers", sudoers_line, result);
+    scan_conf_dir(target_rootfs, "/etc/sudoers.d", "", sudoers_line, result);
+    scan_wtmp(target_rootfs, result);
+    check_history(target_rootfs, "/root", result);
     booto_error_t ioc_err = scan_file_iocs(target_rootfs, result);
     booto_error_t yara_err = scan_yara_dirs(target_rootfs, result);
     if (err == BOOTO_OK) err = env_err;
