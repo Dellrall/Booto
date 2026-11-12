@@ -36,6 +36,8 @@ uint32_t reg_hive_subkey_at(const reg_hive_t *h, uint32_t key, uint32_t i, char 
 bool reg_hive_value(const reg_hive_t *h, uint32_t key, const char *name, uint32_t *type, const uint8_t **data,
                     uint32_t *len);
 /* REG_DWORD value, or false. */
+/* Name of the i-th value of key ("" for a broken entry); false past the last value. */
+bool reg_hive_value_name_at(const reg_hive_t *h, uint32_t key, uint32_t i, char *name, size_t n);
 bool reg_hive_dword(const reg_hive_t *h, uint32_t key, const char *name, uint32_t *out);
 /* REG_SZ / REG_EXPAND_SZ value as ASCII ('?' for other characters), or false. */
 bool reg_hive_string(const reg_hive_t *h, uint32_t key, const char *name, char *out, size_t n);
