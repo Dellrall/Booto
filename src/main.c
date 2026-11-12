@@ -14,6 +14,7 @@
 #include "version.h"
 #include "persistence_mgr.h"
 #include "disk_mount.h"
+#include "disk_image.h"
 #include "forensic_scan.h"
 #include "rules_loader.h"
 #include "tui/tui_app.h"
@@ -84,6 +85,8 @@ static void print_help(const char *prog_name) {
     printf("                             to <file> (sha256sum format), to check against NSRL\n");
     printf("      --volatility <file>    CLI: add Volatility 3 JSON output (vol -r json linux.malware.*)\n");
     printf("                             from the suspect's memory image; flagged rows are threats\n");
+    printf("      --acquire <image>      CLI, with -t: first copy the raw device to <image> read-only,\n");
+    printf("                             with its SHA-256 in <image>.sha256 and bad blocks in <image>.log\n");
     printf("  -V, --verbose              Enable verbose/debug logging\n\n");
     printf("CLI exit codes:\n");
     printf("  0  CLEAN       every enabled engine ran and found nothing\n");
@@ -221,6 +224,23 @@ static void run_expert_firmware(const char *dir) {
 
 static int run_cli(booto_context_t *ctx) {
     LOG_INFO("Booto CLI Mode initialized (Version: %s)", BOOTO_VERSION_STRING);
+    if (ctx->acquire_out[0]) {  // image before the scan mounts anything
+        if (!ctx->target_dev[0]) {
+            LOG_ERROR("--acquire needs -t <dev>: the device to image");
+            return EXIT_INCOMPLETE;
+        }
+        disk_image_result_t img;
+        booto_error_t ie = disk_image_acquire(ctx->target_dev, ctx->acquire_out, &img);
+        if (ie != BOOTO_OK) {
+            LOG_ERROR("Imaging %s to %s failed (%d); an existing image is never overwritten", ctx->target_dev,
+                      ctx->acquire_out, ie);
+            return EXIT_INCOMPLETE;
+        }
+        printf("Image: %s, %llu bytes, SHA-256 %s", ctx->acquire_out, (unsigned long long)img.bytes, img.sha256);
+        if (img.bad_bytes) printf(", %llu unreadable bytes zero-filled (see %s.log)", (unsigned long long)img.bad_bytes,
+                                  ctx->acquire_out);
+        printf("\n");
+    }
     if (!resolve_target(ctx)) {
         LOG_ERROR("No scan target: pass -t <dev> or -s <dir> (auto-discovery found no target partition)");
         return EXIT_INCOMPLETE;
@@ -378,6 +398,7 @@ int main(int argc, char *argv[]) {
         {"bodyfile",        required_argument, 0, 'F'},
         {"hashlist",        required_argument, 0, 'H'},
         {"volatility",      required_argument, 0, 'L'},
+        {"acquire",         required_argument, 0, 'A'},
         {0, 0, 0, 0}
     };
 
@@ -447,6 +468,9 @@ int main(int argc, char *argv[]) {
                 break;
             case 'L':
                 snprintf(ctx.volatility_in, sizeof(ctx.volatility_in), "%s", optarg);
+                break;
+            case 'A':
+                snprintf(ctx.acquire_out, sizeof(ctx.acquire_out), "%s", optarg);
                 break;
             default:
                 print_help(argv[0]);
