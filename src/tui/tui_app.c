@@ -453,6 +453,7 @@ static void render_help_modal(int rows, int cols) {
         {"F4", "Booto storage: where reports are kept"}, {"1 2 3 4", "Panes, Findings, Firmware, Evidence pages"},
         {"f  /", "Findings: show only MEDIUM or HIGH; search by word"}, {"E", "Expert view: engines, log, pane layout"},
         {"Mouse", "Click to select, double-click to open, wheel to scroll"}, {"F10", "Power off, reboot, shell or quit"},
+        {"Root shell", "booto --acquire / --undelete / --hashlist (page 4)"},
     };
     enum { N = (int)(sizeof(keys) / sizeof(keys[0])) };
     int mx, my, mw;
@@ -524,7 +525,7 @@ static scan_module_id_t pane_module_to_scan_id(const char *name) {
     if (strncmp(name, "UEFI", 4) == 0) return SCAN_MOD_UEFI;
     if (strncmp(name, "Kernel", 6) == 0) return SCAN_MOD_KERNEL;
     if (strstr(name, "Initramfs")) return SCAN_MOD_INITRAMFS;
-    if (strncmp(name, "LD_PRELOAD", 10) == 0) return SCAN_MOD_PRELOAD;
+    if (strncmp(name, "Preload", 7) == 0) return SCAN_MOD_PRELOAD;
     if (strncmp(name, "Package", 7) == 0) return SCAN_MOD_PKG;
     if (strncmp(name, "Windows", 7) == 0) return SCAN_MOD_WINBOOT;
     return SCAN_MOD_COUNT;

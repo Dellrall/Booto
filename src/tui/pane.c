@@ -27,9 +27,9 @@ static const struct {
     {"UEFI boot files", "/boot/efi"},
     {"Kernel modules", "/lib/modules"},
     {"Initramfs scripts", "/boot/initrd.img*"},
-    {"LD_PRELOAD & load hooks", "ld.so.preload, modprobe.d, udev"},
+    {"Preload, hooks, accounts", "ld.so.preload, udev, passwd, sudoers, wtmp"},
     {"Package integrity", "dpkg md5sums, pacman mtree"},
-    {"Windows boot files", "winload, ntoskrnl, drivers"},
+    {"Windows boot & triage", "winload, drivers, Run keys, event logs"},
 };
 
 void tui_app_state_init(tui_app_state_t *app, booto_context_t *ctx) {
@@ -683,6 +683,18 @@ static void render_evidence_page(wm_node_t *n, bool focused, tui_app_state_t *ap
     put_kv(x0, &y, bottom, iw, "Quarantine", v, r->quarantined < 0 ? A_BAD : r->quarantine_zip[0] ? A_WARN : A_MUTED);
     put_kv(x0, &y, bottom, iw, "Measured boot", r->measured_note[0] ? r->measured_note : "not checked", A_TEXT);
     y++;
+    if (r->target_dev[0]) {  // CLI-only evidence tools, ready to paste into the F10 root shell
+        const char *cases = app->persist.cases_dir;
+        put_row(x0, &y, bottom, iw, "More evidence from the root shell (F10)", A_STRONG);
+        snprintf(v, sizeof(v), "booto -c -t %.120s --acquire %.200s/disk.img", r->target_dev, cases);
+        put_kv(x0, &y, bottom, iw, "Disk image", v, A_TEXT);
+        snprintf(v, sizeof(v), "mkdir %.100s/undeleted; booto -c -t %.100s --undelete %.100s/undeleted", cases, r->target_dev, cases);
+        put_kv(x0, &y, bottom, iw, "Deleted files", v, A_TEXT);
+        snprintf(v, sizeof(v), "booto -c -t %.120s --hashlist %.200s/hashes.txt", r->target_dev, cases);
+        put_kv(x0, &y, bottom, iw, "Hash list", v, A_TEXT);
+        put_row(x0, &y, bottom, iw, "Deleted files: NTFS only. Write to Booto storage, never to the disk being read.", A_MUTED);
+        y++;
+    }
     put_row(x0, &y, bottom, iw, "What each engine read", A_STRONG);
     for (int m = 0; m < SCAN_MOD_COUNT; m++) {
         switch ((scan_module_id_t)m) {

@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Windows persistence triage on the system volume: Winlogon Shell/Userinit hijacks, IFEO debuggers (CRITICAL on accessibility programs), AppInit_DLLs, Run/RunOnce values and auto-start services that run a script host or a user-writable path, the sticky keys swap, and programs in Startup folders (`WIN_*` rules in `booto-checks(7)`).
 - Ransomware signs on Windows volumes: 10 or more documents renamed to `<name>.<type>.<ext>` in a user folder (`WIN_RANSOM_ENCRYPTED`), a ransom note naming a `.onion` site (`WIN_RANSOM_NOTE`), and BCD automatic recovery turned off (`WIN_RANSOM_RECOVERY_OFF`).
 
+### Changed
+- The engine that checks preload hooks and accounts is named `Preload/users` (was `LD_PRELOAD`) in the TUI, CLI table and case reports; event-log findings are labelled `Event log tampering`.
+- The TUI Evidence page (`4`) lists ready-to-paste root-shell commands for the target: `--acquire`, `--undelete` and `--hashlist`; Help (`?`) points to them.
+
 ### Fixed
 - An engine that was skipped (disabled, no raw device, unsupported package database) now makes the verdict INCOMPLETE instead of CLEAN; an engine that does not apply to the target (Windows engine on Linux, no initramfs, no ESP) shows `N/A` and leaves the verdict alone.
 - A CLEAN verdict now says it does not clear the firmware, in the CLI, the TUI and `booto(1)`.
