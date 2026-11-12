@@ -161,14 +161,14 @@ In the TUI:
 1. Move to the target disk with the arrow keys and press `Space` to mark it as the target. Booto only ever mounts it read-only.
 2. For an encrypted target, press `F3` and enter its passphrase (for BitLocker, its password or 48-digit recovery key, with or without the dashes). It is unlocked read-only.
 3. Optionally turn engines on or off in the module list with `Space`.
-4. Press `F5` to scan. The result is `CLEAN`, `THREATS` or `INCOMPLETE` (an engine could not run, so the disk is not proven clean).
+4. Press `F5` to scan. The result is `CLEAN`, `THREATS` (a HIGH or CRITICAL finding), `SUSPICIOUS` (only MEDIUM or lower findings: check each against what the owner installed) or `INCOMPLETE` (an engine could not run, so the disk is not proven clean).
 5. Press `2` for the Findings page (every finding with its rule, hash and detail), `3` for Firmware, `4` for Evidence (before/after hash of the target, quarantine, what each engine read, and ready-to-paste `--acquire`, `--undelete` and `--hashlist` commands for the target). `1` or `Esc` returns to the panes.
 6. Press `F6` to save the reports to `/persistence/cases`.
 
 Without the TUI (from the root shell):
 
 ```bash
-booto -c -t /dev/nvme0n1p2 -p /persistence/cases   # exit code 0 CLEAN, 1 THREATS, 2 INCOMPLETE
+booto -c -t /dev/nvme0n1p2 -p /persistence/cases   # exit code 0 CLEAN, 1 THREATS, 2 INCOMPLETE, 3 SUSPICIOUS
 booto -c -t /dev/nvme0n1p2 -d                      # dry run: show the plan, touch nothing
 booto -c -t /dev/nvme0n1p3 --undelete /persistence/cases/recovered   # NTFS: copy deleted files out, read-only
 ```

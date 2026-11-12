@@ -488,13 +488,19 @@ In CLI mode:
 CLEAN: every engine that applies ran and found nothing. It does not clear the firmware.
 .TP
 .B 1
-THREATS: at least one engine reported a threat.
+THREATS: at least one finding is HIGH or CRITICAL.
 .TP
 .B 2
 INCOMPLETE: an engine failed or was skipped (disabled, no raw device, an
 unsupported package database), nothing ran, or the scan could not start.
 An engine that does not apply to the target shows N/A and does not change the verdict.
 A clean result from the other engines does not prove the target clean.
+.TP
+.B 3
+SUSPICIOUS: findings, all MEDIUM or lower. Clean setups also show these
+(custom builds, third-party drivers); check each against what the owner installed.
+.PP
+Findings outrank coverage: a scan with findings exits 1 or 3 even when an engine was skipped.
 .PP
 .B \-u
 exits with the status of the rule generator. The other options exit 0, or 1

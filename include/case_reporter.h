@@ -32,7 +32,7 @@ typedef struct {
     int preload_threats_count;
     int pkg_threats_count;
     int winboot_threats_count;
-    char verdict[16];                 /**< "CLEAN" / "THREATS" / "INCOMPLETE" */
+    char verdict[16];                 /**< "CLEAN" / "THREATS" / "SUSPICIOUS" / "INCOMPLETE" */
     char module_status[7][16];        /**< Per-module status, indexed by scan_module_id_t */
     int total_threats;
     char highest_severity[16];

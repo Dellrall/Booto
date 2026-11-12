@@ -645,6 +645,12 @@ static void finish_forensic_scan(tui_app_state_t *app) {
         tui_app_append_log(app, LOG_LEVEL_CRITICAL, NULL, log_buf);
         snprintf(app->status_msg, sizeof(app->status_msg), "Scan finished: %d threat%s found. Press 2 to list them.",
                  r->total_threats, r->total_threats == 1 ? "" : "s");
+    } else if (r->verdict == SCAN_VERDICT_SUSPICIOUS) {
+        snprintf(log_buf, sizeof(log_buf), "Scan finished: %d suspicious finding%s, none high.", r->total_threats,
+                 r->total_threats == 1 ? "" : "s");
+        tui_app_append_log(app, LOG_LEVEL_WARN, NULL, log_buf);
+        snprintf(app->status_msg, sizeof(app->status_msg), "Scan finished: %d suspicious finding%s. Press 2 to review them.",
+                 r->total_threats, r->total_threats == 1 ? "" : "s");
     } else if (r->verdict == SCAN_VERDICT_INCOMPLETE) {
         int failed = SCAN_MOD_COUNT - ok_count;
         snprintf(log_buf, sizeof(log_buf), "Scan incomplete: %d of %d engines could not run.", failed, (int)SCAN_MOD_COUNT);
