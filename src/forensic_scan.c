@@ -538,7 +538,7 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
             if (e == BOOTO_OK) check_bcd(out, q);
             if (e == BOOTO_OK) {
                 char note[96];
-                snprintf(note, sizeof(note), "%d files, %d boot-start; %d drivers catalog-signed, %d third-party",
+                snprintf(note, sizeof(note), "%d files, %d boot-start; %d drivers unsigned, %d third-party",
                          out->winboot.files_checked, out->winboot.boot_start, out->winboot.drivers_unsigned,
                          out->winboot.drivers_third_party);
                 set_status(out, SCAN_MOD_WINBOOT, SCAN_STATUS_OK, e, note);
