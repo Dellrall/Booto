@@ -121,7 +121,7 @@ sudo ./bin/booto -c -s /mnt/evidence                      # scan an already-moun
 | `--compare <file>` | CLI. Lists each boot chain file that changed, went missing or is new since that baseline. Catches tampering no signature knows; an OS update explains most changes. Does not change the verdict |
 | `-v`, `--version` / `-h`, `--help` | Version / help |
 
-Exit codes: `0` CLEAN (every enabled engine ran, nothing found), `1` THREATS, `2` INCOMPLETE (an engine failed, nothing ran, or the scan could not start). Mounting a target needs root; non-root runs cannot mount and report INCOMPLETE.
+Exit codes: `0` CLEAN (every engine that applies ran, nothing found; firmware is not part of it), `1` THREATS, `2` INCOMPLETE (an engine failed or was skipped, nothing ran, or the scan could not start). A module that does not apply to the target (the Windows engine on Linux, no initramfs) shows `N/A` and does not affect the verdict. Mounting a target needs root; non-root runs cannot mount and report INCOMPLETE.
 
 ### Detection Rules
 

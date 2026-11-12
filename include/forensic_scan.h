@@ -24,7 +24,9 @@ extern "C" {
 typedef enum { SCAN_MOD_MBR, SCAN_MOD_UEFI, SCAN_MOD_KERNEL, SCAN_MOD_INITRAMFS, SCAN_MOD_PRELOAD, SCAN_MOD_PKG, SCAN_MOD_WINBOOT, SCAN_MOD_COUNT } scan_module_id_t;
 _Static_assert(sizeof(((forensic_case_summary_t *)0)->module_status) / sizeof(((forensic_case_summary_t *)0)->module_status[0]) == SCAN_MOD_COUNT,
                "forensic_case_summary_t.module_status must hold one entry per scan module");
-typedef enum { SCAN_STATUS_NOT_RUN, SCAN_STATUS_OK, SCAN_STATUS_ERROR, SCAN_STATUS_SKIPPED } scan_status_t;
+typedef enum { SCAN_STATUS_NOT_RUN, SCAN_STATUS_OK, SCAN_STATUS_ERROR, SCAN_STATUS_SKIPPED, SCAN_STATUS_NA } scan_status_t;
+/* SKIPPED = could have run but did not (disabled, no raw device, unsupported package db): verdict INCOMPLETE.
+   NA = does not apply to this target (Windows engine on Linux, no initramfs, no ESP): verdict unaffected. */
 #define SCAN_HEAD_BYTES (1024 * 1024) /* LBA 0-2047: MBR, GPT, VBR or superblock */
 
 typedef enum { SCAN_VERDICT_CLEAN, SCAN_VERDICT_THREATS, SCAN_VERDICT_INCOMPLETE } scan_verdict_t;
