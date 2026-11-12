@@ -76,6 +76,7 @@ echo "======================================================================"
 echo "       BOOT TO FORENSICS (BOOT) - USB INSTALLATION UTILITY             "
 echo "======================================================================"
 echo "Target Block Device: ${TARGET_DRIVE}"
+DEVICE_ID="$(lsblk -dbno MODEL,SIZE,SERIAL "${TARGET_DRIVE}")"
 echo "Model / Size / Serial: $(lsblk -dno MODEL,SIZE,SERIAL "${TARGET_DRIVE}")"
 echo "Data partition size: ${DATA_SIZE:-rest of drive}"
 echo "Source Live ISO:     ${ISO_PATH}"
@@ -114,6 +115,10 @@ if [ ! -f "${ISO_PATH}" ]; then
     echo "[+] ISO not found at ${ISO_PATH}. Building fresh ISO..."
     "${REPO_ROOT}/scripts/build_iso.sh"
 fi
+
+# The ISO build above can take minutes: refuse if the USB at this path was swapped since it was confirmed.
+[ "$(lsblk -dbno MODEL,SIZE,SERIAL "${TARGET_DRIVE}" 2>/dev/null)" = "${DEVICE_ID}" ] ||
+    die "'${TARGET_DRIVE}' is no longer the disk you confirmed (model, size or serial changed); aborting."
 
 echo "[+] Step 1/5: Wiping old partition tables and filesystem headers..."
 wipefs -af "${TARGET_DRIVE}"
