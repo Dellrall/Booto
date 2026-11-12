@@ -24,6 +24,7 @@
 #include <strings.h>
 
 #define WIN_CERT_TYPE_PKCS_SIGNED_DATA 0x0002
+#define AUTHENTICODE_MAX_SIGS 8 // a bound for hostile tables; real images carry one or two
 #define SPC_INDIRECT_DATA_OID "1.3.6.1.4.1.311.2.1.4"
 
 #include "ms_roots.inc"
@@ -122,26 +123,40 @@ static authenticode_state_t check_p7(PKCS7 *p7, const pe_efi_info_t *info) {
     return state;
 }
 
-/* The PKCS#7 in the first WIN_CERTIFICATE, or NULL. The parser already bounds-checked the table against len. */
-static PKCS7 *cert_table_p7(const uint8_t *buf, const pe_efi_info_t *info) {
-    if (!info->has_authenticode || info->cert_table_size < 8) return NULL;
-    // shortcut: only the first WIN_CERTIFICATE is checked; dual-signed images carry the rest as nested signatures
-    const uint8_t *wc = buf + info->cert_table_rva;
-    uint32_t dw_len = (uint32_t)wc[0] | ((uint32_t)wc[1] << 8) | ((uint32_t)wc[2] << 16) | ((uint32_t)wc[3] << 24);
-    uint16_t cert_type = (uint16_t)(wc[6] | (wc[7] << 8));
-    if (dw_len < 8 || dw_len > info->cert_table_size || cert_type != WIN_CERT_TYPE_PKCS_SIGNED_DATA) return NULL;
-    const unsigned char *der = wc + 8;
-    return d2i_PKCS7(NULL, &der, (long)(dw_len - 8));
+/* The PKCS#7 in the n-th WIN_CERTIFICATE (entries are 8-byte aligned), or NULL. The parser bounds-checked the table. */
+static PKCS7 *cert_table_p7(const uint8_t *buf, const pe_efi_info_t *info, int n) {
+    if (!info->has_authenticode) return NULL;
+    uint32_t off = 0;
+    for (;;) {
+        if (info->cert_table_size - off < 8) return NULL;
+        const uint8_t *wc = buf + info->cert_table_rva + off;
+        uint32_t dw_len = (uint32_t)wc[0] | ((uint32_t)wc[1] << 8) | ((uint32_t)wc[2] << 16) | ((uint32_t)wc[3] << 24);
+        uint16_t cert_type = (uint16_t)(wc[6] | (wc[7] << 8));
+        if (dw_len < 8 || dw_len > info->cert_table_size - off) return NULL;
+        if (n-- == 0) {
+            if (cert_type != WIN_CERT_TYPE_PKCS_SIGNED_DATA) return NULL;
+            const unsigned char *der = wc + 8;
+            return d2i_PKCS7(NULL, &der, (long)(dw_len - 8));
+        }
+        uint32_t step = (dw_len + 7u) & ~7u;
+        if (step < dw_len || step > info->cert_table_size - off) return NULL;
+        off += step;
+    }
 }
 
+// Shim tries every signature: Fedora signs grub with its 2025 CA first and its 2020 CA (the one in shim) second.
 bool authenticode_chains_to(const uint8_t *buf, size_t len, const pe_efi_info_t *info, const uint8_t *ca_der,
                             size_t ca_len) {
     (void)len;
     if (!buf || !info || !ca_der || info->authenticode_state != AUTHENTICODE_VALID) return false;
-    PKCS7 *p7 = cert_table_p7(buf, info);
     const unsigned char *const roots[] = { ca_der };
-    bool ok = p7 && signer_chains(p7, roots, &ca_len, 1);
-    PKCS7_free(p7);
+    bool ok = false;
+    for (int i = 0; i < AUTHENTICODE_MAX_SIGS && !ok; i++) {
+        PKCS7 *p7 = cert_table_p7(buf, info, i);
+        if (!p7) break;
+        ok = check_p7(p7, info) == AUTHENTICODE_VALID && signer_chains(p7, roots, &ca_len, 1);
+        PKCS7_free(p7);
+    }
     ERR_clear_error();
     return ok;
 }
@@ -154,7 +169,7 @@ void authenticode_verify(const uint8_t *buf, size_t len, pe_efi_info_t *info) {
     (void)len;
 
     info->authenticode_state = AUTHENTICODE_INVALID;
-    PKCS7 *p7 = cert_table_p7(buf, info);
+    PKCS7 *p7 = cert_table_p7(buf, info, 0);
     if (p7) info->authenticode_state = check_p7(p7, info);
     if (info->authenticode_state == AUTHENTICODE_VALID) info->authenticode_microsoft = signer_is_microsoft(p7);
     PKCS7_free(p7);

@@ -350,6 +350,11 @@ static void check_shim_vendor(const char *efi_path, const pe_efi_info_t *pe, uef
     free(shim);
 }
 
+static bool ext_is_efi(const char *name) {
+    size_t n = strlen(name);
+    return n >= 4 && strcasecmp(name + n - 4, ".efi") == 0;
+}
+
 booto_error_t uefi_inspect_efi_file(const char *efi_path, uefi_scan_result_t *result) {
     if (!efi_path || !result) return BOOTO_ERR_INVALID_ARG;
 
@@ -387,8 +392,12 @@ booto_error_t uefi_inspect_efi_file(const char *efi_path, uefi_scan_result_t *re
                         efi_path,
                         pe.sha256,
                         "UEFI_MISSING_AUTHENTICODE",
-                        first_stage ? SEVERITY_HIGH : SEVERITY_MEDIUM, // memtest, systemd-boot, rEFInd ship unsigned
-                        "EFI executable does not contain an embedded Authenticode signature table");
+                        // memtest, systemd-boot, rEFInd ship unsigned; so do 32-bit shims (Fedora shimia32), which
+                        // x86-64 firmware never runs
+                        first_stage && pe.machine_type != 0x14c ? SEVERITY_HIGH : SEVERITY_MEDIUM,
+                        pe.machine_type == 0x14c ? "32-bit (IA32) EFI executable has no embedded Authenticode signature: "
+                                                   "only 32-bit UEFI firmware would run it"
+                                                 : "EFI executable does not contain an embedded Authenticode signature table");
     }
 
     if (pe.authenticode_state == AUTHENTICODE_HASH_MISMATCH) {
@@ -397,8 +406,12 @@ booto_error_t uefi_inspect_efi_file(const char *efi_path, uefi_scan_result_t *re
                         efi_path,
                         pe.sha256,
                         "UEFI_AUTHENTICODE_HASH_MISMATCH",
-                        SEVERITY_CRITICAL,
-                        "Authenticode signature is intact but the image was modified after signing (patched loader)");
+                        // Firmware boots .efi files; a PE under another name (Dell BIOS_CUR.rcv recovery capsules)
+                        // is an update payload whose signed layout differs
+                        ext_is_efi(base) ? SEVERITY_CRITICAL : SEVERITY_MEDIUM,
+                        ext_is_efi(base) ? "Authenticode signature is intact but the image was modified after signing (patched loader)"
+                                         : "Signed PE that is not a .efi file fails its image hash: firmware update capsules "
+                                           "(Dell .rcv) do; a patched loader renamed to hide does too");
     } else if (pe.authenticode_state == AUTHENTICODE_INVALID) {
         add_uefi_threat(result,
                         "Invalid Authenticode Signature",

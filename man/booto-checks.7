@@ -170,13 +170,16 @@ The file's Authenticode hash is in Microsoft's Secure Boot revocation list:
 a known bootkit or a known-vulnerable loader, such as the Windows boot
 manager BlackLotus downgrades to.
 .TP
-.BR UEFI_AUTHENTICODE_HASH_MISMATCH " (CRITICAL)"
+.BR UEFI_AUTHENTICODE_HASH_MISMATCH " (CRITICAL for .efi files; MEDIUM otherwise)"
 The signature is intact but the file was changed after signing: a patched
-loader.
+loader. A signed PE not named .efi, such as a Dell BIOS_CUR.rcv recovery
+capsule, is an update payload whose signed layout differs, so it is MEDIUM.
 .TP
-.BR UEFI_MISSING_AUTHENTICODE " (HIGH for BOOT*.EFI and shim; MEDIUM otherwise)"
+.BR UEFI_MISSING_AUTHENTICODE " (HIGH for x86-64 BOOT*.EFI and shim; MEDIUM otherwise)"
 The file is not signed. Fine only if Secure Boot is off and the owner built
-it. memtest86+, systemd-boot and rEFInd usually ship unsigned.
+it. memtest86+, systemd-boot and rEFInd usually ship unsigned, and so do
+32-bit shims (Fedora's BOOTIA32.EFI and shimia32.efi), which x86-64 firmware
+never runs.
 .TP
 .BR UEFI_AUTHENTICODE_INVALID " (HIGH)"
 The signature table is malformed or its PKCS#7 signature does not verify.
