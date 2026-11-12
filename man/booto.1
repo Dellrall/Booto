@@ -105,7 +105,7 @@ Show virtual drives in the TUI. For testing the interface without real disks.
 Raw block device to scan, for example
 .IR /dev/sda .
 Its partitions are mounted read-only under a private directory, and the EFI
-System Partition is found and mounted automatically. A LUKS partition must be
+System Partition is found and mounted automatically. A LUKS or BitLocker partition must be
 unlocked first (F3 in the TUI).
 .TP
 .BR \-s ", " \-\-scan\-dir " \fIpath\fR"
@@ -327,7 +327,11 @@ Toggle quarantine for the next scan (see
 .BR \-q ).
 .TP
 .B F3
-Unlock the selected LUKS drive with its passphrase.
+Unlock the selected LUKS or BitLocker drive read-only with its passphrase.
+For BitLocker, give its password or its 48-digit recovery key (the Windows login
+password or PIN does not unlock it); see
+.I docs/SETUP.md
+for where to find the recovery key.
 .TP
 .B F4
 Unlock the encrypted report partition on the Booto USB.

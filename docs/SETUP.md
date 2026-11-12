@@ -13,7 +13,7 @@ How to put Booto on a USB stick, boot a suspect machine from it, scan the machin
 | Secure Boot | On or off. The stick boots through Debian's signed shim, GRUB and kernel, so machines with Microsoft's standard keys accept it. With Secure Boot on the kernel locks down `/dev/mem`, so the expert SPI flash dump (`-x`) needs Secure Boot off. A machine with only its owner's own keys refuses the stick: turn Secure Boot off for that boot. |
 | RAM | 2 GiB minimum (the QEMU test VM uses 2048 MiB). The live system runs from RAM and never writes to the internal disks. |
 | Boot source | Must allow booting from USB. The live system only loads from removable media (USB stick, CD/DVD). A USB SSD that reports itself as non-removable boots only via the "USB not detected" GRUB entry (finds this build's ISO by UUID). |
-| Disk being scanned | Any disk Linux can mount read-only: ext4, xfs, btrfs, NTFS (Windows), LVM volumes, and LUKS (unlocked read-only from the TUI with `F3`, including LVM inside LUKS). The package check covers Debian-, Arch- and RPM-based systems; others show it as `SKIPPED`. A Windows disk gets the Windows boot chain check. BitLocker volumes are detected but cannot be unlocked yet (verdict `INCOMPLETE`). |
+| Disk being scanned | Any disk Linux can mount read-only: ext4, xfs, btrfs, NTFS (Windows), LVM volumes, and LUKS (unlocked read-only from the TUI with `F3`, including LVM inside LUKS). The package check covers Debian-, Arch- and RPM-based systems; others show it as `SKIPPED`. A Windows disk gets the Windows boot chain check. BitLocker volumes are unlocked read-only with `F3` using their password or 48-digit recovery key; a locked one gives the verdict `INCOMPLETE`. |
 
 ### USB stick
 
@@ -108,6 +108,24 @@ Shutting down erases RAM, and with it any rootkit that lives only in memory. If 
 
 Running any program on a compromised machine lets the rootkit see it, so treat the capture as a lead, not proof. Booto does not read the memory capture itself, only Volatility's JSON output.
 
+### Optional: get the decryption keys before you start
+
+Do this while the suspect machine still runs, if you can. An encrypted disk scanned without its key gives the verdict `INCOMPLETE`.
+
+**BitLocker (Windows).** Your Windows login password or PIN does not unlock the disk: on most PCs the TPM chip holds the key, and Booto cannot use the TPM. You need the 48-digit **recovery key** (eight groups of six digits). Find it in one of these places:
+
+- On the running Windows, in an administrator Command Prompt: `manage-bde -protectors -get C:`. The key is under **Numerical Password**. Run it for every encrypted drive letter (`manage-bde -status` lists them).
+- In Windows: Control Panel > BitLocker Drive Encryption > **Back up your recovery key**. On Windows 11 Home, *Device encryption* keys are always stored in the Microsoft account.
+- In your Microsoft account, from any device: <https://account.microsoft.com/devices/recoverykey> (or <https://aka.ms/myrecoverykey>).
+- For a work or school PC: <https://aka.ms/aadrecoverykey>, or ask your IT department.
+- On paper or a USB stick saved when BitLocker was turned on: a file named `BitLocker Recovery Key <ID>.TXT`.
+
+When there are several keys, pick the one whose **Key ID** matches the drive. In Booto's root shell (F10), `cryptsetup bitlkDump /dev/<partition>` prints the drive's recovery key ID; compare its first 8 characters.
+
+Get the key first: changing firmware settings to boot Booto (Secure Boot off, a new boot order) can make Windows ask for this recovery key the next time it starts.
+
+**LUKS (Linux, such as Fedora or Ubuntu with disk encryption).** Use the passphrase you type at boot. There is no separate recovery key unless you added one (`systemd-cryptenroll --recovery-key`). If the disk unlocks only with the TPM or a FIDO key, add a passphrase while the system runs: `sudo cryptsetup luksAddKey /dev/<partition>`.
+
 ### Step 3: Boot the suspect machine
 
 1. Shut the machine down completely (not sleep or hibernate).
@@ -141,7 +159,7 @@ The Reports pane shows `Storage on USB, N MiB free` when reports will be saved t
 In the TUI:
 
 1. Move to the target disk with the arrow keys and press `Space` to mark it as the target. Booto only ever mounts it read-only.
-2. For an encrypted target, press `F3` and enter its passphrase. It is unlocked read-only.
+2. For an encrypted target, press `F3` and enter its passphrase (for BitLocker, its password or 48-digit recovery key, with or without the dashes). It is unlocked read-only.
 3. Optionally turn engines on or off in the module list with `Space`.
 4. Press `F5` to scan. The result is `CLEAN`, `THREATS` or `INCOMPLETE` (an engine could not run, so the disk is not proven clean).
 5. Press `2` for the Findings page (every finding with its rule, hash and detail), `3` for Firmware, `4` for Evidence (before/after hash of the target, quarantine, what each engine read). `1` or `Esc` returns to the panes.

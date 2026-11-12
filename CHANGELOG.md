@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `F3` now unlocks BitLocker volumes read-only with their password or 48-digit recovery key (cryptsetup BITLK), and the unlocked Windows volume is scanned; `docs/SETUP.md` explains where to find the recovery key and the LUKS passphrase.
 - `--volatility <file>` adds Volatility 3 JSON output (`linux.malware.*` plugins, run on a memory image of the suspect taken before shutdown) to the CLI verdict: flagged rows make the exit status THREATS.
 - `-x` now reads the Intel flash descriptor in the dumped SPI image and says whether the host CPU may rewrite it (fwupd Spi.Descriptor).
 - `--hashlist <file>` writes the SHA-256 of every executable file in the scanned root in `sha256sum` format, to check against the NSRL or a known-good machine.

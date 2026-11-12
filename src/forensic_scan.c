@@ -439,7 +439,7 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
     char fs[32] = "";
     if (target_dev && !out->mounted && disk_probe_fs_magic(target_dev, fs, sizeof(fs), NULL, 0) == BOOTO_OK &&
         strcmp(fs, "BitLocker") == 0)
-        snprintf(rootfs_note, sizeof(rootfs_note), "BitLocker volume: encrypted, not scanned");
+        snprintf(rootfs_note, sizeof(rootfs_note), "BitLocker volume: locked, not scanned (F3 unlocks)");
     bool have_root = (out->mount_err == BOOTO_OK);
     bool windows = have_root && winboot_is_windows_root(out->scan_root);
     static const char WIN_NOTE[] = "Windows install: Linux engine does not apply";

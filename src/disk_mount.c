@@ -742,7 +742,11 @@ booto_error_t disk_luks_open_ro(const char *dev_path, const char *mapper_name, c
     }
 
     const char *pass = passphrase ? passphrase : "";
-    const char *const argv[] = {"cryptsetup", "open", "--readonly", "--key-file=-", full_dev, mapper_name, NULL};
+    // cryptsetup opens BitLocker (BITLK) with its password or 48-digit recovery key, but only when told the type.
+    char fs[32] = "";
+    bool bitlk = disk_probe_fs_magic(full_dev, fs, sizeof(fs), NULL, 0) == BOOTO_OK && strcmp(fs, "BitLocker") == 0;
+    const char *const argv[] = {"cryptsetup", "open", "--readonly", "--key-file=-", "--type", bitlk ? "bitlk" : "luks",
+                                full_dev, mapper_name, NULL};
     int status = -1;
     booto_error_t err = disk_exec_argv(argv, pass, strlen(pass), &status);
     if (err == BOOTO_OK) {
