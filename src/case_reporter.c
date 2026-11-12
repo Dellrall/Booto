@@ -210,6 +210,8 @@ booto_error_t case_report_generate_json(const forensic_case_summary_t *summary,
     fputs(",\"target_fs\":", fp); json_put_string(fp, summary->target_fs);
     fputs(",\"target_first_mib_sha256_before\":", fp); json_put_string(fp, summary->head_before);
     fputs(",\"target_first_mib_sha256_after\":", fp); json_put_string(fp, summary->head_after);
+    fputs(",\"volatility_file\":", fp); json_put_string(fp, summary->volatility_file);
+    fprintf(fp, ",\"volatility_suspicious_rows\":%d", summary->volatility_file[0] ? summary->volatility_rows : 0);
     fprintf(fp, "},\"findings_summary\":{\"total_threats\":%d,\"highest_severity\":", summary->total_threats);
     json_put_string(fp, summary->highest_severity);
     fprintf(fp, ",\"mbr_bootkit_threats\":%d,\"kernel_lkm_threats\":%d,\"uefi_bootkit_threats\":%d,"
@@ -302,6 +304,11 @@ booto_error_t case_report_generate_markdown(const forensic_case_summary_t *summa
         fprintf(fp, "\n\n**First 1 MiB of the target, SHA-256:** before `%s`, after `%s` (%s)", summary->head_before,
                 summary->head_after[0] ? summary->head_after : "unreadable",
                 strcmp(summary->head_before, summary->head_after) == 0 ? "unchanged" : "CHANGED");
+    if (summary->volatility_file[0]) {
+        fputs("\n\n**Memory (Volatility 3):** ", fp); md_put_cell(fp, summary->volatility_file);
+        if (summary->volatility_rows < 0) fputs(", unreadable", fp);
+        else fprintf(fp, ", %d suspicious row(s)", summary->volatility_rows);
+    }
     fputs("\n\n| Engine | Threats | Status |\n| :--- | ---: | :--- |\n", fp);
     for (int i = 0; i < SCAN_MOD_COUNT; i++) {
         fprintf(fp, "| %s | %d | ", forensic_scan_module_name((scan_module_id_t)i),
