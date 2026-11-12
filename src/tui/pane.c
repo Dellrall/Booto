@@ -360,6 +360,11 @@ static void render_findings_pane(wm_node_t *n, bool focused, tui_app_state_t *ap
             band = A_V_THREATS;
             word = " THREATS ";
             snprintf(summary, sizeof(summary), "%d %s found", r->total_threats, r->total_threats == 1 ? "threat" : "threats");
+        } else if (r->verdict == SCAN_VERDICT_SUSPICIOUS) {
+            band = A_V_SUSPECT;
+            word = " SUSPICIOUS ";
+            snprintf(summary, sizeof(summary), "%d low or medium %s, none high", r->total_threats,
+                     r->total_threats == 1 ? "finding" : "findings");
         } else if (r->verdict == SCAN_VERDICT_INCOMPLETE) {
             band = A_V_INCOMPL;
             word = " INCOMPLETE ";
@@ -381,6 +386,8 @@ static void render_findings_pane(wm_node_t *n, bool focused, tui_app_state_t *ap
         /* The verdict in plain words: what it means and what to do next. */
         const char *meaning = r->verdict == SCAN_VERDICT_THREATS
                                   ? "Signs of a bootkit or rootkit. Press 2 to see each one, F6 to save the report."
+                              : r->verdict == SCAN_VERDICT_SUSPICIOUS
+                                  ? "Findings that clean setups also show (custom builds, third-party drivers). Press 2 and check each against what the owner installed."
                               : r->verdict == SCAN_VERDICT_INCOMPLETE
                                   ? "Some checks could not run, so this is not a clean result. Press 4 to see why."
                                   : "Nothing suspicious in the boot path or the system. Press F6 to save the report.";

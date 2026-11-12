@@ -21,8 +21,10 @@ package findings carry no severity of their own and count as
 except a YARA match on an installed program, which keeps its rule's severity,
 because each one is direct evidence of tampering.
 .PP
-Any finding makes the verdict
-.BR THREATS .
+A HIGH or CRITICAL finding makes the verdict
+.BR THREATS ;
+findings that are all MEDIUM or lower make it
+.BR SUSPICIOUS .
 .B LOW
 and
 .B MEDIUM

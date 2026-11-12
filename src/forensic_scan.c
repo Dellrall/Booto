@@ -92,6 +92,7 @@ const char *forensic_scan_verdict_str(scan_verdict_t v) {
     switch (v) {
         case SCAN_VERDICT_CLEAN:   return "CLEAN";
         case SCAN_VERDICT_THREATS: return "THREATS";
+        case SCAN_VERDICT_SUSPICIOUS: return "SUSPICIOUS";
         default:                   return "INCOMPLETE";
     }
 }
@@ -580,15 +581,7 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
     out->total_threats = 0;
     for (int i = 0; i < SCAN_MOD_COUNT; i++) out->total_threats += forensic_scan_module_threats(out, (scan_module_id_t)i);
 
-    bool any_ok = false, any_gap = false;
-    for (int i = 0; i < SCAN_MOD_COUNT; i++) {
-        if (out->status[i] == SCAN_STATUS_OK) any_ok = true;
-        // A skipped engine left part of the boot chain unchecked, so CLEAN would overclaim.
-        if (out->status[i] == SCAN_STATUS_ERROR || out->status[i] == SCAN_STATUS_SKIPPED) any_gap = true;
-    }
-    if (out->total_threats > 0) out->verdict = SCAN_VERDICT_THREATS;
-    else if (any_gap || !any_ok) out->verdict = SCAN_VERDICT_INCOMPLETE;
-    else out->verdict = SCAN_VERDICT_CLEAN;
+    out->verdict = forensic_scan_verdict(out);
     return BOOTO_OK;
 }
 
@@ -607,6 +600,20 @@ static booto_severity_t highest_severity(const forensic_scan_report_t *r) {
     for (int i = 0; i < r->winboot.threats_detected && i < MAX_WINBOOT_THREATS; i++)
         if (r->winboot.findings[i].severity > max) max = r->winboot.findings[i].severity;
     return max;
+}
+
+scan_verdict_t forensic_scan_verdict(const forensic_scan_report_t *out) {
+    bool any_ok = false, any_gap = false;
+    for (int i = 0; i < SCAN_MOD_COUNT; i++) {
+        if (out->status[i] == SCAN_STATUS_OK) any_ok = true;
+        // A skipped engine left part of the boot chain unchecked, so CLEAN would overclaim.
+        if (out->status[i] == SCAN_STATUS_ERROR || out->status[i] == SCAN_STATUS_SKIPPED) any_gap = true;
+    }
+    // Findings past a full array were not kept, so their severity is unknown: assume the worst.
+    bool overflow = out->preload.threats_detected > MAX_PRELOAD_THREATS || out->winboot.threats_detected > MAX_WINBOOT_THREATS;
+    if (out->total_threats > 0)
+        return overflow || highest_severity(out) >= SEVERITY_HIGH ? SCAN_VERDICT_THREATS : SCAN_VERDICT_SUSPICIOUS;
+    return any_gap || !any_ok ? SCAN_VERDICT_INCOMPLETE : SCAN_VERDICT_CLEAN;
 }
 
 /* Read a sysfs attribute of the disk behind /dev/<name>: a partition's own dir has no device/, its parent's has.

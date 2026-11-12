@@ -29,7 +29,8 @@ typedef enum { SCAN_STATUS_NOT_RUN, SCAN_STATUS_OK, SCAN_STATUS_ERROR, SCAN_STAT
    NA = does not apply to this target (Windows engine on Linux, no initramfs, no ESP): verdict unaffected. */
 #define SCAN_HEAD_BYTES (1024 * 1024) /* LBA 0-2047: MBR, GPT, VBR or superblock */
 
-typedef enum { SCAN_VERDICT_CLEAN, SCAN_VERDICT_THREATS, SCAN_VERDICT_INCOMPLETE } scan_verdict_t;
+/* SUSPICIOUS: findings, all MEDIUM or lower; THREATS needs one HIGH or CRITICAL. */
+typedef enum { SCAN_VERDICT_CLEAN, SCAN_VERDICT_THREATS, SCAN_VERDICT_INCOMPLETE, SCAN_VERDICT_SUSPICIOUS } scan_verdict_t;
 
 typedef struct {
     char target_dev[128];
@@ -87,6 +88,8 @@ void forensic_scan_set_hashlist(const char *path);
 const char *forensic_scan_module_name(scan_module_id_t id);
 const char *forensic_scan_status_str(scan_status_t s);
 const char *forensic_scan_verdict_str(scan_verdict_t v);
+/* Verdict of a finished report: findings first (any HIGH or CRITICAL: THREATS, else SUSPICIOUS), then coverage. */
+scan_verdict_t forensic_scan_verdict(const forensic_scan_report_t *r);
 /* Threats found by one module. */
 int forensic_scan_module_threats(const forensic_scan_report_t *r, scan_module_id_t id);
 /* One finding of any engine, flattened for listing. Engines without a severity report CRITICAL. */

@@ -194,6 +194,31 @@ static void test_highest_severity(void) {
     TEST_PASS("test_highest_severity");
 }
 
+/* MEDIUM-or-lower findings give SUSPICIOUS, one HIGH gives THREATS; findings outrank coverage gaps. */
+static void test_suspicious_verdict(void) {
+    TEST_START("test_suspicious_verdict");
+    forensic_scan_report_t *r = calloc(1, sizeof(*r));
+    for (int i = 0; i < SCAN_MOD_COUNT; i++) r->status[i] = SCAN_STATUS_OK;
+    ASSERT_INT_EQ(forensic_scan_verdict(r), SCAN_VERDICT_CLEAN, "No findings, all engines ran: CLEAN");
+    r->winboot.threats_detected = 1;
+    r->winboot.findings[0].severity = SEVERITY_MEDIUM;
+    r->total_threats = 1;
+    ASSERT_INT_EQ(forensic_scan_verdict(r), SCAN_VERDICT_SUSPICIOUS, "A lone MEDIUM finding is SUSPICIOUS");
+    r->status[SCAN_MOD_MBR] = SCAN_STATUS_SKIPPED;
+    ASSERT_INT_EQ(forensic_scan_verdict(r), SCAN_VERDICT_SUSPICIOUS, "Findings outrank a skipped engine");
+    r->mbr.threats_detected = 1;
+    r->mbr.findings[0].severity = SEVERITY_HIGH;
+    r->total_threats = 2;
+    ASSERT_INT_EQ(forensic_scan_verdict(r), SCAN_VERDICT_THREATS, "One HIGH finding gives THREATS");
+    memset(r, 0, sizeof(*r));
+    r->winboot.threats_detected = MAX_WINBOOT_THREATS + 1;
+    r->total_threats = MAX_WINBOOT_THREATS + 1;
+    ASSERT_INT_EQ(forensic_scan_verdict(r), SCAN_VERDICT_THREATS, "Findings past a full array count as THREATS");
+    ASSERT_STR_EQ(forensic_scan_verdict_str(SCAN_VERDICT_SUSPICIOUS), "SUSPICIOUS", "Verdict name");
+    free(r);
+    TEST_PASS("test_suspicious_verdict");
+}
+
 /* Findings of every engine flatten into one list in engine order; overflow counts beyond an array are not listed. */
 static void test_finding_list(void) {
     TEST_START("test_finding_list");
@@ -287,6 +312,7 @@ int main(void) {
     test_rootfs_esp_used();
     test_all_disabled();
     test_highest_severity();
+    test_suspicious_verdict();
     test_finding_list();
     test_invalid_args();
     test_quarantine_export();

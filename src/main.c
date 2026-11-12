@@ -31,6 +31,7 @@
 #define EXIT_CLEAN 0
 #define EXIT_THREATS 1
 #define EXIT_INCOMPLETE 2
+#define EXIT_SUSPICIOUS 3
 
 void booto_context_init(booto_context_t *ctx) {
     if (!ctx) return;
@@ -97,8 +98,9 @@ static void print_help(const char *prog_name) {
     printf("  -V, --verbose              Enable verbose/debug logging\n\n");
     printf("CLI exit codes:\n");
     printf("  0  CLEAN       every engine that applies ran and found nothing\n");
-    printf("  1  THREATS     at least one engine reported a threat\n");
-    printf("  2  INCOMPLETE  an engine failed or was skipped, nothing ran, or the scan could not start\n\n");
+    printf("  1  THREATS     at least one finding is HIGH or CRITICAL\n");
+    printf("  2  INCOMPLETE  an engine failed or was skipped, nothing ran, or the scan could not start\n");
+    printf("  3  SUSPICIOUS  findings, all MEDIUM or lower: check them against what the owner installed\n\n");
 }
 
 static void scan_progress(int step, int total, const char *msg, void *user) {
@@ -382,7 +384,8 @@ static int run_cli(booto_context_t *ctx) {
     if (ctx->persistence_dir[0]) write_reports(ctx, rep, ctx->persistence_dir, v);
 
     int code = rep->verdict == SCAN_VERDICT_CLEAN ? EXIT_CLEAN
-             : rep->verdict == SCAN_VERDICT_THREATS ? EXIT_THREATS : EXIT_INCOMPLETE;
+             : rep->verdict == SCAN_VERDICT_THREATS ? EXIT_THREATS
+             : rep->verdict == SCAN_VERDICT_SUSPICIOUS ? EXIT_SUSPICIOUS : EXIT_INCOMPLETE;
     free(rep);
     if (v > 0) code = EXIT_THREATS;
     else if (v < 0 && code == EXIT_CLEAN) code = EXIT_INCOMPLETE;

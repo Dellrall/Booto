@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- A fourth verdict, `SUSPICIOUS` (exit status 3, yellow band in the TUI, `"verdict":"SUSPICIOUS"` in case reports): the scan found something, but every finding is MEDIUM or lower. `THREATS` now needs a HIGH or CRITICAL finding.
+
 ### Fixed
 - The Windows engine note called drivers without an embedded signature "catalog-signed"; it now says "unsigned", since catalogs are not checked.
 - `--acquire` now fails, with no `.sha256`, when unreadable ranges were zero-filled but could not be written to `<image>.log`.
