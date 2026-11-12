@@ -121,7 +121,7 @@ static booto_error_t create_zip(quarantine_t *q) {
     char stamp[32];
     strftime(stamp, sizeof(stamp), "%Y%m%d-%H%M%S", &tm);
     snprintf(q->path, sizeof(q->path), "%.255s/booto-quarantine-%s.zip", q->dir, stamp);
-    q->fd = open(q->path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
+    q->fd = open(q->path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0644);  // password-locked ZIP: readable on the analysis host
     if (q->fd < 0) {
         LOG_ERROR("Cannot create quarantine archive %s: %s", q->path, strerror(errno));
         return BOOTO_ERR_IO;

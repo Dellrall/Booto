@@ -154,9 +154,9 @@ static void crash_report(int fd, int sig) {
 
 static void handle_crash(int sig) {
     const char *path = g_crash_primary;
-    int fd = path ? open(path, O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW | O_CLOEXEC, 0600) : -1;
+    int fd = path ? open(path, O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW | O_CLOEXEC, 0644) : -1;
     if (fd < 0 && (path = g_crash_fallback) != NULL)
-        fd = open(path, O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW | O_CLOEXEC, 0600);
+        fd = open(path, O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW | O_CLOEXEC, 0644);
     crash_report(STDERR_FILENO, sig);
     if (fd >= 0) {
         crash_report(fd, sig);

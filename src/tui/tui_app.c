@@ -574,7 +574,7 @@ static void start_forensic_scan(tui_app_state_t *app) {
             tui_app_append_log(app, LOG_LEVEL_WARN, NULL, "Quarantine needs report storage (F4); scanning without it");
         } else {
             snprintf(app->scan_quarantine_dir, sizeof(app->scan_quarantine_dir), "%s/quarantine", app->persist.mount_path);
-            if (disk_ensure_private_dir(app->scan_quarantine_dir) != BOOTO_OK) {
+            if (disk_ensure_report_dir(app->scan_quarantine_dir) != BOOTO_OK) {
                 snprintf(log_buf, sizeof(log_buf), "Unsafe or unusable quarantine directory %.150s; scanning without it",
                          app->scan_quarantine_dir);
                 tui_app_append_log(app, LOG_LEVEL_WARN, NULL, log_buf);
@@ -673,7 +673,7 @@ static void export_case_report(tui_app_state_t *app) {
 
     bool on_usb = persistence_is_unlocked(&app->persist);
     const char *out_dir = app->persist.cases_dir;
-    booto_error_t err = disk_ensure_private_dir(out_dir);
+    booto_error_t err = disk_ensure_report_dir(out_dir);
     if (err != BOOTO_OK) {
         snprintf(app->status_msg, sizeof(app->status_msg), "Export failed: cannot create %.150s (error %d)", out_dir, (int)err);
         tui_app_append_log(app, LOG_LEVEL_ERROR, NULL, app->status_msg);
