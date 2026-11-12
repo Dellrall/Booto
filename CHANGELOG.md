@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.12.1-beta] - 2026-11-13
+
 ### Fixed
 - An unlocked LUKS target (`/dev/mapper/...`) or a partition target no longer gets its own first sector audited as an MBR: the MBR/VBR engine reads the disk under it, and the UEFI engine finds that disk's ESP instead of failing. On real hardware this raised false `MBR_INVALID_BOOT_SIGNATURE`, `MBR_CORRUPT_PARTITION_TABLE` and `MBR_GAP_ANOMALOUS_PAYLOAD` findings.
 - Fedora's GRUB (`grubx64.efi`, `gcdx64.efi`) is no longer flagged `UEFI_LOADER_NOT_SHIM_VENDOR`: it carries two signatures, and Booto now tries each one as shim does instead of only the first.

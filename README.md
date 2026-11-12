@@ -211,6 +211,7 @@ Set `NO_COLOR=1` (see [no-color.org](https://no-color.org)) for a monochrome TUI
 | **Stage 20** | `v1.11.0-beta` | BitLocker Unlock, Windows Persistence & Ransomware Triage, Event Log Tampering, Account Triage, NTFS Undelete, Disk Acquisition, Signed Reports, Volatility Import | **Completed** |
 | **Stage 20.1** | `v1.11.1-beta` | Case Report Fields (case ID, examiner, evidence number, disk serial), Linux YARA Rules (BPFDoor, PUMAKIT, XorDDoS, connection hiding) | **Completed** |
 | **Stage 21** | `v1.12.0-beta` | SUSPICIOUS Verdict (MEDIUM-only findings, exit 3), Report and Acquisition Fixes | **Completed** |
+| **Stage 21.1** | `v1.12.1-beta` | Real-Hardware Fixes: Parent-Disk MBR Audit, Fedora/Dell ESP False Positives, Per-Finding Reports, Readable Report Folders | **Completed** |
 
 Releases tagged `-beta` are pre-releases: Booto has not yet been validated against real bootkits on real hardware.
 
