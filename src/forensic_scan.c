@@ -41,6 +41,12 @@ void forensic_scan_set_bodyfile(const char *path) {
     g_bodyfile = path;
 }
 
+static const char *g_hashlist;   /* NULL: no executable hash list wanted */
+
+void forensic_scan_set_hashlist(const char *path) {
+    g_hashlist = path;
+}
+
 typedef struct { baseline_t *b; size_t root_len; } core_ctx_t;
 
 static void add_core(const char *path, void *user) {
@@ -544,6 +550,7 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
     }
 
     if (g_bodyfile && have_root) out->bodyfile_written = bodyfile_write(root, g_bodyfile) == BOOTO_OK;
+    if (g_hashlist && have_root) out->hashlist_written = hashlist_write(root, g_hashlist) == BOOTO_OK;
 
     if (q) out->quarantined = quarantine_close(q, out->quarantine_zip, sizeof(out->quarantine_zip));
 

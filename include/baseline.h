@@ -44,6 +44,9 @@ booto_error_t baseline_load(const char *path, baseline_t *out);
 /* Writes a Sleuth Kit 3.x bodyfile (mactime input) of every entry under root, without crossing
  * mounts or following symlinks. Names are /-rooted; '|', '\\' and control bytes are \\xHH-escaped. */
 booto_error_t bodyfile_write(const char *root, const char *path);
+/* Same walk; writes "<sha256>  <name>" (sha256sum format, names escaped as above) for every regular
+ * file with an execute bit, so the list can be checked against NSRL or a known-good machine. */
+booto_error_t hashlist_write(const char *root, const char *path);
 
 /* Prints changed, missing and new entries to fp; returns how many differ. */
 int baseline_compare(const baseline_t *old, const baseline_t *cur, FILE *fp);

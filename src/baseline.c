@@ -93,7 +93,7 @@ static void put_name(FILE *fp, const char *s) {
     }
 }
 
-static void body_walk(FILE *fp, const char *root, size_t rlen, dev_t dev, int depth) {
+static void body_walk(FILE *fp, const char *root, size_t rlen, dev_t dev, int depth, bool hashes) {
     DIR *d = opendir(root);
     if (!d) return;
     struct dirent *de;
@@ -104,21 +104,28 @@ static void body_walk(FILE *fp, const char *root, size_t rlen, dev_t dev, int de
         if (w < 0 || (size_t)w >= sizeof(path)) continue;
         struct stat st;
         if (lstat(path, &st) != 0) continue;
-        char m[13];
-        mode_str(st.st_mode, m);
-        fputs("0|", fp);
-        put_name(fp, path + rlen);
-        /* shortcut: crtime is 0, statx btime would fill it; upgrade when a reviewer needs birth times */
-        fprintf(fp, "|%llu|%s|%u|%u|%lld|%lld|%lld|%lld|0\n", (unsigned long long)st.st_ino, m,
-                (unsigned)st.st_uid, (unsigned)st.st_gid, (long long)st.st_size, (long long)st.st_atime,
-                (long long)st.st_mtime, (long long)st.st_ctime);
+        char hex[65];
+        if (!hashes) {
+            char m[13];
+            mode_str(st.st_mode, m);
+            fputs("0|", fp);
+            put_name(fp, path + rlen);
+            /* shortcut: crtime is 0, statx btime would fill it; upgrade when a reviewer needs birth times */
+            fprintf(fp, "|%llu|%s|%u|%u|%lld|%lld|%lld|%lld|0\n", (unsigned long long)st.st_ino, m,
+                    (unsigned)st.st_uid, (unsigned)st.st_gid, (long long)st.st_size, (long long)st.st_atime,
+                    (long long)st.st_mtime, (long long)st.st_ctime);
+        } else if (S_ISREG(st.st_mode) && (st.st_mode & 0111) && sha256_file_hex(path, hex)) {
+            fprintf(fp, "%s  ", hex);
+            put_name(fp, path + rlen);
+            fputc('\n', fp);
+        }
         if (S_ISDIR(st.st_mode) && st.st_dev == dev && depth < TREE_MAX_DEPTH)
-            body_walk(fp, path, rlen, dev, depth + 1);
+            body_walk(fp, path, rlen, dev, depth + 1, hashes);
     }
     closedir(d);
 }
 
-booto_error_t bodyfile_write(const char *root, const char *path) {
+static booto_error_t tree_write(const char *root, const char *path, bool hashes) {
     if (!root || !path) return BOOTO_ERR_INVALID_ARG;
     struct stat st;
     if (lstat(root, &st) != 0 || !S_ISDIR(st.st_mode)) return BOOTO_ERR_IO;
@@ -127,9 +134,17 @@ booto_error_t bodyfile_write(const char *root, const char *path) {
     size_t rlen = strlen(root);
     while (rlen > 1 && root[rlen - 1] == '/') rlen--;
     if (rlen == 1) rlen = 0;            /* root "/" keeps its leading slash */
-    body_walk(fp, root, rlen, st.st_dev, 0);
+    body_walk(fp, root, rlen, st.st_dev, 0, hashes);
     bool ok = !ferror(fp);
     return (fclose(fp) == 0 && ok) ? BOOTO_OK : BOOTO_ERR_IO;
+}
+
+booto_error_t bodyfile_write(const char *root, const char *path) {
+    return tree_write(root, path, false);
+}
+
+booto_error_t hashlist_write(const char *root, const char *path) {
+    return tree_write(root, path, true);
 }
 
 booto_error_t baseline_write(const baseline_t *b, const char *path) {

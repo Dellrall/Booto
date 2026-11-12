@@ -193,6 +193,18 @@ time fields are 0. Names with
 or control bytes are written as
 .BI \ex HH .
 .TP
+.BI \-\-hashlist " file"
+CLI mode. Write the SHA-256 of every regular file with an execute bit under
+the scanned root to
+.IR file ,
+one
+.RI \(dq hash "  " name \(dq
+line as
+.BR sha256sum (1)
+writes, so the list can be matched against the NSRL or a known-good machine.
+The walk and name escaping are the same as for
+.BR \-\-bodyfile .
+.TP
 .BR \-V ", " \-\-verbose
 Show debug messages.
 .SH TUI
