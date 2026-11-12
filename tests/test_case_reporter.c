@@ -3,7 +3,11 @@
  * @brief Unit tests for forensic case report generation (JSON & Markdown).
  */
 #include "test_framework.h"
+#include "case_reporter.h"
 #include "forensic_scan.h"
+#include <openssl/evp.h>
+#include <openssl/pem.h>
+#include <sys/stat.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -65,6 +69,43 @@ static void test_report_generation(void) {
     ASSERT_INT_EQ(case_report_sign_and_seal(md_path, seal), BOOTO_OK, "Seal computation must return BOOTO_OK");
     ASSERT_TRUE(strlen(seal) == 64, "SHA-256 seal must be 64 characters");
     TEST_PASS("test_report_generation");
+}
+
+static void test_report_signature(void) {
+    TEST_START("test_report_signature");
+    forensic_case_summary_t sum;
+    fill_summary(&sum, "SIG-1");
+    char path[512], sig_path[600], pub_path[600];
+    ASSERT_INT_EQ(case_report_generate_json(&sum, g_dir, path, sizeof(path)), BOOTO_OK, "JSON generation must succeed");
+    snprintf(sig_path, sizeof(sig_path), "%s.sig", path);
+    snprintf(pub_path, sizeof(pub_path), "%s/booto_report_key.pub", g_dir);
+
+    unsigned char sig[64], data[4096];
+    FILE *fp = fopen(sig_path, "rb");
+    ASSERT_TRUE(fp && fread(sig, 1, sizeof(sig), fp) == sizeof(sig), "Signature file holds 64 bytes");
+    fclose(fp);
+    fp = fopen(path, "rb");
+    size_t len = fp ? fread(data, 1, sizeof(data), fp) : 0;
+    if (fp) fclose(fp);
+    fp = fopen(pub_path, "r");
+    EVP_PKEY *pub = fp ? PEM_read_PUBKEY(fp, NULL, NULL, NULL) : NULL;
+    if (fp) fclose(fp);
+    ASSERT_TRUE(pub != NULL, "Public key written beside the report");
+
+    EVP_MD_CTX *ctx = EVP_MD_CTX_new();
+    bool good = EVP_DigestVerifyInit(ctx, NULL, NULL, NULL, pub) == 1 && EVP_DigestVerify(ctx, sig, 64, data, len) == 1;
+    data[0] ^= 1;  /* one flipped bit in the report must fail */
+    bool forged = EVP_DigestVerifyInit(ctx, NULL, NULL, NULL, pub) == 1 && EVP_DigestVerify(ctx, sig, 64, data, len) == 1;
+    EVP_MD_CTX_free(ctx);
+    EVP_PKEY_free(pub);
+    ASSERT_TRUE(good, "Signature verifies against the published key");
+    ASSERT_TRUE(!forged, "An edited report fails verification");
+
+    char key_path[600];
+    snprintf(key_path, sizeof(key_path), "%s/keys/report_ed25519.pem", g_dir);
+    struct stat st;
+    ASSERT_TRUE(stat(key_path, &st) == 0 && (st.st_mode & 077) == 0, "Private key is owner-only, outside the cases folder");
+    TEST_PASS("test_report_signature");
 }
 
 static void test_json_and_markdown_escaping(void) {
@@ -164,7 +205,11 @@ int main(void) {
         perror("mkdtemp");
         return 1;
     }
+    char key_dir[128];
+    snprintf(key_dir, sizeof(key_dir), "%s/keys", g_dir);
+    case_report_set_key_dir(key_dir);
     test_report_generation();
+    test_report_signature();
     test_json_and_markdown_escaping();
     test_host_firmware_section();
     test_unsafe_case_id_rejected();

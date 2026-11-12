@@ -34,7 +34,7 @@ Built with **C11**, Booto runs from a trusted Debian Live USB environment so the
 - **Verdicts**: Every scan ends as `CLEAN`, `THREATS`, or `INCOMPLETE`, with a per-module status; an engine that errors makes the scan `INCOMPLETE` instead of silently passing.
 - **Signed Detection Rules**: Signatures live in `rules/*.json`, each with an Ed25519 signature (`*.json.sig`) checked against a public key built into the binary; an unsigned or altered file is refused. YARA rules in `rules/bootkits.yar` (signed the same way) are matched against every PE image the UEFI and Windows checks read, every kernel module and every ELF file in the initramfs; a match on a Microsoft-signed image is not reported.
 - **Defensive Fuzzing, ASan & Multi-Compiler CI**: Deterministic 1,500-iteration-per-parser mutation fuzzing of the ELF, PE, MBR/VBR/gap and initramfs parsers, AddressSanitizer/UBSan builds, and a GCC/Clang matrix.
-- **Case Reporting**: Export of a one-line JSON report and a compact Markdown report (about 1.3 KB together per case), each with a SHA-256 side file (`sha256sum -c` works from the cases directory). The side file is an integrity checksum, not a cryptographic signature.
+- **Case Reporting**: Export of a one-line JSON report and a compact Markdown report (about 1.3 KB together per case), each with a SHA-256 side file (`sha256sum -c` works from the cases directory). Each report is also Ed25519-signed (`.sig`) with a key the stick makes on first use and keeps outside the cases folder; `booto_report_key.pub` beside the reports verifies it with `openssl pkeyutl -verify -rawin`.
 - **Automated ISO Generation (`make iso`)**: Standalone live bootable ISO output ready for USB deployment.
 
 ---

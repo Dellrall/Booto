@@ -65,12 +65,18 @@ booto_error_t case_report_generate_markdown(const forensic_case_summary_t *summa
                                             size_t max_path);
 
 /**
- * @brief Compute SHA-256 integrity seal for an exported case report.
+ * @brief Compute SHA-256 integrity seal for an exported case report, written as <report>.sha256, and sign it:
+ *        <report>.sig holds a raw Ed25519 signature by this USB's report key (made on first use in the key folder,
+ *        /persistence/keys by default) and booto_report_key.pub beside the report holds its public key. With no
+ *        key folder the report is sealed but not signed.
  * @param report_path Full path to exported report.
  * @param sha256_seal 65-byte buffer to receive hex digest.
  * @return BOOTO_OK on success.
  */
 booto_error_t case_report_sign_and_seal(const char *report_path, char sha256_seal[65]);
+
+/** @brief Folder that holds the report signing key (NULL restores /persistence/keys); for tests. */
+void case_report_set_key_dir(const char *dir);
 
 #ifdef __cplusplus
 }
