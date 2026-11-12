@@ -693,15 +693,23 @@ booto_error_t disk_mount_ro(const char *dev_path, const char *mount_point, const
     const char *candidate_fs[] = {"ext4", "vfat", "ntfs3", "ntfs", "iso9660", "btrfs", "xfs"};
     size_t num_fs = sizeof(candidate_fs) / sizeof(candidate_fs[0]);
 
+    // Keep the kernel's error for the filesystem the superblock names: the last candidate's errno says nothing.
+    char probed[32] = "";
+    if (disk_probe_fs_magic(full_dev, probed, sizeof(probed), NULL, 0) != BOOTO_OK) probed[0] = '\0';
+    if (strcmp(probed, "ntfs") == 0) snprintf(probed, sizeof(probed), "ntfs3");
+    int probed_errno = 0;
     for (size_t i = 0; i < num_fs; i++) {
         if (mount(full_dev, mount_point, candidate_fs[i], flags, fs_noreplay_opts(candidate_fs[i])) == 0) {
             LOG_INFO("Successfully mounted %s at %s (%s) strictly READ-ONLY", full_dev, mount_point, candidate_fs[i]);
             return BOOTO_OK;
         }
+        if (strcmp(candidate_fs[i], probed) == 0) probed_errno = errno;
     }
 
     // If all fail, the disk is an unformatted or raw partition table (e.g. fresh VM disk)
+    if (probed_errno) LOG_WARN("%s: %s mount failed: %s", full_dev, probed, strerror(probed_errno));
     LOG_WARN("%s could not be mounted read-only (no supported filesystem). Direct raw sector inspection is still possible.", full_dev);
+    errno = probed_errno;
     return BOOTO_ERR_MOUNT_FAILED;
 }
 

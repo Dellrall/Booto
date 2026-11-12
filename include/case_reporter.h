@@ -11,6 +11,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+struct forensic_scan_report;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -42,6 +44,8 @@ typedef struct {
     char head_after[65];              /**< The same after the scan */
     char volatility_file[128];        /**< --volatility input; "" if none */
     int volatility_rows;              /**< Suspicious rows in it; -1 if unreadable */
+    char module_note[7][96];          /**< Per-module reason (mount error, skip cause); "" if none */
+    const struct forensic_scan_report *scan; /**< Source of the per-finding list; NULL lists none */
 } forensic_case_summary_t;
 
 /**

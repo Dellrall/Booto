@@ -21,6 +21,7 @@
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <errno.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
@@ -433,6 +434,7 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
     if (!out || (!target_dev && !rootfs_dir)) return BOOTO_ERR_INVALID_ARG;
     memset(out, 0, sizeof(*out));
     if (target_dev) snprintf(out->target_dev, sizeof(out->target_dev), "%.127s", target_dev);
+    int mount_errno = 0;
 
     if (rootfs_dir) {
         snprintf(out->scan_root, sizeof(out->scan_root), "%.255s", rootfs_dir);
@@ -440,16 +442,25 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
         snprintf(out->scan_root, sizeof(out->scan_root), "%s", SCAN_MOUNT_POINT);
         if (!sha256_head_hex(target_dev, SCAN_HEAD_BYTES, out->head_before)) out->head_before[0] = '\0';
         out->mount_err = disk_mount_ro(target_dev, SCAN_MOUNT_POINT, NULL);
+        mount_errno = errno;
         out->mounted = (out->mount_err == BOOTO_OK);
         if (!out->mounted) LOG_ERROR("Cannot mount %s read-only: %s", target_dev, err_name(out->mount_err));
     }
 
+    if (target_dev && disk_probe_fs_magic(target_dev, out->target_fs, sizeof(out->target_fs), NULL, 0) != BOOTO_OK)
+        out->target_fs[0] = '\0';
+    const char *fs = out->target_fs;
     char rootfs_note[96];
-    snprintf(rootfs_note, sizeof(rootfs_note), "rootfs not mounted: %s", err_name(out->mount_err));
-    char fs[32] = "";
-    if (target_dev && !out->mounted && disk_probe_fs_magic(target_dev, fs, sizeof(fs), NULL, 0) == BOOTO_OK &&
-        strcmp(fs, "BitLocker") == 0)
+    if (out->mount_err == BOOTO_ERR_MOUNT_FAILED && mount_errno)
+        snprintf(rootfs_note, sizeof(rootfs_note), "rootfs not mounted: %s mount: %s", fs, strerror(mount_errno));
+    else
+        snprintf(rootfs_note, sizeof(rootfs_note), "rootfs not mounted: %s", err_name(out->mount_err));
+    if (!out->mounted && strcmp(fs, "BitLocker") == 0)
         snprintf(rootfs_note, sizeof(rootfs_note), "BitLocker volume: locked, not scanned (F3 unlocks)");
+    else if (!out->mounted && strcmp(fs, "ntfs") == 0 && mount_errno)
+        // ntfs3 refuses a volume left dirty by Fast Startup or hibernation, even read-only.
+        snprintf(rootfs_note, sizeof(rootfs_note), "NTFS not mounted (%.24s): turn off Windows Fast Startup, shut down fully",
+                 strerror(mount_errno));
     bool have_root = (out->mount_err == BOOTO_OK);
     bool windows = have_root && winboot_is_windows_root(out->scan_root);
     static const char WIN_NOTE[] = "Windows install: Linux engine does not apply";
@@ -658,7 +669,8 @@ void forensic_scan_fill_case_summary(const forensic_scan_report_t *r, const char
     if (!examiner) examiner = getenv("USER");
     snprintf(sum->examiner, sizeof(sum->examiner), "%.63s", (examiner && examiner[0]) ? examiner : "unknown");
     snprintf(sum->target_disk, sizeof(sum->target_disk), "%.127s", r->target_dev[0] ? r->target_dev : r->scan_root);
-    snprintf(sum->target_fs, sizeof(sum->target_fs), "unknown");
+    snprintf(sum->target_fs, sizeof(sum->target_fs), "%s", r->target_fs[0] ? r->target_fs : "unknown");
+    sum->scan = r;
     if (r->target_dev[0]) {
         disk_attr(r->target_dev, "model", 0, sum->target_model, sizeof(sum->target_model));
         disk_attr(r->target_dev, "serial", 0, sum->target_serial, sizeof(sum->target_serial));  // NVMe
@@ -679,6 +691,7 @@ void forensic_scan_fill_case_summary(const forensic_scan_report_t *r, const char
     snprintf(sum->verdict, sizeof(sum->verdict), "%s", forensic_scan_verdict_str(r->verdict));
     for (int i = 0; i < SCAN_MOD_COUNT; i++) {
         snprintf(sum->module_status[i], sizeof(sum->module_status[i]), "%s", forensic_scan_status_str(r->status[i]));
+        snprintf(sum->module_note[i], sizeof(sum->module_note[i]), "%s", r->note[i]);
     }
     sum->firmware_ran = r->firmware_ran;
     sum->firmware = r->firmware;

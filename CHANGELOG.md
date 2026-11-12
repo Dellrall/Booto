@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - An unlocked LUKS target (`/dev/mapper/...`) or a partition target no longer gets its own first sector audited as an MBR: the MBR/VBR engine reads the disk under it, and the UEFI engine finds that disk's ESP instead of failing. On real hardware this raised false `MBR_INVALID_BOOT_SIGNATURE`, `MBR_CORRUPT_PARTITION_TABLE` and `MBR_GAP_ANOMALOUS_PAYLOAD` findings.
 - Fedora's GRUB (`grubx64.efi`, `gcdx64.efi`) is no longer flagged `UEFI_LOADER_NOT_SHIM_VENDOR`: it carries two signatures, and Booto now tries each one as shim does instead of only the first.
 - `UEFI_MISSING_AUTHENTICODE` is MEDIUM, not HIGH, for 32-bit loaders (Fedora's unsigned `BOOTIA32.EFI`, `shimia32.efi`), which x86-64 firmware never runs.
+- Case reports list every finding (engine, severity, where, rule, hash, detail) and a note per engine. A target that fails to mount records the kernel's error and its filesystem; an NTFS volume Windows left dirty says to turn off Fast Startup.
 - `UEFI_AUTHENTICODE_HASH_MISMATCH` is MEDIUM, not CRITICAL, for signed PEs not named `.efi`, such as Dell `BIOS_CUR.rcv` recovery capsules.
 
 ## [1.12.0-beta] - 2026-11-12

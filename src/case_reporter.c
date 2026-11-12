@@ -228,7 +228,26 @@ booto_error_t case_report_generate_json(const forensic_case_summary_t *summary,
         fputc(':', fp);
         json_put_string(fp, summary->module_status[i]);
     }
-    fputs("},\"host_firmware\":", fp);
+    fputs("},\"module_notes\":{", fp);
+    for (int i = 0; i < SCAN_MOD_COUNT; i++) {
+        if (i) fputc(',', fp);
+        json_put_string(fp, forensic_scan_module_name((scan_module_id_t)i));
+        fputc(':', fp);
+        json_put_string(fp, summary->module_note[i]);
+    }
+    fputs("},\"findings\":[", fp);
+    scan_finding_t f;
+    for (int i = 0; summary->scan && forensic_scan_finding(summary->scan, i, &f); i++) {
+        fputs(i ? ",{\"engine\":" : "{\"engine\":", fp); json_put_string(fp, forensic_scan_module_name(f.engine));
+        fputs(",\"severity\":", fp); json_put_string(fp, booto_severity_str(f.severity));
+        fputs(",\"name\":", fp); json_put_string(fp, f.name);
+        fputs(",\"where\":", fp); json_put_string(fp, f.where);
+        fputs(",\"rule\":", fp); json_put_string(fp, f.rule);
+        fputs(",\"hash\":", fp); json_put_string(fp, f.hash);
+        fputs(",\"detail\":", fp); json_put_string(fp, f.detail);
+        fputc('}', fp);
+    }
+    fputs("],\"host_firmware\":", fp);
     if (!summary->firmware_ran) {
         fputs("null", fp);
     } else {
@@ -309,12 +328,26 @@ booto_error_t case_report_generate_markdown(const forensic_case_summary_t *summa
         if (summary->volatility_rows < 0) fputs(", unreadable", fp);
         else fprintf(fp, ", %d suspicious row(s)", summary->volatility_rows);
     }
-    fputs("\n\n| Engine | Threats | Status |\n| :--- | ---: | :--- |\n", fp);
+    fputs("\n\n| Engine | Threats | Status | Note |\n| :--- | ---: | :--- | :--- |\n", fp);
     for (int i = 0; i < SCAN_MOD_COUNT; i++) {
         fprintf(fp, "| %s | %d | ", forensic_scan_module_name((scan_module_id_t)i),
                 summary_module_threats(summary, (scan_module_id_t)i));
         md_put_cell(fp, summary->module_status[i]);
+        fputs(" | ", fp);
+        if (summary->module_note[i][0]) md_put_cell(fp, summary->module_note[i]);
         fputs(" |\n", fp);
+    }
+
+    scan_finding_t f;
+    for (int i = 0; summary->scan && forensic_scan_finding(summary->scan, i, &f); i++) {
+        if (i == 0) fputs("\n## Findings\n", fp);
+        fprintf(fp, "\n%d. **%s** %s: ", i + 1, booto_severity_str(f.severity), forensic_scan_module_name(f.engine));
+        md_put_cell(fp, f.name);
+        fputs("\n   - where: ", fp); md_put_cell(fp, f.where);
+        if (f.rule[0]) { fputs("\n   - rule: ", fp); md_put_cell(fp, f.rule); }
+        if (f.hash[0]) { fputs("\n   - hash: ", fp); md_put_cell(fp, f.hash); }
+        if (f.detail[0]) { fputs("\n   - detail: ", fp); md_put_cell(fp, f.detail); }
+        fputc('\n', fp);
     }
 
     fputs("\n## Host firmware\n\n", fp);

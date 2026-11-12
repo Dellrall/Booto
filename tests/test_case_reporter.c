@@ -71,6 +71,36 @@ static void test_report_generation(void) {
     TEST_PASS("test_report_generation");
 }
 
+/* Each finding and each module's reason (the NTFS mount error) must reach both reports, not only the counts. */
+static void test_findings_and_notes_listed(void) {
+    TEST_START("test_findings_and_notes_listed");
+    forensic_scan_report_t *r = calloc(1, sizeof(*r));
+    ASSERT_TRUE(r != NULL, "alloc");
+    r->mbr.threats_detected = 1;
+    snprintf(r->mbr.findings[0].threat_name, sizeof(r->mbr.findings[0].threat_name), "Rovnix VBR");
+    snprintf(r->mbr.findings[0].target_device, sizeof(r->mbr.findings[0].target_device), "/dev/sda");
+    snprintf(r->mbr.findings[0].rule_id, sizeof(r->mbr.findings[0].rule_id), "MBR_ROVNIX");
+    r->mbr.findings[0].severity = SEVERITY_HIGH;
+    forensic_case_summary_t sum;
+    fill_summary(&sum, "TEST-FINDINGS");
+    sum.scan = r;
+    snprintf(sum.module_note[SCAN_MOD_KERNEL], sizeof(sum.module_note[0]), "NTFS not mounted (Invalid argument)");
+
+    char path[512], buf[8192];
+    ASSERT_INT_EQ(case_report_generate_json(&sum, g_dir, path, sizeof(path)), BOOTO_OK, "JSON");
+    slurp(path, buf, sizeof(buf));
+    ASSERT_TRUE(strstr(buf, "\"findings\":[{\"engine\":\"MBR/VBR\",\"severity\":\"HIGH\",\"name\":\"Rovnix VBR\"") != NULL,
+                "JSON lists the finding");
+    ASSERT_TRUE(strstr(buf, "\"NTFS not mounted (Invalid argument)\"") != NULL, "JSON carries the module note");
+    ASSERT_INT_EQ(case_report_generate_markdown(&sum, g_dir, path, sizeof(path)), BOOTO_OK, "Markdown");
+    slurp(path, buf, sizeof(buf));
+    ASSERT_TRUE(strstr(buf, "## Findings") != NULL && strstr(buf, "1. **HIGH** MBR/VBR: `Rovnix VBR`") != NULL,
+                "Markdown lists the finding");
+    ASSERT_TRUE(strstr(buf, "`NTFS not mounted (Invalid argument)` |") != NULL, "Markdown carries the module note");
+    free(r);
+    TEST_PASS("test_findings_and_notes_listed");
+}
+
 static void test_report_signature(void) {
     TEST_START("test_report_signature");
     forensic_case_summary_t sum;
@@ -228,6 +258,7 @@ int main(void) {
     snprintf(key_dir, sizeof(key_dir), "%s/keys", g_dir);
     case_report_set_key_dir(key_dir);
     test_report_generation();
+    test_findings_and_notes_listed();
     test_report_signature();
     test_json_and_markdown_escaping();
     test_host_firmware_section();
