@@ -369,7 +369,10 @@ static int run_cli(booto_context_t *ctx) {
     if (old) {
         printf("\nBoot chain since baseline %s\n", ctx->baseline_in);
         int n = baseline_compare(old, cur, stdout);
-        if (n == 0) printf("  no change (%d file(s) compared)\n", cur->count);
+        if (n == 0 && (old->truncated || cur->truncated))
+            printf("  no change in the %d file(s) recorded; the baseline is capped at %d, so files past it were not compared\n",
+                   cur->count, BASELINE_MAX);
+        else if (n == 0) printf("  no change (%d file(s) compared)\n", cur->count);
         else printf("  %d change(s): expected after an OS or boot loader update, suspicious otherwise\n", n);
     }
     free(cur), free(old);

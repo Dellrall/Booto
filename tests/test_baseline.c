@@ -87,6 +87,13 @@ static void test_parse_rejects_bad_lines(void) {
 
     baseline_add_hash(b, "esp/evil\nname", "unreadable");
     ASSERT_STR_EQ(b->e[0].label, "esp/evil?name", "A newline in a file name cannot split the line");
+
+    static char full[BASELINE_MAX * 72];
+    size_t len = 0;
+    for (int i = 0; i < BASELINE_MAX; i++) len += (size_t)snprintf(full + len, sizeof(full) - len, "%064d  f%d\n", 0, i);
+    ASSERT_INT_EQ(baseline_parse(full, len, b), BOOTO_OK, "Full baseline parses");
+    ASSERT_TRUE(b->truncated, "A baseline at the cap stays marked incomplete after reload");
+    ASSERT_INT_EQ(baseline_parse(full, len - 72, b), BOOTO_OK, "Baseline below the cap parses");
     free(b);
     TEST_PASS("test_parse_rejects_bad_lines");
 }
