@@ -108,6 +108,20 @@ static void test_shipped_rules(void) {
     ASSERT_INT_EQ(yara_scan_buffer((const uint8_t *)ko, sizeof(ko), m, YARA_MAX_MATCHES, &n), BOOTO_OK, "scan ok");
     ASSERT_INT_EQ(n, 1, "rootkit module info flagged");
     ASSERT_STR_EQ(m[0].rule, "BOOTO_YARA_LKM_ROOTKIT_MODINFO", "Linux rule id");
+    static const char net[] = "\x7f" "ELF\0\0\0\0\0\0\0\0\0\0\0\0\x01\0" "tcp4_seq_show\0";
+    ASSERT_INT_EQ(yara_scan_buffer((const uint8_t *)net, sizeof(net), m, YARA_MAX_MATCHES, &n), BOOTO_OK, "scan ok");
+    ASSERT_INT_EQ(n, 0, "tcp4_seq_show alone is not a hook");
+    static const char hook[] = "\x7f" "ELF\0\0\0\0\0\0\0\0\0\0\0\0\x01\0" "tcp4_seq_show\0register_kprobe\0";
+    ASSERT_INT_EQ(yara_scan_buffer((const uint8_t *)hook, sizeof(hook), m, YARA_MAX_MATCHES, &n), BOOTO_OK, "scan ok");
+    ASSERT_INT_EQ(n, 1, "connection-hiding module flagged");
+    ASSERT_STR_EQ(m[0].rule, "BOOTO_YARA_LKM_NET_HIDE", "net hide rule id");
+    static const char xinetd[] = "\x7f" "ELF\0/var/run/xinetd.lock\0";
+    ASSERT_INT_EQ(yara_scan_buffer((const uint8_t *)xinetd, sizeof(xinetd), m, YARA_MAX_MATCHES, &n), BOOTO_OK, "scan ok");
+    ASSERT_INT_EQ(n, 0, "xinetd lock path alone is not BPFDoor");
+    static const char bpf[] = "\x7f" "ELF\0/var/run/xinetd.lock\0/dev/shm/kdmtmpflush\0";
+    ASSERT_INT_EQ(yara_scan_buffer((const uint8_t *)bpf, sizeof(bpf), m, YARA_MAX_MATCHES, &n), BOOTO_OK, "scan ok");
+    ASSERT_INT_EQ(n, 1, "BPFDoor flagged");
+    ASSERT_STR_EQ(m[0].rule, "BOOTO_YARA_BPFDOOR", "BPFDoor rule id");
     TEST_PASS("shipped rules load and flag an embedded PE");
 }
 
