@@ -636,7 +636,7 @@ static void finish_forensic_scan(tui_app_state_t *app) {
 
     int ok_count = 0;
     for (int m = 0; m < SCAN_MOD_COUNT; m++) {
-        if (r->status[m] == SCAN_STATUS_OK) ok_count++;
+        if (r->status[m] == SCAN_STATUS_OK || r->status[m] == SCAN_STATUS_NA) ok_count++;
     }
 
     if (r->verdict == SCAN_VERDICT_THREATS) {
@@ -651,8 +651,8 @@ static void finish_forensic_scan(tui_app_state_t *app) {
         snprintf(app->status_msg, sizeof(app->status_msg), "Scan incomplete: %d engine%s could not run. Press E for the log.",
                  failed, failed == 1 ? "" : "s");
     } else {
-        tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "Scan finished: no threats found.");
-        snprintf(app->status_msg, sizeof(app->status_msg), "Scan finished: no threats found.");
+        tui_app_append_log(app, LOG_LEVEL_INFO, NULL, "Scan finished: no known threats in the disk parts checked. Firmware is not part of this verdict.");
+        snprintf(app->status_msg, sizeof(app->status_msg), "Scan finished: no known threats in the disk parts checked. Firmware is not part of this verdict.");
     }
 }
 

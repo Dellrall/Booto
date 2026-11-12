@@ -38,19 +38,19 @@ static void test_rootfs_dir_scan(void) {
     ASSERT_INT_EQ(r->mount_err, BOOTO_OK, "rootfs_dir needs no mount");
     ASSERT_TRUE(!r->mounted, "rootfs_dir must not be mounted");
     ASSERT_INT_EQ(r->status[SCAN_MOD_MBR], SCAN_STATUS_SKIPPED, "MBR skipped without raw device");
-    ASSERT_INT_EQ(r->status[SCAN_MOD_INITRAMFS], SCAN_STATUS_SKIPPED, "Initramfs skipped when absent");
+    ASSERT_INT_EQ(r->status[SCAN_MOD_INITRAMFS], SCAN_STATUS_NA, "Initramfs n/a when absent");
     ASSERT_INT_EQ(r->status[SCAN_MOD_PRELOAD], SCAN_STATUS_OK, "Preload must run");
     ASSERT_INT_EQ(r->status[SCAN_MOD_KERNEL], SCAN_STATUS_OK, "Kernel must run");
-    ASSERT_INT_EQ(r->status[SCAN_MOD_UEFI], SCAN_STATUS_SKIPPED, "Empty boot/efi and no raw device: UEFI skipped");
+    ASSERT_INT_EQ(r->status[SCAN_MOD_UEFI], SCAN_STATUS_NA, "Empty boot/efi and no raw device: UEFI n/a");
     ASSERT_STR_EQ(r->note[SCAN_MOD_UEFI], "no EFI system partition found", "UEFI skip reason");
     ASSERT_STR_EQ(r->esp_dev, "", "No ESP recorded");
     ASSERT_INT_EQ(r->total_threats, 0, "Empty rootfs has no threats");
-    ASSERT_INT_EQ(r->verdict, SCAN_VERDICT_CLEAN, "Engines that ran are OK, the rest honestly SKIPPED: CLEAN");
+    ASSERT_INT_EQ(r->verdict, SCAN_VERDICT_INCOMPLETE, "MBR skipped (no raw device): INCOMPLETE, never CLEAN");
     ASSERT_TRUE(!r->firmware_ran, "rootfs-only scan must not audit host firmware");
 
     forensic_case_summary_t sum;
     forensic_scan_fill_case_summary(r, "CASE-T", "tester", &sum);
-    ASSERT_STR_EQ(sum.verdict, "CLEAN", "Summary verdict");
+    ASSERT_STR_EQ(sum.verdict, "INCOMPLETE", "Summary verdict");
     ASSERT_STR_EQ(sum.module_status[SCAN_MOD_MBR], "SKIPPED", "Summary module status");
     ASSERT_TRUE(!sum.firmware_ran, "Summary firmware_ran copied");
     free(r);

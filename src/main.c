@@ -89,9 +89,9 @@ static void print_help(const char *prog_name) {
     printf("                             with its SHA-256 in <image>.sha256 and bad blocks in <image>.log\n");
     printf("  -V, --verbose              Enable verbose/debug logging\n\n");
     printf("CLI exit codes:\n");
-    printf("  0  CLEAN       every enabled engine ran and found nothing\n");
+    printf("  0  CLEAN       every engine that applies ran and found nothing\n");
     printf("  1  THREATS     at least one engine reported a threat\n");
-    printf("  2  INCOMPLETE  an engine failed, nothing ran, or the scan could not start\n\n");
+    printf("  2  INCOMPLETE  an engine failed or was skipped, nothing ran, or the scan could not start\n\n");
 }
 
 static void scan_progress(int step, int total, const char *msg, void *user) {
@@ -299,6 +299,8 @@ static int run_cli(booto_context_t *ctx) {
                rep->note[i]);
     }
     printf("\nVerdict: %s\n", forensic_scan_verdict_str(rep->verdict));
+    if (rep->verdict == SCAN_VERDICT_CLEAN)
+        printf("CLEAN means no known threat in the disk parts above; it does not clear the firmware.\n");
     if (rep->firmware_ran) {
         printf("\nHost firmware (this machine, not part of the verdict)\n");
         printf("%-30s | %-7s | %s\n", "Check", "Result", "Detail");

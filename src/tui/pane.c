@@ -137,10 +137,10 @@ static void draw_scroll_marks(const wm_node_t *n, int top, int vis, bool up, boo
     if (down) term_put_glyph(cx, top + vis - 1, TERM_G_DOWN, row_attr(top + vis - 1 == cursor_row, A_MUTED));
 }
 
-static const char *const STATUS_WORD[] = {"not run", "ok", "error", "skipped"};
+static const char *const STATUS_WORD[] = {"not run", "ok", "error", "skipped", "n/a"};
 
 static const char *status_word(scan_status_t s) {
-    return (unsigned)s <= (unsigned)SCAN_STATUS_SKIPPED ? STATUS_WORD[s] : "unknown";
+    return (unsigned)s <= (unsigned)SCAN_STATUS_NA ? STATUS_WORD[s] : "unknown";
 }
 
 static uint32_t status_attr(scan_status_t s) {

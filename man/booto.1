@@ -421,13 +421,15 @@ close it.
 In CLI mode:
 .TP
 .B 0
-CLEAN: every enabled engine ran and found nothing.
+CLEAN: every engine that applies ran and found nothing. It does not clear the firmware.
 .TP
 .B 1
 THREATS: at least one engine reported a threat.
 .TP
 .B 2
-INCOMPLETE: an engine failed, nothing ran, or the scan could not start.
+INCOMPLETE: an engine failed or was skipped (disabled, no raw device, an
+unsupported package database), nothing ran, or the scan could not start.
+An engine that does not apply to the target shows N/A and does not change the verdict.
 A clean result from the other engines does not prove the target clean.
 .PP
 .B \-u

@@ -83,6 +83,7 @@ const char *forensic_scan_status_str(scan_status_t s) {
         case SCAN_STATUS_OK:      return "OK";
         case SCAN_STATUS_ERROR:   return "ERROR";
         case SCAN_STATUS_SKIPPED: return "SKIPPED";
+        case SCAN_STATUS_NA:      return "N/A";
         default:                  return "NOT_RUN";
     }
 }
@@ -335,7 +336,7 @@ static void run_uefi(forensic_scan_report_t *out, const char *target_dev, bool h
         }
     }
     if (!target_dev) {
-        set_status(out, SCAN_MOD_UEFI, SCAN_STATUS_SKIPPED, BOOTO_OK, "no EFI system partition found");
+        set_status(out, SCAN_MOD_UEFI, SCAN_STATUS_NA, BOOTO_OK, "no EFI system partition found");
         return;
     }
 
@@ -400,7 +401,7 @@ static void run_uefi(forensic_scan_report_t *out, const char *target_dev, bool h
         set_status(out, SCAN_MOD_UEFI, SCAN_STATUS_ERROR, last_err, note);
         return;
     }
-    set_status(out, SCAN_MOD_UEFI, SCAN_STATUS_SKIPPED, BOOTO_OK, "no EFI system partition found");
+    set_status(out, SCAN_MOD_UEFI, SCAN_STATUS_NA, BOOTO_OK, "no EFI system partition found");
 }
 
 /* The BCD store on the ESP the UEFI engine found, mounted again read-only when it is a device. */
@@ -467,7 +468,7 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
         if (!have_root) {
             set_status(out, SCAN_MOD_KERNEL, SCAN_STATUS_ERROR, out->mount_err, rootfs_note);
         } else if (windows) {
-            set_status(out, SCAN_MOD_KERNEL, SCAN_STATUS_SKIPPED, BOOTO_OK, WIN_NOTE);
+            set_status(out, SCAN_MOD_KERNEL, SCAN_STATUS_NA, BOOTO_OK, WIN_NOTE);
         } else {
             snprintf(path, sizeof(path), "%.256s/lib/modules", root);
             set_result(out, SCAN_MOD_KERNEL, kernel_inspect_directory(path, &out->kernel));
@@ -480,9 +481,9 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
         if (!have_root) {
             set_status(out, SCAN_MOD_INITRAMFS, SCAN_STATUS_ERROR, out->mount_err, rootfs_note);
         } else if (windows) {
-            set_status(out, SCAN_MOD_INITRAMFS, SCAN_STATUS_SKIPPED, BOOTO_OK, WIN_NOTE);
+            set_status(out, SCAN_MOD_INITRAMFS, SCAN_STATUS_NA, BOOTO_OK, WIN_NOTE);
         } else if (!find_initramfs(root, path, sizeof(path))) {
-            set_status(out, SCAN_MOD_INITRAMFS, SCAN_STATUS_SKIPPED, BOOTO_OK, "no initramfs found");
+            set_status(out, SCAN_MOD_INITRAMFS, SCAN_STATUS_NA, BOOTO_OK, "no initramfs found");
         } else {
             set_result(out, SCAN_MOD_INITRAMFS, initramfs_audit_file(path, &out->initramfs));
             if (out->initramfs.threats_detected > 0) export_file(out, q, "initramfs", root, path, QUARANTINE_MAX_ITEM);
@@ -491,7 +492,7 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
 
     if (begin(out, SCAN_MOD_PRELOAD, enabled, cb, user)) {
         if (!have_root) set_status(out, SCAN_MOD_PRELOAD, SCAN_STATUS_ERROR, out->mount_err, rootfs_note);
-        else if (windows) set_status(out, SCAN_MOD_PRELOAD, SCAN_STATUS_SKIPPED, BOOTO_OK, WIN_NOTE);
+        else if (windows) set_status(out, SCAN_MOD_PRELOAD, SCAN_STATUS_NA, BOOTO_OK, WIN_NOTE);
         else set_result(out, SCAN_MOD_PRELOAD, preload_scan_rootfs(root, &out->preload));
         for (int i = 0; i < out->preload.threats_detected && i < MAX_PRELOAD_THREATS; i++) {
             const char *lib = out->preload.findings[i].target_library;
@@ -504,7 +505,7 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
         if (!have_root) {
             set_status(out, SCAN_MOD_PKG, SCAN_STATUS_ERROR, out->mount_err, rootfs_note);
         } else if (windows) {
-            set_status(out, SCAN_MOD_PKG, SCAN_STATUS_SKIPPED, BOOTO_OK, WIN_NOTE);
+            set_status(out, SCAN_MOD_PKG, SCAN_STATUS_NA, BOOTO_OK, WIN_NOTE);
         } else {
             booto_error_t e = pkg_integrity_scan_rootfs(root, &out->pkg);
             if (e == BOOTO_ERR_NOT_FOUND) {
@@ -528,7 +529,7 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
         if (!have_root) {
             set_status(out, SCAN_MOD_WINBOOT, SCAN_STATUS_ERROR, out->mount_err, rootfs_note);
         } else if (!windows) {
-            set_status(out, SCAN_MOD_WINBOOT, SCAN_STATUS_SKIPPED, BOOTO_OK, "not a Windows install");
+            set_status(out, SCAN_MOD_WINBOOT, SCAN_STATUS_NA, BOOTO_OK, "not a Windows install");
         } else {
             booto_error_t e = winboot_scan_rootfs(root, &out->winboot);
             for (int i = 0; i < out->winboot.threats_detected && i < MAX_WINBOOT_THREATS; i++)
@@ -578,13 +579,14 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
     out->total_threats = 0;
     for (int i = 0; i < SCAN_MOD_COUNT; i++) out->total_threats += forensic_scan_module_threats(out, (scan_module_id_t)i);
 
-    bool any_ok = false, any_err = false;
+    bool any_ok = false, any_gap = false;
     for (int i = 0; i < SCAN_MOD_COUNT; i++) {
         if (out->status[i] == SCAN_STATUS_OK) any_ok = true;
-        if (out->status[i] == SCAN_STATUS_ERROR) any_err = true;
+        // A skipped engine left part of the boot chain unchecked, so CLEAN would overclaim.
+        if (out->status[i] == SCAN_STATUS_ERROR || out->status[i] == SCAN_STATUS_SKIPPED) any_gap = true;
     }
     if (out->total_threats > 0) out->verdict = SCAN_VERDICT_THREATS;
-    else if (any_err || !any_ok) out->verdict = SCAN_VERDICT_INCOMPLETE;
+    else if (any_gap || !any_ok) out->verdict = SCAN_VERDICT_INCOMPLETE;
     else out->verdict = SCAN_VERDICT_CLEAN;
     return BOOTO_OK;
 }

@@ -154,8 +154,8 @@ static void test_orchestrator(void) {
     forensic_scan_report_t *r = calloc(1, sizeof(*r));
     ASSERT_INT_EQ(forensic_scan_run(NULL, g_root, NULL, NULL, NULL, NULL, r), BOOTO_OK, "Scan runs");
     ASSERT_INT_EQ(r->status[SCAN_MOD_WINBOOT], SCAN_STATUS_OK, "Windows engine ran");
-    ASSERT_INT_EQ(r->status[SCAN_MOD_KERNEL], SCAN_STATUS_SKIPPED, "Linux kernel engine skipped");
-    ASSERT_INT_EQ(r->status[SCAN_MOD_PKG], SCAN_STATUS_SKIPPED, "Package engine skipped");
+    ASSERT_INT_EQ(r->status[SCAN_MOD_KERNEL], SCAN_STATUS_NA, "Linux kernel engine skipped");
+    ASSERT_INT_EQ(r->status[SCAN_MOD_PKG], SCAN_STATUS_NA, "Package engine skipped");
     ASSERT_INT_EQ(r->verdict, SCAN_VERDICT_THREATS, "Findings give THREATS");
     ASSERT_INT_EQ(forensic_scan_module_threats(r, SCAN_MOD_WINBOOT), 3, "Threats counted");
     free(r);
