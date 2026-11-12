@@ -94,6 +94,7 @@ booto_error_t uefi_parse_pe_buffer(const uint8_t *buf, size_t len, pe_efi_info_t
 
     info->entry_point = rd32(buf + opt + 16);
     info->subsystem = (uint16_t)(buf[opt + 68] | (buf[opt + 69] << 8));
+    info->dll_characteristics = (uint16_t)(buf[opt + 70] | (buf[opt + 71] << 8));
     uint32_t size_of_headers = rd32(buf + opt + 60);
     uint32_t num_rva = rd32(buf + opt + num_rva_off);
     size_t checksum_off = opt + 64;
@@ -429,6 +430,12 @@ booto_error_t uefi_inspect_efi_file(const char *efi_path, uefi_scan_result_t *re
                         "UEFI_PACKED_CODE_SECTION",
                         SEVERITY_MEDIUM,
                         "Executable section is high-entropy (compressed or encrypted code), typical of packed bootkit loaders");
+    }
+
+    // Microsoft signs only NX-compatible third-party loaders since 2024; an old or rebuilt loader lacks the flag.
+    if (first_stage && pe.subsystem == 10 && !(pe.dll_characteristics & 0x0100)) {
+        add_uefi_threat(result, "Boot Loader Not NX-Compatible", efi_path, pe.sha256, "UEFI_NO_NX_COMPAT", SEVERITY_LOW,
+                        "First-stage loader lacks the NX_COMPAT flag: older builds do too, but Microsoft no longer signs such loaders");
     }
 
     if (pe.sbat_revoked[0]) {

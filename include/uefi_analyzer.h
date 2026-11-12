@@ -32,6 +32,7 @@ typedef struct {
     bool is_pe32_plus;
     uint16_t machine_type;
     uint16_t subsystem;       // 10 = IMAGE_SUBSYSTEM_EFI_APPLICATION
+    uint16_t dll_characteristics; // 0x0100 = IMAGE_DLLCHARACTERISTICS_NX_COMPAT
     uint64_t entry_point;
     uint32_t cert_table_rva;  // Security Directory RVA
     uint32_t cert_table_size; // Security Directory Size
