@@ -305,6 +305,29 @@ static void test_yara_installed_programs(void) {
     TEST_PASS("test_yara_installed_programs");
 }
 
+static void test_full_table_keeps_severity(void) {
+    TEST_START("test_full_table_keeps_severity");
+    make_root();
+    char libs[MAX_PRELOAD_THREATS * 16 + 1] = "";
+    for (int i = 0; i < MAX_PRELOAD_THREATS; i++) {
+        char one[16];
+        snprintf(one, sizeof(one), "/l%d.so ", i);
+        strcat(libs, one);
+    }
+    write_etc_file("ld.so.preload", libs);
+    write_file("/tmp/kit", "\x7f" "ELF hooks by diamorphine");
+
+    preload_scan_result_t res;
+    booto_error_t err = preload_scan_rootfs(g_root, &res);
+    remove_tree();
+
+    ASSERT_INT_EQ(err, BOOTO_OK, "Scan must return BOOTO_OK");
+    ASSERT_INT_EQ(res.threats_detected, MAX_PRELOAD_THREATS, "Table full");
+    ASSERT_INT_EQ(res.findings[MAX_PRELOAD_THREATS - 1].severity, SEVERITY_CRITICAL,
+                  "A dropped YARA match must not regrade the last kept finding");
+    TEST_PASS("test_full_table_keeps_severity");
+}
+
 int main(void) {
     printf("\n--- Running LD_PRELOAD & PAM Interceptor Tests ---\n");
     test_ld_preload_detection();
@@ -318,6 +341,7 @@ int main(void) {
     test_persistence_sweep();
     test_known_rootkit_files();
     test_yara_installed_programs();
+    test_full_table_keeps_severity();
     TEST_SUMMARY();
     return 0;
 }

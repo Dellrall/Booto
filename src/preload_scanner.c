@@ -45,6 +45,15 @@ static void add_preload_threat(preload_scan_result_t *result,
                  f->threat_name, f->file_path, f->target_library, f->rule_id);
 }
 
+// add_preload_threat with a severity other than CRITICAL; no-op when the findings table is full.
+static void add_graded_threat(preload_scan_result_t *result, const char *file_path, const char *threat_name,
+                              const char *target_lib, const char *sha256, const char *rule_id, const char *description,
+                              booto_severity_t severity) {
+    int before = result->threats_detected;
+    add_preload_threat(result, file_path, threat_name, target_lib, sha256, rule_id, description);
+    if (result->threats_detected > before) result->findings[before].severity = severity;
+}
+
 #define PRELOAD_MAX_FILE_BYTES (1024u * 1024u)
 
 // Reads path fully into a NUL-terminated heap buffer; absent -> NOT_FOUND, oversized -> CORRUPT_DATA.
@@ -451,11 +460,8 @@ static void yara_dir(const char *rootfs, const char *rel_dir, preload_scan_resul
         if (n == 0) continue;
         char sha256[65] = "";
         sha256_file_hex(path, sha256);
-        for (int i = 0; i < n; i++) {
-            add_preload_threat(result, path, "YARA Rule Match", "", sha256, m[i].rule, m[i].description);
-            if (result->threats_detected <= MAX_PRELOAD_THREATS)
-                result->findings[result->threats_detected - 1].severity = m[i].severity;
-        }
+        for (int i = 0; i < n; i++)
+            add_graded_threat(result, path, "YARA Rule Match", "", sha256, m[i].rule, m[i].description, m[i].severity);
     }
     closedir(d);
 }
