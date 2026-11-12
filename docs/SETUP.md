@@ -161,7 +161,11 @@ booto -c -t /dev/nvme0n1p2 -d                      # dry run: show the plan, tou
    ```bash
    cd /path/to/mounted/cases && sha256sum -c case_*.sha256
    ```
-   Each report has a `.json` (one line, for tools) and a `.md` (for people) file. The `.sha256` files are integrity checksums, not signatures.
+   Each report has a `.json` (one line, for tools) and a `.md` (for people) file. The `.sha256` files only catch accidental changes; the `.sig` files prove the report came from this stick:
+   ```bash
+   openssl pkeyutl -verify -pubin -inkey booto_report_key.pub -rawin -in case_X.json -sigfile case_X.json.sig
+   ```
+   It must print `Signature Verified Successfully`. Each stick makes its own Ed25519 key on first export and keeps the private half in `keys/` on the report partition, outside `cases/`; keep a copy of `booto_report_key.pub` from a known-good run, because anyone who can write the partition can also replace the key.
 
 ## 4. Limits
 

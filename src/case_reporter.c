@@ -14,6 +14,13 @@
 #include "crypto_utils.h"
 #include "logger.h"
 #include "version.h"
+#include "persistence_mgr.h"
+
+#include <fcntl.h>
+#include <openssl/evp.h>
+#include <openssl/pem.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include <errno.h>
 #include <stdio.h>
@@ -74,6 +81,72 @@ static booto_error_t finish_report(FILE *fp, const char *filename) {
     return BOOTO_OK;
 }
 
+static char g_key_dir[256] = DEFAULT_PERSISTENCE_MOUNT "/keys";
+
+void case_report_set_key_dir(const char *dir) {
+    snprintf(g_key_dir, sizeof(g_key_dir), "%s", dir ? dir : DEFAULT_PERSISTENCE_MOUNT "/keys");
+}
+
+// The USB's Ed25519 report key, made on first use. Kept outside the cases folder so sharing reports never leaks it.
+static EVP_PKEY *report_key(void) {
+    char path[300];
+    snprintf(path, sizeof(path), "%.255s/report_ed25519.pem", g_key_dir);
+    FILE *fp = fopen(path, "r");
+    if (fp) {
+        EVP_PKEY *key = PEM_read_PrivateKey(fp, NULL, NULL, NULL);
+        fclose(fp);
+        return key;
+    }
+    if (mkdir(g_key_dir, 0700) != 0 && errno != EEXIST) return NULL;  // no Booto data partition: seal only
+    EVP_PKEY *key = EVP_PKEY_Q_keygen(NULL, NULL, "ED25519");
+    int fd = key ? open(path, O_WRONLY | O_CREAT | O_EXCL, 0600) : -1;
+    fp = fd >= 0 ? fdopen(fd, "w") : NULL;
+    bool ok = fp && PEM_write_PrivateKey(fp, key, NULL, NULL, 0, NULL, NULL) == 1;
+    if (fp) ok = fclose(fp) == 0 && ok;
+    else if (fd >= 0) close(fd);
+    if (!ok) {
+        if (fd >= 0) unlink(path);
+        EVP_PKEY_free(key);
+        return NULL;
+    }
+    return key;
+}
+
+#define REPORT_SIGN_MAX_BYTES (16u * 1024u * 1024u)
+
+// Writes <report>.sig (raw 64-byte Ed25519 signature, the rules' format) and booto_report_key.pub beside it.
+static bool sign_report(const char *report_path) {
+    EVP_PKEY *key = report_key();
+    if (!key) return false;
+    unsigned char *data = malloc(REPORT_SIGN_MAX_BYTES);
+    FILE *fp = data ? fopen(report_path, "rb") : NULL;
+    size_t len = fp ? fread(data, 1, REPORT_SIGN_MAX_BYTES, fp) : 0;
+    bool ok = fp && !ferror(fp) && feof(fp);
+    if (fp) fclose(fp);
+    unsigned char sig[64];
+    size_t sig_len = sizeof(sig);
+    EVP_MD_CTX *ctx = ok ? EVP_MD_CTX_new() : NULL;
+    ok = ctx && EVP_DigestSignInit(ctx, NULL, NULL, NULL, key) == 1 &&
+         EVP_DigestSign(ctx, sig, &sig_len, data, len) == 1 && sig_len == sizeof(sig);
+    EVP_MD_CTX_free(ctx);
+    free(data);
+
+    char path[600];
+    snprintf(path, sizeof(path), "%.500s.sig", report_path);
+    fp = ok ? fopen(path, "wb") : NULL;
+    ok = fp && fwrite(sig, 1, sizeof(sig), fp) == sizeof(sig);
+    if (fp) ok = fclose(fp) == 0 && ok;
+
+    const char *slash = strrchr(report_path, '/');
+    snprintf(path, sizeof(path), "%.*s/booto_report_key.pub", slash ? (int)(slash - report_path) : 1,
+             slash ? report_path : ".");
+    fp = ok ? fopen(path, "w") : NULL;
+    ok = fp && PEM_write_PUBKEY(fp, key) == 1;
+    if (fp) ok = fclose(fp) == 0 && ok;
+    EVP_PKEY_free(key);
+    return ok;
+}
+
 booto_error_t case_report_sign_and_seal(const char *report_path, char sha256_seal[65]) {
     if (!report_path || !sha256_seal) return BOOTO_ERR_INVALID_ARG;
 
@@ -96,6 +169,8 @@ booto_error_t case_report_sign_and_seal(const char *report_path, char sha256_sea
     fprintf(fp, "%s  %s\n", sha256_seal, base ? base + 1 : report_path);
     booto_error_t err = finish_report(fp, seal_file);
     if (err != BOOTO_OK) return err;
+    if (!sign_report(report_path))
+        LOG_WARN("Report '%s' not signed (no report key under %s); the SHA-256 seal still applies", report_path, g_key_dir);
 
     LOG_INFO("Case report integrity seal generated: %s (Seal: %.16s...)", report_path, sha256_seal);
     return BOOTO_OK;

@@ -121,7 +121,14 @@ and
 .IR .md ,
 each with a
 .I .sha256
-seal file.
+seal file and a raw Ed25519
+.I .sig
+signature.
+The signing key is
+.IR /persistence/keys/report_ed25519.pem ,
+made on first use; its public half is written beside the reports as
+.IR booto_report_key.pub .
+Without that folder the report is sealed but not signed.
 .TP
 .BR \-u ", " \-\-update\-rules
 Regenerate the rule files by running
