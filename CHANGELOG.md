@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.12.0-beta] - 2026-11-12
+
 ### Added
 - A fourth verdict, `SUSPICIOUS` (exit status 3, yellow band in the TUI, `"verdict":"SUSPICIOUS"` in case reports): the scan found something, but every finding is MEDIUM or lower. `THREATS` now needs a HIGH or CRITICAL finding.
 
