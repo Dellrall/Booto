@@ -581,6 +581,18 @@ site.
 (MEDIUM) The BCD store has automatic recovery off
 .RB ( "bcdedit recoveryenabled No" ).
 Ransomware does this before encrypting; some administrators do it too.
+.TP
+.B WIN_EVTX_LOG_CLEARED
+(MEDIUM) The Security log holds event 1102 or the System log event 104:
+someone cleared it, as attackers do to hide a logon or a service install.
+Administrators also clear logs; check who and when in Event Viewer.
+.TP
+.B WIN_EVTX_LOG_MISSING
+(MEDIUM) The
+.I winevt/Logs
+folder exists but
+.I Security.evtx
+is missing, unreadable or holds no events.
 .SS Boot configuration (BCD)
 When the ESP was found, its
 .I EFI/Microsoft/Boot/BCD

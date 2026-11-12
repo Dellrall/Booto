@@ -534,6 +534,61 @@ static void check_users(winboot_scan_result_t *res, const char *root) {
     closedir(d);
 }
 
+#define EVTX_HDR 4096u
+#define EVTX_CHUNK 65536u
+
+/* Event 1102 (Security) and 104 (System) carry <UserData><LogFileCleared>. BinXML keeps that element name as
+ * UTF-16LE in the template or string table of each chunk holding such an event, so a byte search per chunk finds
+ * them without decoding the template.
+ * shortcut: matches the name, not the EventID; decode BinXML templates if another event ever uses that name. */
+int winboot_evtx_scan(const uint8_t *buf, size_t len, uint64_t *records) {
+    static const char name[] = "LogFileCleared";
+    uint8_t pat[2 * (sizeof(name) - 1)];
+    for (size_t i = 0; i < sizeof(name) - 1; i++) {
+        pat[2 * i] = (uint8_t)name[i];
+        pat[2 * i + 1] = 0;
+    }
+    if (records) *records = 0;
+    if (!buf || len < EVTX_HDR || memcmp(buf, "ElfFile", 8) != 0) return -1;
+    int cleared = 0;
+    for (size_t off = EVTX_HDR; len - off >= EVTX_CHUNK; off += EVTX_CHUNK) {
+        const uint8_t *c = buf + off;
+        if (memcmp(c, "ElfChnk", 8) != 0 || memcmp(c + 512, "**\0\0", 4) != 0) continue;
+        uint64_t first = 0, last = 0;
+        memcpy(&first, c + 24, 8);
+        memcpy(&last, c + 32, 8);
+        if (records && last >= first) *records += last - first + 1;
+        for (size_t i = 512; i + sizeof(pat) <= EVTX_CHUNK; i++)
+            if (c[i] == pat[0] && memcmp(c + i, pat, sizeof(pat)) == 0) {
+                cleared++;
+                break;
+            }
+    }
+    return cleared;
+}
+
+/* A log cleared (1102/104), or Security.evtx deleted or emptied while the Logs folder is still there. */
+static void check_evtx(winboot_scan_result_t *res, const char *s32) {
+    char logs[512], path[512], why[96];
+    if (!ci_dir(s32, "winevt/Logs", logs, sizeof(logs))) return;
+    static const char *const LOGS[] = {"Security.evtx", "System.evtx"};
+    for (size_t i = 0; i < 2; i++) {
+        size_t len = 0;
+        uint8_t *buf = ci_path(logs, LOGS[i], path, sizeof(path)) ? read_hive(path, &len) : NULL;
+        uint64_t n = 0;
+        int cleared = buf ? winboot_evtx_scan(buf, len, &n) : -1;
+        free(buf);
+        if (cleared > 0) {
+            snprintf(why, sizeof(why), "log was cleared (event %s) in %d chunk(s)", i ? "104" : "1102", cleared);
+            add_rule(res, path, SEVERITY_MEDIUM, "WIN_EVTX_LOG_CLEARED", why);
+        } else if (i == 0 && n == 0) {
+            snprintf(path, sizeof(path), "%.480s/Security.evtx", logs);
+            add_rule(res, path, SEVERITY_MEDIUM, "WIN_EVTX_LOG_MISSING",
+                     cleared < 0 ? "Security log is missing or unreadable" : "Security log holds no events");
+        }
+    }
+}
+
 booto_error_t winboot_scan_rootfs(const char *root, winboot_scan_result_t *res) {
     if (!root || !res) return BOOTO_ERR_INVALID_ARG;
     memset(res, 0, sizeof(*res));
@@ -568,6 +623,7 @@ booto_error_t winboot_scan_rootfs(const char *root, winboot_scan_result_t *res) 
     if (ci_dir(root, "ProgramData/Microsoft/Windows/Start Menu/Programs/StartUp", dir, sizeof(dir))) check_startup(res, dir);
     check_users(res, root);
     check_ransom_dir(res, root);
+    check_evtx(res, s32);
     LOG_INFO("Windows boot: %d files, %d finding(s), %d driver(s) without embedded signature", res->files_checked,
              res->threats_detected, res->drivers_unsigned);
     return BOOTO_OK;
