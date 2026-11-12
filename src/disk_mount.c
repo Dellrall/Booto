@@ -968,25 +968,59 @@ static bool read_partition_number(const char *dir, uint32_t *num) {
     return true;
 }
 
+/* The one device under a device-mapper node (/sys/class/block/dm-0/slaves/nvme0n1p5), else false. */
+static bool dm_single_slave(const char *sysdir, char *out, size_t out_size) {
+    char p[PATH_MAX];
+    if (snprintf(p, sizeof(p), "%s/slaves", sysdir) >= (int)sizeof(p)) return false;
+    DIR *d = opendir(p);
+    if (!d) return false;
+    int count = 0;
+    struct dirent *de;
+    while ((de = readdir(d)) != NULL) {
+        if (de->d_name[0] == '.') continue;
+        if (++count == 1 && snprintf(out, out_size, "/dev/%s", de->d_name) >= (int)out_size) count = 2;
+    }
+    closedir(d);
+    return count == 1;
+}
+
 booto_error_t disk_partition_parent(const char *part_dev, char *parent, size_t parent_size) {
     // A path outside /dev (e.g. a disk image file) has no sysfs entry: it is a whole disk, not a partition.
     if (part_dev && strncmp(part_dev, "/dev/", 5) != 0) return BOOTO_ERR_NOT_FOUND;
-    const char *nm;
-    booto_error_t err = dev_name(part_dev, &nm);
-    if (err != BOOTO_OK) return err;
     if (!parent || parent_size == 0) return BOOTO_ERR_INVALID_ARG;
-    char link[PATH_MAX], resolved[PATH_MAX];
-    if (snprintf(link, sizeof(link), "/sys/class/block/%s", nm) >= (int)sizeof(link)) return BOOTO_ERR_INVALID_ARG;
-    uint32_t num;
-    if (!realpath(link, resolved) || !read_partition_number(resolved, &num)) return BOOTO_ERR_NOT_FOUND;
-    char *slash = strrchr(resolved, '/');
-    if (!slash || slash == resolved) return BOOTO_ERR_NOT_FOUND;
-    *slash = '\0';
-    const char *pname = strrchr(resolved, '/');
-    pname = pname ? pname + 1 : resolved;
-    if (*pname == '\0') return BOOTO_ERR_NOT_FOUND;
-    if (snprintf(parent, parent_size, "/dev/%s", pname) >= (int)parent_size) return BOOTO_ERR_INVALID_ARG;
-    return BOOTO_OK;
+    // /dev/mapper/name links to /dev/dm-N, the name sysfs knows.
+    char dev[PATH_MAX], real[PATH_MAX];
+    snprintf(dev, sizeof(dev), "%s", part_dev ? part_dev : "");
+    if (part_dev && realpath(part_dev, real) && strncmp(real, "/dev/", 5) == 0) snprintf(dev, sizeof(dev), "%s", real);
+    // An unlocked LUKS target (dm-crypt) sits on one partition: walk down to it, then to its disk.
+    for (int depth = 0; depth < 4; depth++) {
+        const char *nm;
+        booto_error_t err = dev_name(dev, &nm);
+        if (err != BOOTO_OK) return err;
+        char link[PATH_MAX], resolved[PATH_MAX];
+        if (snprintf(link, sizeof(link), "/sys/class/block/%s", nm) >= (int)sizeof(link)) return BOOTO_ERR_INVALID_ARG;
+        if (!realpath(link, resolved)) return BOOTO_ERR_NOT_FOUND;
+        uint32_t num;
+        if (!read_partition_number(resolved, &num)) {
+            char slave[PATH_MAX];
+            if (!dm_single_slave(resolved, slave, sizeof(slave))) {
+                if (depth == 0) return BOOTO_ERR_NOT_FOUND;
+                // dm-crypt straight on a whole disk: that disk is the parent.
+                return snprintf(parent, parent_size, "%s", dev) >= (int)parent_size ? BOOTO_ERR_INVALID_ARG : BOOTO_OK;
+            }
+            snprintf(dev, sizeof(dev), "%s", slave);
+            continue;
+        }
+        char *slash = strrchr(resolved, '/');
+        if (!slash || slash == resolved) return BOOTO_ERR_NOT_FOUND;
+        *slash = '\0';
+        const char *pname = strrchr(resolved, '/');
+        pname = pname ? pname + 1 : resolved;
+        if (*pname == '\0') return BOOTO_ERR_NOT_FOUND;
+        if (snprintf(parent, parent_size, "/dev/%s", pname) >= (int)parent_size) return BOOTO_ERR_INVALID_ARG;
+        return BOOTO_OK;
+    }
+    return BOOTO_ERR_NOT_FOUND;
 }
 
 booto_error_t disk_partition_by_number(const char *disk_dev, uint32_t number, char *out, size_t out_size) {

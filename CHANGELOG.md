@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- An unlocked LUKS target (`/dev/mapper/...`) or a partition target no longer gets its own first sector audited as an MBR: the MBR/VBR engine reads the disk under it, and the UEFI engine finds that disk's ESP instead of failing. On real hardware this raised false `MBR_INVALID_BOOT_SIGNATURE`, `MBR_CORRUPT_PARTITION_TABLE` and `MBR_GAP_ANOMALOUS_PAYLOAD` findings.
+
 ## [1.12.0-beta] - 2026-11-12
 
 ### Added

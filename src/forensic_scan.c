@@ -460,8 +460,13 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
 
     if (begin(out, SCAN_MOD_MBR, enabled, cb, user)) {
         if (!target_dev) set_status(out, SCAN_MOD_MBR, SCAN_STATUS_SKIPPED, BOOTO_OK, "no raw device");
-        else set_result(out, SCAN_MOD_MBR, mbr_audit_device(target_dev, &out->mbr));
-        if (out->mbr.threats_detected > 0) export_file(out, q, "mbr", NULL, target_dev, MBR_EXPORT_BYTES);
+        else {
+            // Sector 0 of a partition or an unlocked LUKS mapping is not an MBR: audit the disk under it.
+            char disk[128];
+            if (disk_partition_parent(target_dev, disk, sizeof(disk)) != BOOTO_OK) snprintf(disk, sizeof(disk), "%.127s", target_dev);
+            set_result(out, SCAN_MOD_MBR, mbr_audit_device(disk, &out->mbr));
+            if (out->mbr.threats_detected > 0) export_file(out, q, "mbr", NULL, disk, MBR_EXPORT_BYTES);
+        }
     }
 
     if (begin(out, SCAN_MOD_UEFI, enabled, cb, user)) run_uefi(out, target_dev, have_root, q);

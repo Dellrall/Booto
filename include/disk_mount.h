@@ -151,7 +151,7 @@ booto_error_t disk_parse_esp_partitions(const uint8_t *buf, size_t len, uint32_t
 /** @brief Read disk_path read-only (block device or image) and return ESP partition numbers. */
 booto_error_t disk_find_esp_partitions(const char *disk_path, uint32_t *part_numbers, int max, int *n);
 
-/** @brief "/dev/nvme0n1p2" -> "/dev/nvme0n1" via sysfs. BOOTO_ERR_NOT_FOUND if not a partition. */
+/** @brief "/dev/nvme0n1p2" (or a dm-crypt mapping on it) -> "/dev/nvme0n1" via sysfs. BOOTO_ERR_NOT_FOUND if a whole disk. */
 booto_error_t disk_partition_parent(const char *part_dev, char *parent, size_t parent_size);
 
 /** @brief "/dev/nvme0n1" + 1 -> "/dev/nvme0n1p1" via sysfs. BOOTO_ERR_NOT_FOUND if absent. */
