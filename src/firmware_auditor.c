@@ -1001,8 +1001,8 @@ static void check_intel_debug(fw_check_t *c, const char *msr_dir, bool sdbg) {
     }
 }
 
-/* The ccp driver exposes the AMD security processor's fuse state per PCI device. */
-static void check_amd_debug(fw_check_t *c, const char *ccp_dir) {
+/* The ccp driver exposes the AMD security processor's fuse state per PCI device as 0/1 files. */
+static void check_ccp_flag(fw_check_t *c, const char *ccp_dir, const char *attr, const char *pass, const char *fail) {
     DIR *d = opendir(ccp_dir);
     if (!d) {
         set_check(c, FW_RESULT_UNKNOWN, "AMD security processor driver (ccp) is not loaded.");
@@ -1014,17 +1014,21 @@ static void check_amd_debug(fw_check_t *c, const char *ccp_dir) {
         if (de->d_name[0] == '.') continue;
         char sub[4096], v[8];
         int w = snprintf(sub, sizeof(sub), "%s/%s", ccp_dir, de->d_name);
-        if (w < 0 || (size_t)w >= sizeof(sub) || read_text(sub, "debug_lock_on", v, sizeof(v)) != 0) continue;
+        if (w < 0 || (size_t)w >= sizeof(sub) || read_text(sub, attr, v, sizeof(v)) != 0) continue;
         if (v[0] == '1') on++;
         else if (v[0] == '0') off++;
     }
     closedir(d);
-    if (off)
-        set_check(c, FW_RESULT_FAIL, "AMD security processor debug is not locked (debug_lock_on is 0).");
-    else if (on)
-        set_check(c, FW_RESULT_PASS, "AMD security processor debug is locked.");
-    else
-        set_check(c, FW_RESULT_UNKNOWN, "This kernel does not report the AMD debug lock.");
+    char msg[160];
+    if (off) {
+        snprintf(msg, sizeof(msg), "%s (%s is 0).", fail, attr);
+        set_check(c, FW_RESULT_FAIL, msg);
+    } else if (on) {
+        set_check(c, FW_RESULT_PASS, pass);
+    } else {
+        snprintf(msg, sizeof(msg), "This kernel does not report %s.", attr);
+        set_check(c, FW_RESULT_UNKNOWN, msg);
+    }
 }
 
 static void check_silicon(fw_check_t *ck, bool *unconfirmed, const char *cpuinfo, const char *msr_dir,
@@ -1075,10 +1079,13 @@ static void check_silicon(fw_check_t *ck, bool *unconfirmed, const char *cpuinfo
                       "SMM is not locked (HWCR.SmmLock)");
         check_msr_bit(silicon[1], msr_dir, MSR_AMD_SMM_MASK, SMM_MASK_TVALID, "TSEG protects SMRAM.",
                       "TSEG protection is off");
-        set_check(silicon[2], FW_RESULT_NA, "Checked on Intel only: AMD flash protection needs MMIO.");
+        check_ccp_flag(silicon[2], ccp_dir, "rom_armor_enforced", "AMD ROM Armor guards the SPI flash.",
+                       "AMD ROM Armor is not enforced: the SPI flash is writable");
         set_check(silicon[3], FW_RESULT_NA, "Intel only.");
-        set_check(silicon[4], FW_RESULT_NA, "Intel only: AMD Platform Secure Boot is not read yet.");
-        check_amd_debug(silicon[5], ccp_dir);
+        check_ccp_flag(silicon[4], ccp_dir, "fused_part", "AMD Platform Secure Boot is fused on.",
+                       "AMD Platform Secure Boot is not fused: firmware is not verified");
+        check_ccp_flag(silicon[5], ccp_dir, "debug_lock_on", "AMD security processor debug is locked.",
+                       "AMD security processor debug is not locked");
     }
 }
 

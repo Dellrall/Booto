@@ -713,7 +713,7 @@ static void test_amd_silicon(void) {
     ASSERT_INT_EQ(r.checks[FW_CHECK_SMM_LOCK].result, FW_RESULT_PASS, "SmmLock on all CPUs passes");
     ASSERT_INT_EQ(r.checks[FW_CHECK_SMRAM_RANGE].result, FW_RESULT_FAIL, "TValid clear on one CPU fails");
     ASSERT_TRUE(strstr(r.checks[FW_CHECK_SMRAM_RANGE].detail, "1 of 2 CPUs") != NULL, "names the CPU count");
-    ASSERT_INT_EQ(r.checks[FW_CHECK_BIOS_WP].result, FW_RESULT_NA, "BIOS_CNTL is Intel only");
+    ASSERT_INT_EQ(r.checks[FW_CHECK_BIOS_WP].result, FW_RESULT_UNKNOWN, "AMD flash WP needs ccp rom_armor_enforced");
     TEST_PASS("test_amd_silicon");
 }
 
@@ -786,6 +786,14 @@ static void test_me_boot_guard_debug(void) {
     write_file(path, "1\n", 2);
     firmware_audit(&g_paths, &r);
     ASSERT_INT_EQ(r.checks[FW_CHECK_DEBUG_LOCK].result, FW_RESULT_PASS, "PSP debug locked passes");
+    ASSERT_INT_EQ(r.checks[FW_CHECK_BIOS_WP].result, FW_RESULT_UNKNOWN, "no rom_armor_enforced is unknown");
+    snprintf(path, sizeof(path), "%s/0000:05:00.2/rom_armor_enforced", g_ccp);
+    write_file(path, "0\n", 2);
+    snprintf(path, sizeof(path), "%s/0000:05:00.2/fused_part", g_ccp);
+    write_file(path, "1\n", 2);
+    firmware_audit(&g_paths, &r);
+    ASSERT_INT_EQ(r.checks[FW_CHECK_BIOS_WP].result, FW_RESULT_FAIL, "ROM Armor off fails");
+    ASSERT_INT_EQ(r.checks[FW_CHECK_BOOT_GUARD].result, FW_RESULT_PASS, "PSB fused passes");
     remove_tree(g_root);
     TEST_PASS("test_me_boot_guard_debug");
 }

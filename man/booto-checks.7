@@ -516,7 +516,10 @@ The firmware describes an IOMMU, so DMA attacks can be blocked. Needs root.
 .TP
 .BR "SMM locked" ", " "SMRAM range protected" ", " "BIOS write protection"
 Chipset registers that stop code from writing firmware or SMM memory. Only
-read on confirmed chipsets; others report unknown.
+read on confirmed chipsets; others report unknown. On AMD, BIOS write
+protection is the ccp driver's
+.I rom_armor_enforced
+(ROM Armor).
 .TP
 .B Boot measurements (TPM)
 The TPM event log is read and the firmware measurements (PCR 0 to 7) are
@@ -530,7 +533,9 @@ flash region or fuses writable. Intel only.
 .B Boot Guard verified boot
 HFSTS6 must show Boot Guard verifying the firmware and its fuses locked, so
 modified firmware cannot boot. Read for CSME 11 to 17 only; other versions
-report unknown.
+report unknown. On AMD, Platform Secure Boot must be fused on (ccp
+.I fused_part
+is 1).
 .TP
 .B CPU debug interface locked
 On Intel CPUs with silicon debug (SDBG), IA32_DEBUG_INTERFACE must be off and
