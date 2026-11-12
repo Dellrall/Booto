@@ -391,6 +391,8 @@ static void hive_walk(const reg_hive_t *h, uint32_t key, int depth) {
     (void)reg_hive_dword(h, key, "Start", &x);
     (void)reg_hive_string(h, key, "ImagePath", s, sizeof(s));
     (void)reg_hive_subkey(h, key, "Services");
+    for (uint32_t i = 0; depth < 4 && reg_hive_value_name_at(h, key, i, name, sizeof(name)); i++)
+        (void)reg_hive_string(h, key, name, s, sizeof(s));
     for (uint32_t i = 0, k; depth < 4 && (k = reg_hive_subkey_at(h, key, i, name, sizeof(name))) != 0; i++)
         hive_walk(h, k, depth + 1);
 }

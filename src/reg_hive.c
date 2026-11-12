@@ -158,6 +158,21 @@ bool reg_hive_value(const reg_hive_t *h, uint32_t key, const char *name, uint32_
     return false;
 }
 
+bool reg_hive_value_name_at(const reg_hive_t *h, uint32_t key, uint32_t i, char *name, size_t n) {
+    uint32_t cn, ln, vn;
+    const uint8_t *k = typed(h, key, "nk", NK_NAME, &cn);
+    if (!k || !name || n == 0) return false;
+    uint32_t count = rd32(k + 0x24);
+    if (i >= count) return false;
+    const uint8_t *list = cell(h, rd32(k + 0x28), &ln);
+    if (!list || count > ln / 4) return false;
+    name[0] = '\0';
+    const uint8_t *v = typed(h, rd32(list + 4 * i), "vk", VK_NAME, &vn);
+    uint16_t nlen = v ? rd16(v + 2) : 0;
+    if (v && nlen <= vn - VK_NAME) copy_name(v + VK_NAME, nlen, rd16(v + 0x10) & VALUE_COMP_NAME, name, n);
+    return true;  // a broken entry gives "", so the caller keeps iterating
+}
+
 bool reg_hive_dword(const reg_hive_t *h, uint32_t key, const char *name, uint32_t *out) {
     uint32_t type, len;
     const uint8_t *d;
