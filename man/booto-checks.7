@@ -491,6 +491,96 @@ outside
 is checked the same way. A path with
 .B ..
 or through a symlink is not followed. Changes still in the hive's transaction logs are not seen.
+.SS Persistence and ransomware
+Autostart places and ransomware traces on the Windows system volume, read
+from the SOFTWARE and SYSTEM hives, each NTUSER.DAT, and the Startup folders.
+.TP
+.B WIN_WINLOGON_SHELL
+(HIGH) The Winlogon
+.B Shell
+value starts something besides
+.IR explorer.exe ,
+so it runs at every logon.
+.TP
+.B WIN_WINLOGON_USERINIT
+(HIGH) The Winlogon
+.B Userinit
+value lists a program after
+.IR userinit.exe .
+.TP
+.B WIN_IFEO_ACCESSIBILITY
+(CRITICAL) An Image File Execution Options
+.B Debugger
+is set for an accessibility program
+.RI ( sethc.exe ", " utilman.exe ", " osk.exe ", ...),"
+which then opens a shell at the logon screen without a password.
+.TP
+.B WIN_IFEO_DEBUGGER
+(MEDIUM) An Image File Execution Options
+.B Debugger
+is set for another program. Developers set this; malware uses it to start
+itself instead of the program.
+.TP
+.B WIN_APPINIT_DLLS
+(HIGH)
+.B LoadAppInit_DLLs
+is on and
+.B AppInit_DLLs
+names a DLL, which Windows loads into every GUI process.
+.TP
+.B WIN_RUN_KEY
+(MEDIUM) A machine or user
+.B Run
+or
+.B RunOnce
+value starts a script host (PowerShell, mshta, wscript, cscript,
+.BR "cmd /c" )
+or a program in a folder any user can write
+.RI ( Users\ePublic ", " Temp ", " $Recycle.Bin ", " PerfLogs ).
+Ordinary programs from
+.I Program Files
+are not reported.
+.TP
+.B WIN_SERVICE_COMMAND
+(HIGH) An automatic or boot service
+.RB ( Start " 0, 1 or 2)"
+has an
+.B ImagePath
+that runs a script host or a program from a user-writable folder.
+.TP
+.B WIN_ACCESSIBILITY_SWAP
+(CRITICAL) An accessibility program in System32 has the same SHA-256 as
+.IR cmd.exe ,
+.I powershell.exe
+or
+.IR taskmgr.exe :
+the sticky keys backdoor.
+.TP
+.B WIN_STARTUP_FILE
+(MEDIUM) A Startup folder holds a program or script
+.RI ( .exe ", " .bat ", " .vbs ", " .ps1 ", " .hta ", ...)"
+that runs at logon. Shortcuts
+.RI ( .lnk )
+are normal there and not reported.
+.TP
+.B WIN_RANSOM_ENCRYPTED
+(HIGH) At least 10 documents in one folder (Desktop, Documents, Pictures,
+Downloads, or the volume root) are renamed to
+.IR <name>.<document type>.<new extension> ,
+as ransomware does. Backup and download extensions
+.RI ( .bak ", " .part ", " .tmp ", ...)"
+are not counted.
+.TP
+.B WIN_RANSOM_NOTE
+(HIGH) A text or HTML file named like a ransom note (decrypt, restore,
+how_to, readme, ...) names a Tor
+.I .onion
+site.
+.TP
+.B WIN_RANSOM_RECOVERY_OFF
+(MEDIUM) The BCD store has automatic recovery off
+.RB ( "bcdedit recoveryenabled No" ).
+Ransomware does this before encrypting; some administrators do it too.
 .SS Boot configuration (BCD)
 When the ESP was found, its
 .I EFI/Microsoft/Boot/BCD

@@ -14,6 +14,7 @@
 #include "logger.h"
 #include "firmware_auditor.h"
 #include "reg_hive.h"
+#include "crypto_utils.h"
 
 #include <ctype.h>
 #include <dirent.h>
@@ -41,7 +42,7 @@ static bool ci_child(const char *dir, const char *name, char *out, size_t n) {
 
 /* <dir>/<rel> by any case, rel split on '\\' or '/'. Refuses "..", symlinks and a final non-regular file:
  * rel comes from a hive the attacker controls. */
-static bool ci_path(const char *dir, const char *rel, char *out, size_t n) {
+static bool ci_walk(const char *dir, const char *rel, char *out, size_t n, bool want_dir) {
     char cur[512], next[512], part[256];
     snprintf(cur, sizeof(cur), "%s", dir);
     struct stat st = {0};
@@ -56,10 +57,13 @@ static bool ci_path(const char *dir, const char *rel, char *out, size_t n) {
         if (lstat(next, &st) != 0 || S_ISLNK(st.st_mode)) return false;
         memcpy(cur, next, sizeof(cur));
     }
-    if (!S_ISREG(st.st_mode)) return false;
+    if (want_dir ? !S_ISDIR(st.st_mode) : !S_ISREG(st.st_mode)) return false;
     snprintf(out, n, "%s", cur);
     return true;
 }
+
+static bool ci_path(const char *dir, const char *rel, char *out, size_t n) { return ci_walk(dir, rel, out, n, false); }
+static bool ci_dir(const char *dir, const char *rel, char *out, size_t n) { return ci_walk(dir, rel, out, n, true); }
 
 #define HIVE_CAP (256u << 20)
 
@@ -96,6 +100,30 @@ static void add(winboot_scan_result_t *res, const char *path, const pe_efi_info_
     snprintf(f->sha256, sizeof(f->sha256), "%s", pe ? pe->sha256 : "");
     snprintf(f->reason, sizeof(f->reason), "%s", reason);
     f->severity = sev;
+}
+
+static void add_rule(winboot_scan_result_t *res, const char *path, booto_severity_t sev, const char *rule,
+                     const char *reason) {
+    int before = res->threats_detected;
+    add(res, path, NULL, sev, reason);
+    if (res->threats_detected > before) snprintf(res->findings[before].rule_id, sizeof(res->findings[before].rule_id), "%s", rule);
+}
+
+/* A command line that runs a script host, or a program from a folder any user (or a dropper) can write. */
+static const char *suspect_command(const char *cmd) {
+    char lc[512];
+    size_t i = 0;
+    for (; cmd[i] && i + 1 < sizeof(lc); i++) lc[i] = (char)tolower((unsigned char)cmd[i]);
+    lc[i] = '\0';
+    static const char *const hosts[] = { "powershell", "pwsh", "mshta", "wscript", "cscript", "%comspec%", "cmd.exe /c",
+                                         "cmd /c", "cmd.exe /k" };
+    static const char *const dirs[] = { "\\windows\\temp\\", "\\appdata\\local\\temp\\", "\\users\\public\\",
+                                        "\\$recycle.bin\\", "\\perflogs\\" };
+    for (size_t k = 0; k < sizeof(hosts) / sizeof(hosts[0]); k++)
+        if (strstr(lc, hosts[k])) return "runs a script host";
+    for (size_t k = 0; k < sizeof(dirs) / sizeof(dirs[0]); k++)
+        if (strstr(lc, dirs[k])) return "runs from a user-writable folder";
+    return NULL;
 }
 
 static void check_file(winboot_scan_result_t *res, const char *path, bool core) {
@@ -153,8 +181,9 @@ static bool image_file(const char *root, const char *win, const char *img, char 
 /* Boot-start services (Start = 0) in the SYSTEM hive whose file lies outside System32\\drivers, which the caller
  * already checked. shortcut: changes still in the hive's .LOG1/.LOG2 transaction logs are not applied. */
 static void check_boot_start(winboot_scan_result_t *res, const char *root, const char *win, const char *drv) {
-    char path[512], cs[16], name[256], img[512];
+    char path[512], hive[512], cs[16], name[256], img[512];
     if (!ci_path(win, "System32/config/SYSTEM", path, sizeof(path))) return;
+    memcpy(hive, path, sizeof(hive));  // path is reused for each driver below
     size_t len = 0;
     uint8_t *buf = read_hive(path, &len);
     reg_hive_t h;
@@ -173,7 +202,14 @@ static void check_boot_start(winboot_scan_result_t *res, const char *root, const
     size_t dlen = strlen(drv);
     uint32_t svc, start;
     for (uint32_t i = 0; (svc = reg_hive_subkey_at(&h, svcs, i, name, sizeof(name))) != 0; i++) {
-        if (!reg_hive_dword(&h, svc, "Start", &start) || start != 0) continue;
+        if (!reg_hive_dword(&h, svc, "Start", &start) || start > 2) continue;
+        const char *why = reg_hive_string(&h, svc, "ImagePath", img, sizeof(img)) ? suspect_command(img) : NULL;
+        if (why) {
+            char reason[96];
+            snprintf(reason, sizeof(reason), "auto-start service %.30s %s: %.30s", name, why, img);
+            add_rule(res, hive, SEVERITY_HIGH, "WIN_SERVICE_COMMAND", reason);
+        }
+        if (start != 0) continue;
         res->boot_start++;
         if (!reg_hive_string(&h, svc, "ImagePath", img, sizeof(img)))
             snprintf(img, sizeof(img), "System32\\drivers\\%.200s.sys", name);
@@ -226,6 +262,12 @@ booto_error_t winboot_check_bcd(const char *esp, winboot_scan_result_t *res) {
             if (reg_hive_value(&h, reg_hive_subkey(&h, els, BCD_FLAGS[f].type), "Element", &type, &d, &blen) &&
                 blen > 0 && d[0] != 0)
                 add(res, path, NULL, BCD_FLAGS[f].sev, BCD_FLAGS[f].reason);
+        if (reg_hive_value(&h, reg_hive_subkey(&h, els, "16000009"), "Element", &type, &d, &blen) && blen > 0 && d[0] == 0) {
+            int before = res->threats_detected;
+            add(res, path, NULL, SEVERITY_MEDIUM, "BCD: automatic recovery is off (bcdedit recoveryenabled No)");
+            if (res->threats_detected > before)
+                snprintf(res->findings[before].rule_id, sizeof(res->findings[before].rule_id), "WIN_RANSOM_RECOVERY_OFF");
+        }
         uint32_t otype = 0;
         if (!reg_hive_dword(&h, reg_hive_subkey(&h, obj, "Description"), "Type", &otype) || otype != BCD_OS_LOADER ||
             !reg_hive_string(&h, reg_hive_subkey(&h, els, BCD_APP_PATH), "Element", app, sizeof(app)))
@@ -239,6 +281,257 @@ booto_error_t winboot_check_bcd(const char *esp, winboot_scan_result_t *res) {
     free(buf);
     LOG_INFO("Windows boot: BCD store %s read", path);
     return BOOTO_OK;
+}
+
+/* Registry key by a backslash path below key, or 0. */
+static uint32_t key_path(const reg_hive_t *h, uint32_t key, const char *rel) {
+    char part[128];
+    while (key && *rel) {
+        size_t len = strcspn(rel, "\\");
+        if (len >= sizeof(part)) return 0;
+        memcpy(part, rel, len);
+        part[len] = '\0';
+        rel += len + (rel[len] != '\0');
+        key = reg_hive_subkey(h, key, part);
+    }
+    return key;
+}
+
+/* Every comma-separated entry of v is exe, by name or as the last part of a path. */
+static bool only_entries(const char *v, const char *exe) {
+    size_t elen = strlen(exe);
+    while (*v) {
+        while (*v == ' ' || *v == ',') v++;
+        size_t len = strcspn(v, ",");
+        while (len > 0 && v[len - 1] == ' ') len--;
+        if (len > 0 && !(len >= elen && strncasecmp(v + len - elen, exe, elen) == 0 &&
+                         (len == elen || v[len - elen - 1] == '\\')))
+            return false;
+        v += len;
+        while (*v && *v != ',') v++;
+    }
+    return true;
+}
+
+static const char *const ACCESSIBILITY[] = { "sethc.exe", "utilman.exe", "osk.exe", "magnify.exe", "narrator.exe",
+                                             "displayswitch.exe", "atbroker.exe" };
+
+static bool is_accessibility(const char *exe) {
+    for (size_t i = 0; i < sizeof(ACCESSIBILITY) / sizeof(ACCESSIBILITY[0]); i++)
+        if (strcasecmp(exe, ACCESSIBILITY[i]) == 0) return true;
+    return false;
+}
+
+/* Run and RunOnce values below base (the SOFTWARE root, or Software in NTUSER.DAT). */
+static void check_run_keys(winboot_scan_result_t *res, const char *hive, const reg_hive_t *h, uint32_t base) {
+    static const char *const keys[] = { "Microsoft\\Windows\\CurrentVersion\\Run", "Microsoft\\Windows\\CurrentVersion\\RunOnce",
+                                        "Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Run",
+                                        "Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\RunOnce" };
+    char name[128], v[512], reason[96];
+    for (size_t k = 0; k < sizeof(keys) / sizeof(keys[0]); k++) {
+        uint32_t key = key_path(h, base, keys[k]);
+        for (uint32_t i = 0; key && reg_hive_value_name_at(h, key, i, name, sizeof(name)); i++) {
+            const char *why = reg_hive_string(h, key, name, v, sizeof(v)) ? suspect_command(v) : NULL;
+            if (!why) continue;
+            snprintf(reason, sizeof(reason), "Run value %.20s %s: %.30s", name, why, v);
+            add_rule(res, hive, SEVERITY_MEDIUM, "WIN_RUN_KEY", reason);
+        }
+    }
+}
+
+/* SOFTWARE hive: Winlogon Shell and Userinit, IFEO debuggers, AppInit_DLLs and the machine Run keys. */
+static void check_software(winboot_scan_result_t *res, const char *win) {
+    char hive[512], v[512], name[256], reason[96];
+    if (!ci_path(win, "System32/config/SOFTWARE", hive, sizeof(hive))) return;
+    size_t len = 0;
+    uint8_t *buf = read_hive(hive, &len);
+    reg_hive_t h;
+    uint32_t top = 0;
+    if (buf && reg_hive_open(buf, len, &h) == BOOTO_OK) top = reg_hive_root(&h);
+    if (!top) {
+        res->not_checked++;
+        free(buf);
+        return;
+    }
+    uint32_t nt = key_path(&h, top, "Microsoft\\Windows NT\\CurrentVersion");
+    uint32_t wl = reg_hive_subkey(&h, nt, "Winlogon");
+    if (reg_hive_string(&h, wl, "Shell", v, sizeof(v)) && !only_entries(v, "explorer.exe")) {
+        snprintf(reason, sizeof(reason), "Winlogon Shell is %.55s, not explorer.exe", v);
+        add_rule(res, hive, SEVERITY_HIGH, "WIN_WINLOGON_SHELL", reason);
+    }
+    if (reg_hive_string(&h, wl, "Userinit", v, sizeof(v)) && !only_entries(v, "userinit.exe")) {
+        snprintf(reason, sizeof(reason), "Winlogon Userinit also runs: %.60s", v);
+        add_rule(res, hive, SEVERITY_HIGH, "WIN_WINLOGON_USERINIT", reason);
+    }
+    uint32_t ifeo = reg_hive_subkey(&h, nt, "Image File Execution Options"), sub;
+    for (uint32_t i = 0; ifeo && (sub = reg_hive_subkey_at(&h, ifeo, i, name, sizeof(name))) != 0; i++) {
+        if (!reg_hive_string(&h, sub, "Debugger", v, sizeof(v)) || !v[0]) continue;
+        bool acc = is_accessibility(name);
+        snprintf(reason, sizeof(reason), "IFEO starts %.45s instead of %.24s", v, name);
+        add_rule(res, hive, acc ? SEVERITY_CRITICAL : SEVERITY_MEDIUM, acc ? "WIN_IFEO_ACCESSIBILITY" : "WIN_IFEO_DEBUGGER",
+                 reason);
+    }
+    static const char *const appinit[] = { "Microsoft\\Windows NT\\CurrentVersion\\Windows",
+                                           "Wow6432Node\\Microsoft\\Windows NT\\CurrentVersion\\Windows" };
+    for (size_t k = 0; k < 2; k++) {
+        uint32_t wk = key_path(&h, top, appinit[k]), load = 0;
+        if (reg_hive_dword(&h, wk, "LoadAppInit_DLLs", &load) && load &&
+            reg_hive_string(&h, wk, "AppInit_DLLs", v, sizeof(v)) && v[0]) {
+            snprintf(reason, sizeof(reason), "AppInit_DLLs loads %.50s into every GUI process", v);
+            add_rule(res, hive, SEVERITY_HIGH, "WIN_APPINIT_DLLS", reason);
+        }
+    }
+    check_run_keys(res, hive, &h, top);
+    free(buf);
+}
+
+/* Sticky keys backdoor: an accessibility program replaced by a copy of a shell, run from the logon screen. */
+static void check_accessibility(winboot_scan_result_t *res, const char *s32) {
+    static const char *const shells[] = { "cmd.exe", "WindowsPowerShell/v1.0/powershell.exe", "taskmgr.exe" };
+    char hashes[3][65] = { "", "", "" }, path[512], hex[65], reason[96];
+    for (size_t i = 0; i < 3; i++)
+        if (!ci_path(s32, shells[i], path, sizeof(path)) || !sha256_file_hex(path, hashes[i])) hashes[i][0] = '\0';
+    for (size_t a = 0; a < sizeof(ACCESSIBILITY) / sizeof(ACCESSIBILITY[0]); a++) {
+        if (!ci_path(s32, ACCESSIBILITY[a], path, sizeof(path)) || !sha256_file_hex(path, hex)) continue;
+        for (size_t i = 0; i < 3; i++) {
+            if (!hashes[i][0] || strcmp(hex, hashes[i]) != 0) continue;
+            snprintf(reason, sizeof(reason), "%.20s is a copy of %.40s: logon-screen shell", ACCESSIBILITY[a],
+                     shells[i]);
+            add_rule(res, path, SEVERITY_CRITICAL, "WIN_ACCESSIBILITY_SWAP", reason);
+            break;
+        }
+    }
+}
+
+static bool ext_in(const char *ext, const char *const *list, size_t n) {
+    for (size_t i = 0; i < n; i++)
+        if (strcasecmp(ext, list[i]) == 0) return true;
+    return false;
+}
+
+/* Programs and scripts in a Startup folder run at every logon; shortcuts (.lnk) are normal there. */
+static void check_startup(winboot_scan_result_t *res, const char *dir) {
+    static const char *const run[] = { "exe", "bat", "cmd", "vbs", "vbe", "js", "jse", "ps1", "hta", "scr", "wsf", "pif" };
+    DIR *d = opendir(dir);
+    if (!d) return;
+    struct dirent *de;
+    char path[800], reason[96];
+    struct stat st;
+    while ((de = readdir(d)) != NULL) {
+        const char *dot = strrchr(de->d_name, '.');
+        snprintf(path, sizeof(path), "%.500s/%.250s", dir, de->d_name);
+        if (!dot || !ext_in(dot + 1, run, sizeof(run) / sizeof(run[0])) || lstat(path, &st) != 0 || !S_ISREG(st.st_mode))
+            continue;
+        snprintf(reason, sizeof(reason), "Startup folder runs %.60s at logon", de->d_name);
+        add_rule(res, path, SEVERITY_MEDIUM, "WIN_STARTUP_FILE", reason);
+    }
+    closedir(d);
+}
+
+#define RANSOM_NOTE_MAX (256u << 10)
+#define RANSOM_MIN_FILES 10
+#define RANSOM_MAX_EXTS 16
+
+/* The note names a Tor .onion site, in ASCII or UTF-16LE. */
+static bool note_has_onion(const char *path) {
+    FILE *fp = fopen(path, "rb");
+    if (!fp) return false;
+    uint8_t *buf = malloc(RANSOM_NOTE_MAX);
+    size_t len = buf ? fread(buf, 1, RANSOM_NOTE_MAX, fp) : 0;
+    fclose(fp);
+    bool hit = false;
+    static const char onion[] = ".onion";
+    for (size_t i = 0; buf && !hit && i + 12 <= len; i++) {
+        bool a = true, w = true;
+        for (size_t j = 0; j < 6 && (a || w); j++) {
+            a = a && tolower(buf[i + j]) == onion[j];
+            w = w && tolower(buf[i + 2 * j]) == onion[j] && buf[i + 2 * j + 1] == 0;
+        }
+        hit = a || w;
+    }
+    free(buf);
+    return hit;
+}
+
+/* One folder, not recursive: a ransom note, and many files renamed to <name>.<document type>.<new extension>.
+ * shortcut: top level of the usual user folders only; a walk of the whole profile when that proves too narrow. */
+static void check_ransom_dir(winboot_scan_result_t *res, const char *dir) {
+    static const char *const docs[] = { "doc", "docx", "xls", "xlsx", "ppt", "pptx", "pdf", "jpg", "jpeg", "png", "txt",
+                                        "csv", "rtf", "odt", "zip", "mp4", "mp3", "sql", "db" };
+    static const char *const benign[] = { "lnk", "tmp", "bak", "old", "orig", "part", "crdownload", "download", "url",
+                                          "sig", "asc", "gpg", "sha256", "md5", "7z", "gz", "rar", "xz", "ini" };
+    static const char *const note_words[] = { "decrypt", "restore", "recover", "ransom", "readme", "read_me", "how_to",
+                                              "how-to", "unlock" };
+    static const char *const note_ext[] = { "txt", "html", "htm", "hta" };
+    DIR *d = opendir(dir);
+    if (!d) return;
+    char exts[RANSOM_MAX_EXTS][25];
+    int counts[RANSOM_MAX_EXTS] = {0}, nexts = 0;
+    char path[800], lc[256], reason[96];
+    struct stat st;
+    struct dirent *de;
+    while ((de = readdir(d)) != NULL) {
+        snprintf(path, sizeof(path), "%.500s/%.250s", dir, de->d_name);
+        if (lstat(path, &st) != 0 || !S_ISREG(st.st_mode)) continue;
+        size_t i = 0;
+        for (; de->d_name[i] && i + 1 < sizeof(lc); i++) lc[i] = (char)tolower((unsigned char)de->d_name[i]);
+        lc[i] = '\0';
+        char *ext2 = strrchr(lc, '.');
+        if (!ext2) continue;
+        bool word = false;
+        for (size_t w = 0; w < sizeof(note_words) / sizeof(note_words[0]) && !word; w++) word = strstr(lc, note_words[w]);
+        if (word && (uint64_t)st.st_size <= RANSOM_NOTE_MAX && ext_in(ext2 + 1, note_ext, 4) && note_has_onion(path)) {
+            snprintf(reason, sizeof(reason), "ransom note %.50s names a Tor .onion site", de->d_name);
+            add_rule(res, path, SEVERITY_HIGH, "WIN_RANSOM_NOTE", reason);
+            continue;
+        }
+        *ext2 = '\0';
+        char *inner = strrchr(lc, '.');
+        size_t elen = strlen(ext2 + 1);
+        if (!inner || elen < 2 || elen > 24 || !ext_in(inner + 1, docs, sizeof(docs) / sizeof(docs[0])) ||
+            ext_in(ext2 + 1, docs, sizeof(docs) / sizeof(docs[0])) || ext_in(ext2 + 1, benign, sizeof(benign) / sizeof(benign[0])))
+            continue;
+        int e = 0;
+        while (e < nexts && strcmp(exts[e], ext2 + 1) != 0) e++;
+        if (e == nexts && nexts < RANSOM_MAX_EXTS) snprintf(exts[nexts++], sizeof(exts[0]), "%s", ext2 + 1);
+        if (e < nexts) counts[e]++;
+    }
+    closedir(d);
+    for (int e = 0; e < nexts; e++) {
+        if (counts[e] < RANSOM_MIN_FILES) continue;
+        snprintf(reason, sizeof(reason), "%d documents renamed to <name>.<type>.%.20s, as ransomware does", counts[e], exts[e]);
+        add_rule(res, dir, SEVERITY_HIGH, "WIN_RANSOM_ENCRYPTED", reason);
+    }
+}
+
+/* Per profile: NTUSER.DAT Run keys, the Startup folder, and ransomware signs in the usual folders. */
+static void check_users(winboot_scan_result_t *res, const char *root) {
+    char users[512], prof[800], path[800];
+    if (!ci_child(root, "Users", users, sizeof(users))) return;
+    DIR *d = opendir(users);
+    if (!d) return;
+    struct dirent *de;
+    struct stat st;
+    while ((de = readdir(d)) != NULL) {
+        if (de->d_name[0] == '.') continue;
+        snprintf(prof, sizeof(prof), "%.500s/%.250s", users, de->d_name);
+        if (lstat(prof, &st) != 0 || !S_ISDIR(st.st_mode)) continue;  // "All Users" and "Default User" are links
+        if (ci_path(prof, "NTUSER.DAT", path, sizeof(path))) {
+            size_t len = 0;
+            uint8_t *buf = read_hive(path, &len);
+            reg_hive_t h;
+            uint32_t top = 0;
+            if (buf && reg_hive_open(buf, len, &h) == BOOTO_OK && (top = reg_hive_root(&h)) != 0)
+                check_run_keys(res, path, &h, reg_hive_subkey(&h, top, "Software"));
+            free(buf);
+        }
+        if (ci_dir(prof, "AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup", path, sizeof(path)))
+            check_startup(res, path);
+        static const char *const folders[] = { "Desktop", "Documents", "Pictures", "Downloads" };
+        for (size_t f = 0; f < 4; f++)
+            if (ci_dir(prof, folders[f], path, sizeof(path))) check_ransom_dir(res, path);
+    }
+    closedir(d);
 }
 
 booto_error_t winboot_scan_rootfs(const char *root, winboot_scan_result_t *res) {
@@ -266,7 +559,15 @@ booto_error_t winboot_scan_rootfs(const char *root, winboot_scan_result_t *res) 
     }
     closedir(d);
     char win[512];
-    if (ci_child(root, "Windows", win, sizeof(win))) check_boot_start(res, root, win, drv);
+    if (ci_child(root, "Windows", win, sizeof(win))) {
+        check_boot_start(res, root, win, drv);
+        check_software(res, win);
+    }
+    check_accessibility(res, s32);
+    char dir[512];
+    if (ci_dir(root, "ProgramData/Microsoft/Windows/Start Menu/Programs/StartUp", dir, sizeof(dir))) check_startup(res, dir);
+    check_users(res, root);
+    check_ransom_dir(res, root);
     LOG_INFO("Windows boot: %d files, %d finding(s), %d driver(s) without embedded signature", res->files_checked,
              res->threats_detected, res->drivers_unsigned);
     return BOOTO_OK;

@@ -62,6 +62,12 @@ static bool has_finding(const winboot_scan_result_t *r, const char *file, const 
     return false;
 }
 
+static bool has_rule(const winboot_scan_result_t *r, const char *rule, const char *reason) {
+    for (int i = 0; i < r->threats_detected; i++)
+        if (strcmp(r->findings[i].rule_id, rule) == 0 && strstr(r->findings[i].reason, reason)) return true;
+    return false;
+}
+
 static void test_windows_root(void) {
     TEST_START("test_windows_root");
     ASSERT_TRUE(!winboot_is_windows_root(g_root), "Empty dir is not Windows");
@@ -172,9 +178,11 @@ static void test_boot_start(void) {
     uint32_t v2[] = { hv_dword(&h, "Start", 0), hv_string(&h, "ImagePath", "System32\\..\\..\\outside.sys") };
     uint32_t v3[] = { hv_dword(&h, "Start", 3), hv_string(&h, "ImagePath", "System32\\Evil\\hidden.sys") };
     uint32_t v4[] = { hv_dword(&h, "Start", 0) };
+    uint32_t v5[] = { hv_dword(&h, "Start", 2), hv_string(&h, "ImagePath", "cmd.exe /c C:\\Users\\Public\\x.bat") };
     uint32_t svc[] = { hv_key(&h, "evil", NULL, 0, v1, 2), hv_key(&h, "escape", NULL, 0, v2, 2),
-                       hv_key(&h, "demand", NULL, 0, v3, 2), hv_key(&h, "broken", NULL, 0, v4, 1) };
-    uint32_t svcs = hv_key(&h, "Services", svc, 4, NULL, 0);
+                       hv_key(&h, "demand", NULL, 0, v3, 2), hv_key(&h, "broken", NULL, 0, v4, 1),
+                       hv_key(&h, "updater", NULL, 0, v5, 2) };
+    uint32_t svcs = hv_key(&h, "Services", svc, 5, NULL, 0);
     uint32_t cur = hv_dword(&h, "Current", 1);
     uint32_t top[] = { hv_key(&h, "Select", NULL, 0, &cur, 1), hv_key(&h, "ControlSet001", &svcs, 1, NULL, 0) };
     put("WINDOWS/system32/config/SYSTEM", g_hive, hv_root(&h, hv_key(&h, "ROOT", top, 2, NULL, 0)));
@@ -185,6 +193,8 @@ static void test_boot_start(void) {
     ASSERT_TRUE(has_finding(r, "Evil/hidden.sys", "does not verify"), "Boot-start driver outside drivers checked");
     ASSERT_TRUE(!has_finding(r, "outside.sys", ""), "ImagePath with .. is not followed");
     ASSERT_INT_EQ(r->files_checked, 5, "Drivers dir file not checked twice");
+    ASSERT_TRUE(has_rule(r, "WIN_SERVICE_COMMAND", "updater"), "Auto-start service running cmd /c flagged");
+    ASSERT_TRUE(!has_rule(r, "WIN_SERVICE_COMMAND", "demand"), "Demand-start driver not flagged");
     free(r);
     TEST_PASS("test_boot_start");
 }
@@ -226,6 +236,86 @@ static void test_bcd(void) {
     TEST_PASS("test_bcd");
 }
 
+/* SOFTWARE hive: Winlogon, one IFEO debugger, AppInit_DLLs and a Run value, tampered or as Windows ships them. */
+static size_t software_hive(bool bad) {
+    hv_t h;
+    hv_init(&h, g_hive, sizeof(g_hive));
+    uint32_t wl[] = { hv_string(&h, "Shell", bad ? "explorer.exe, C:\\ProgramData\\svc.exe" : "explorer.exe"),
+                      hv_string(&h, "Userinit", bad ? "C:\\Windows\\system32\\userinit.exe,evil.exe"
+                                                    : "C:\\Windows\\system32\\userinit.exe,") };
+    uint32_t dbg = hv_string(&h, "Debugger", "C:\\Windows\\System32\\cmd.exe");
+    uint32_t ifeo_sub = hv_key(&h, bad ? "sethc.exe" : "notepad.exe", NULL, 0, bad ? &dbg : NULL, bad ? 1 : 0);
+    uint32_t ai[] = { hv_dword(&h, "LoadAppInit_DLLs", bad ? 1 : 0), hv_string(&h, "AppInit_DLLs", "C:\\x\\hook.dll") };
+    uint32_t cv[] = { hv_key(&h, "Winlogon", NULL, 0, wl, 2), hv_key(&h, "Image File Execution Options", &ifeo_sub, 1, NULL, 0),
+                      hv_key(&h, "Windows", NULL, 0, ai, 2) };
+    uint32_t nt_cv = hv_key(&h, "CurrentVersion", cv, 3, NULL, 0);
+    uint32_t run_v = hv_string(&h, "Updater", bad ? "powershell -w hidden -enc AAAA" : "\"C:\\Program Files\\Vendor\\tray.exe\"");
+    uint32_t run = hv_key(&h, "Run", NULL, 0, &run_v, 1);
+    uint32_t w_cv = hv_key(&h, "CurrentVersion", &run, 1, NULL, 0);
+    uint32_t ms_sub[] = { hv_key(&h, "Windows NT", &nt_cv, 1, NULL, 0), hv_key(&h, "Windows", &w_cv, 1, NULL, 0) };
+    uint32_t ms = hv_key(&h, "Microsoft", ms_sub, 2, NULL, 0);
+    return hv_root(&h, hv_key(&h, "ROOT", &ms, 1, NULL, 0));
+}
+
+static void test_persistence(void) {
+    TEST_START("test_persistence");
+    static const char *const rules[] = { "WIN_WINLOGON_SHELL", "WIN_WINLOGON_USERINIT", "WIN_IFEO_ACCESSIBILITY",
+                                         "WIN_APPINIT_DLLS", "WIN_RUN_KEY", "WIN_ACCESSIBILITY_SWAP", "WIN_STARTUP_FILE" };
+    mk("ProgramData");
+    mk("ProgramData/Microsoft");
+    mk("ProgramData/Microsoft/Windows");
+    mk("ProgramData/Microsoft/Windows/Start Menu");
+    mk("ProgramData/Microsoft/Windows/Start Menu/Programs");
+    mk("ProgramData/Microsoft/Windows/Start Menu/Programs/StartUp");
+    put("WINDOWS/system32/cmd.exe", (const uint8_t *)"MZ cmd", 6);
+    put("ProgramData/Microsoft/Windows/Start Menu/Programs/StartUp/Vendor.lnk", (const uint8_t *)"L", 1);
+    winboot_scan_result_t *r = calloc(1, sizeof(*r));
+    for (int bad = 0; bad < 2; bad++) {
+        put("WINDOWS/system32/config/SOFTWARE", g_hive, software_hive(bad));
+        put("WINDOWS/system32/sethc.exe", (const uint8_t *)(bad ? "MZ cmd" : "MZ sethc"), bad ? 6 : 8);
+        if (bad) put("ProgramData/Microsoft/Windows/Start Menu/Programs/StartUp/svc.vbs", (const uint8_t *)"x", 1);
+        ASSERT_INT_EQ(winboot_scan_rootfs(g_root, r), BOOTO_OK, "Scan runs");
+        for (size_t i = 0; i < sizeof(rules) / sizeof(rules[0]); i++)
+            ASSERT_TRUE(has_rule(r, rules[i], "") == (bad == 1), rules[i]);
+    }
+    ASSERT_TRUE(has_rule(r, "WIN_IFEO_ACCESSIBILITY", "sethc.exe"), "IFEO names the hijacked program");
+    ASSERT_TRUE(!has_rule(r, "WIN_STARTUP_FILE", "Vendor.lnk"), "Startup shortcut is normal");
+    free(r);
+    TEST_PASS("test_persistence");
+}
+
+static void test_ransomware(void) {
+    TEST_START("test_ransomware");
+    mk("Users");
+    mk("Users/alice");
+    mk("Users/alice/Documents");
+    char rel[128];
+    winboot_scan_result_t *r = calloc(1, sizeof(*r));
+    for (int n = 9; n <= 10; n++) {
+        snprintf(rel, sizeof(rel), "Users/alice/Documents/report%d.docx.lockbit", n);
+        put(rel, (const uint8_t *)"x", 1);
+        if (n == 9)
+            for (int i = 0; i < 8; i++) {
+                snprintf(rel, sizeof(rel), "Users/alice/Documents/report%d.docx.lockbit", i);
+                put(rel, (const uint8_t *)"x", 1);
+                snprintf(rel, sizeof(rel), "Users/alice/Documents/photo%d.jpg.bak", i);  // a backup tool's copies
+                put(rel, (const uint8_t *)"x", 1);
+            }
+        ASSERT_INT_EQ(winboot_scan_rootfs(g_root, r), BOOTO_OK, "Scan runs");
+        ASSERT_TRUE(has_rule(r, "WIN_RANSOM_ENCRYPTED", "lockbit") == (n == 10), "Ten renamed documents, not nine");
+    }
+    ASSERT_TRUE(!has_rule(r, "WIN_RANSOM_ENCRYPTED", ".bak"), "Backup copies are not ransomware");
+    static const char note[] = "Your files are encrypted. Visit http://abc.onion to restore them.";
+    mk("Users/alice/Desktop");
+    put("Users/alice/Desktop/HOW_TO_DECRYPT.txt", (const uint8_t *)note, sizeof(note));
+    put("Users/alice/Desktop/readme.txt", (const uint8_t *)"Install notes", 13);
+    ASSERT_INT_EQ(winboot_scan_rootfs(g_root, r), BOOTO_OK, "Scan runs");
+    ASSERT_TRUE(has_rule(r, "WIN_RANSOM_NOTE", "HOW_TO_DECRYPT"), "Note naming an .onion site flagged");
+    ASSERT_TRUE(!has_rule(r, "WIN_RANSOM_NOTE", "readme"), "Plain readme not flagged");
+    free(r);
+    TEST_PASS("test_ransomware");
+}
+
 int main(void) {
     printf("\n--- Running Windows Boot Engine Tests ---\n");
     if (!mkdtemp(g_root)) {
@@ -238,6 +328,8 @@ int main(void) {
     test_measured_boot();
     test_boot_start();
     test_bcd();
+    test_persistence();
+    test_ransomware();
     char cmd[128];
     snprintf(cmd, sizeof(cmd), "rm -rf '%s'", g_root);
     if (system(cmd) != 0) fprintf(stderr, "warning: cleanup of %s failed\n", g_root);
