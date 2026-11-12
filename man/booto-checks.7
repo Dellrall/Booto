@@ -205,6 +205,11 @@ revoked, known-vulnerable shim or GRUB.
 The code section is near-random (compressed or encrypted), typical of packed
 bootkit loaders.
 .TP
+.BR UEFI_NO_NX_COMPAT " (LOW)"
+A first-stage loader (BOOT*.EFI, shim*) lacks the NX_COMPAT flag. Older
+distro builds lack it too, but Microsoft has signed only NX-compatible
+third-party loaders since 2024.
+.TP
 .BR UEFI_ESP_SYSTEM32 " (HIGH)"
 Executables in
 .IR ESP:/system32 ,

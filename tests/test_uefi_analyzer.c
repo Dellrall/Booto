@@ -259,6 +259,32 @@ static void test_unsigned_needs_efi_subsystem(void) {
     TEST_PASS("test_unsigned_needs_efi_subsystem");
 }
 
+/* A first-stage loader without NX_COMPAT is LOW; with the flag it is not reported. */
+static bool nx_flagged(bool nx) {
+    static uint8_t b[0x400];
+    size_t len = build_pe(b, sizeof(b), true, false);
+    if (nx) b[0x84 + 20 + 71] = 0x01;   // DllCharacteristics |= 0x0100
+    const char *path = "/tmp/bootx64_nx_test.efi";
+    FILE *fp = fopen(path, "wb");
+    if (!fp) return false;
+    fwrite(b, 1, len, fp);
+    fclose(fp);
+    uefi_scan_result_t res;
+    memset(&res, 0, sizeof(res));
+    uefi_inspect_efi_file(path, &res);
+    unlink(path);
+    for (int i = 0; i < res.bootkits_detected; i++)
+        if (strcmp(res.findings[i].rule_id, "UEFI_NO_NX_COMPAT") == 0) return res.findings[i].severity == SEVERITY_LOW;
+    return false;
+}
+
+static void test_nx_compat(void) {
+    TEST_START("test_nx_compat");
+    ASSERT_TRUE(nx_flagged(false), "Loader without NX_COMPAT is LOW");
+    ASSERT_TRUE(!nx_flagged(true), "NX-compatible loader is not reported");
+    TEST_PASS("test_nx_compat");
+}
+
 static authenticode_state_t verify_state(const uint8_t *b, size_t len) {
     pe_efi_info_t info;
     if (uefi_parse_pe_buffer(b, len, &info) != BOOTO_OK) return (authenticode_state_t)-1;
@@ -450,6 +476,7 @@ int main(void) {
     test_pe_wrapping_offset_rejected();
     test_packed_code_section();
     test_unsigned_needs_efi_subsystem();
+    test_nx_compat();
     test_authenticode_signature();
     test_esp_scan_by_magic();
     test_esp_layout_and_sbat();
