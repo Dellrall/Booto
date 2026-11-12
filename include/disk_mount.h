@@ -58,7 +58,8 @@ booto_error_t disk_discover_partitions(disk_discovery_result_t *result, bool inc
  * @param mount_point Target directory (created 0700 if missing; must be a private dir owned by euid).
  * @param fs_type Optional filesystem type string (or NULL for auto-detect).
  * @return BOOTO_OK on success, BOOTO_ERR_PERMISSION_DENIED if not root or unsafe mount dir,
- *         BOOTO_ERR_IO if the device cannot be set read-only, BOOTO_ERR_MOUNT_FAILED if no mount succeeded.
+ *         BOOTO_ERR_IO if the device cannot be set read-only, BOOTO_ERR_MOUNT_FAILED if no mount succeeded;
+ *         then errno holds the kernel error for the filesystem the superblock names, 0 if none was tried.
  */
 booto_error_t disk_mount_ro(const char *dev_path, const char *mount_point, const char *fs_type);
 

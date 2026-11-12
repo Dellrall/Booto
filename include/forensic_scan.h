@@ -32,8 +32,9 @@ typedef enum { SCAN_STATUS_NOT_RUN, SCAN_STATUS_OK, SCAN_STATUS_ERROR, SCAN_STAT
 /* SUSPICIOUS: findings, all MEDIUM or lower; THREATS needs one HIGH or CRITICAL. */
 typedef enum { SCAN_VERDICT_CLEAN, SCAN_VERDICT_THREATS, SCAN_VERDICT_INCOMPLETE, SCAN_VERDICT_SUSPICIOUS } scan_verdict_t;
 
-typedef struct {
+typedef struct forensic_scan_report {
     char target_dev[128];
+    char target_fs[32];                 /* superblock magic of target_dev; "" if unknown */
     char scan_root[256];
     bool mounted;                       /* we mounted target_dev at scan_root */
     booto_error_t mount_err;            /* BOOTO_OK if rootfs available */
