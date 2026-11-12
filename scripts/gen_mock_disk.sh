@@ -160,7 +160,7 @@ build_zoo() {
     new_case initramfs-revshell "Initramfs"
     plant_initramfs "${ROOT}" revshell
 
-    new_case preload-hook "LD_PRELOAD"
+    new_case preload-hook "Preload/users"
     plant_preload "${ROOT}"
 
     new_case pkg-changed-binary "Packages"

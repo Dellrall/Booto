@@ -73,7 +73,7 @@ static const char *err_name(booto_error_t e) {
 }
 
 const char *forensic_scan_module_name(scan_module_id_t id) {
-    static const char *names[SCAN_MOD_COUNT] = {"MBR/VBR", "UEFI ESP", "Kernel LKM", "Initramfs", "LD_PRELOAD", "Packages",
+    static const char *names[SCAN_MOD_COUNT] = {"MBR/VBR", "UEFI ESP", "Kernel LKM", "Initramfs", "Preload/users", "Packages",
                                                      "Windows boot"};
     return ((unsigned)id < SCAN_MOD_COUNT) ? names[id] : "unknown";
 }
@@ -209,6 +209,7 @@ bool forensic_scan_finding(const forensic_scan_report_t *r, int i, scan_finding_
         f->severity = s->severity;
         snprintf(f->name, sizeof(f->name), "%s", !s->rule_id[0] ? "Windows boot file"
                                                  : strstr(s->rule_id, "_RANSOM_") ? "Ransomware sign"
+                                                 : strstr(s->rule_id, "_EVTX_")   ? "Event log tampering"
                                                                                                : "Windows persistence");
         snprintf(f->where, sizeof(f->where), "%.299s", s->file_path);
         if (s->rule_id[0]) {
