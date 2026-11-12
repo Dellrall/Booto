@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Six YARA rules ported from Binarly's FwHunt (BlackLotus, ESPecter, CosmicStrand, MoonBounce, LoJax, MosaicRegressor) flag known UEFI bootkits on the ESP and in the boot images, and `-x` now matches the YARA rules against the dumped SPI flash and its inflated LZMA sections.
 - GRUB, MokManager and kernels beside a shim must be signed by the distro CA built into that shim: one signed by any other key is flagged `UEFI_LOADER_NOT_SHIM_VENDOR` (MEDIUM), catching a swapped-in GRUB that carries a valid but foreign signature.
 - `--bodyfile <file>` writes a Sleuth Kit bodyfile of the scanned root, so `mactime -b <file> -d` builds a file timeline of the suspect disk.
+- `docs/SETUP.md` explains how to capture the suspect machine's memory with AVML before shutting it down, and how to check the capture with Volatility 3.
 - The host firmware audit adds three silicon checks: Intel ME operating mode (manufacturing mode, security override or debug mode fail), Boot Guard verified boot with locked fuses (CSME 11 to 17; other versions report unknown), and the CPU debug interface lock (Intel IA32_DEBUG_INTERFACE when the CPU has SDBG, AMD `debug_lock_on` from the ccp driver).
 
 ## [1.9.8-beta] - 2026-11-12
