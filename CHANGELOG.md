@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.8-beta] - 2026-11-12
+
 ### Fixed
 - Storage: the drive Booto runs from can no longer be opened or selected as a target, and a CD boot shows `Booto CD` instead of `Booto USB`. A disk with no filesystem shows `No filesystem`, and `Enter` on it explains there is nothing to open instead of logging a mount error.
 
