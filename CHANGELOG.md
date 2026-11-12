@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--hashlist <file>` writes the SHA-256 of every executable file in the scanned root in `sha256sum` format, to check against the NSRL or a known-good machine.
 - A first-stage EFI loader without the NX_COMPAT flag is flagged `UEFI_NO_NX_COMPAT` (LOW), the fwupd HSI NX check.
 - The host firmware audit adds four checks: boot-time UEFI variables leaking past boot (fwupd Uefi.BootserviceVars), the Intel SPI flash lock (HSFS.FLOCKDN), and on AMD replay-protected flash (RPMC) and firmware anti-rollback from the ccp driver.
+- Account triage on the scanned root: a second UID 0 account (`ACCT_UID0_ALIAS`), an empty shadow password (`ACCT_EMPTY_PASSWORD`), sudoers `NOPASSWD: ALL` (`ACCT_SUDO_NOPASSWD_ALL`), wtmp login records wiped with zeros (`ACCT_WTMP_ZEROED`) and shell history linked to `/dev/null` (`ACCT_HISTORY_DEVNULL`).
 - On AMD, the firmware audit now reads ROM Armor (`rom_armor_enforced`) as BIOS write protection and Platform Secure Boot (`fused_part`) as verified boot, from the ccp driver; both were reported N/A before.
 
 ## [1.10.0-beta] - 2026-11-12
