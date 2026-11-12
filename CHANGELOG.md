@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.11.1-beta] - 2026-11-12
+
 ### Added
 - Case reports carry `--case-id`, `--examiner`, `--evidence-number` and `--notes` (CLI, with `-p`), plus the disk model and serial number read from sysfs for `-t`.
 - Four YARA rules for Linux threats: `BOOTO_YARA_LKM_NET_HIDE` (a module hooking `tcp4_seq_show` to hide connections), `BOOTO_YARA_BPFDOOR`, `BOOTO_YARA_PUMAKIT` and `BOOTO_YARA_XORDDOS`.
