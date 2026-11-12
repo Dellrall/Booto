@@ -440,6 +440,16 @@ static void test_shim_vendor_signer(void) {
     size_t shim_len = build_shim(shim, sizeof(shim), ca);
     size_t grub_len = sign_pe_with(grub, sizeof(grub), distro, ca);
     size_t rogue_len = sign_pe_with(rogue, sizeof(rogue), other, other_cert);
+    // Fedora grub: a first signature by a newer CA, the shim's CA second. Both cover the same image hash.
+    static uint8_t dual[0x2000];
+    memcpy(dual, rogue, rogue_len);
+    size_t dual_len = rogue_len;
+    if (grub_len > 0x300 && rogue_len + grub_len - 0x300 <= sizeof(dual)) {
+        memcpy(dual + rogue_len, grub + 0x300, grub_len - 0x300);
+        dual_len = rogue_len + grub_len - 0x300;
+        size_t dir = 0x84 + 20 + 112 + 32 + 4, table = dual_len - 0x300;
+        dual[dir] = (uint8_t)table; dual[dir + 1] = (uint8_t)(table >> 8);
+    }
     X509_free(ca);
     X509_free(other_cert);
     EVP_PKEY_free(distro);
@@ -453,17 +463,55 @@ static void test_shim_vendor_signer(void) {
     write_pe(dir, "EFI/debian/shimx64.efi", shim, shim_len);
     write_pe(dir, "EFI/debian/grubx64.efi", grub, grub_len);
     write_pe(dir, "EFI/debian/mmx64.efi", rogue, rogue_len);
+    write_pe(dir, "EFI/debian/gcdx64.efi", dual, dual_len);
     write_pe(dir, "EFI/other/grubx64.efi", rogue, rogue_len);  // no shim beside it: judged by db, not here
     uefi_scan_result_t res;
     memset(&res, 0, sizeof(res));
     uefi_inspect_esp_directory(dir, &res);
     snprintf(cmd, sizeof(cmd), "rm -rf '%s'", dir);
     if (system(cmd) != 0) perror("rm");
-    ASSERT_INT_EQ(count_rule(&res, "UEFI_LOADER_NOT_SHIM_VENDOR"), 1, "Only the loader signed by a stranger key is flagged");
+    ASSERT_TRUE(dual_len > rogue_len, "dual-signed fixture built");
+    ASSERT_INT_EQ(count_rule(&res, "UEFI_LOADER_NOT_SHIM_VENDOR"), 1,
+                  "Only the loader signed by a stranger key is flagged; a second signature by the shim CA counts");
     for (int i = 0; i < res.bootkits_detected; i++)
         if (strcmp(res.findings[i].rule_id, "UEFI_LOADER_NOT_SHIM_VENDOR") == 0)
             ASSERT_TRUE(strstr(res.findings[i].file_path, "debian/mmx64.efi") != NULL, "the rogue one beside the shim");
     TEST_PASS("test_shim_vendor_signer");
+}
+
+/* Severity of rule on a one-file scan of b written as name, or -1 when not reported. */
+static int rule_severity(const char *name, const uint8_t *b, size_t len, const char *rule) {
+    char dir[] = "/tmp/booto_sev_XXXXXX", cmd[64];
+    if (!mkdtemp(dir)) return -1;
+    write_pe(dir, name, b, len);
+    uefi_scan_result_t res;
+    memset(&res, 0, sizeof(res));
+    uefi_inspect_esp_directory(dir, &res);
+    snprintf(cmd, sizeof(cmd), "rm -rf '%s'", dir);
+    if (system(cmd) != 0) perror("rm");
+    for (int i = 0; i < res.bootkits_detected; i++)
+        if (strcmp(res.findings[i].rule_id, rule) == 0) return (int)res.findings[i].severity;
+    return -1;
+}
+
+static void test_real_hardware_false_positives(void) {
+    TEST_START("test_real_hardware_false_positives");
+    static uint8_t b[0x1000];
+    size_t len = build_pe(b, sizeof(b), true, false);
+    ASSERT_INT_EQ(rule_severity("EFI/BOOT/BOOTX64.EFI", b, len, "UEFI_MISSING_AUTHENTICODE"), SEVERITY_HIGH,
+                  "Unsigned x86-64 first-stage loader is HIGH");
+    len = build_pe(b, sizeof(b), false, false);
+    b[0x84] = 0x4c; b[0x85] = 0x01;                // IMAGE_FILE_MACHINE_I386
+    ASSERT_INT_EQ(rule_severity("EFI/BOOT/BOOTIA32.EFI", b, len, "UEFI_MISSING_AUTHENTICODE"), SEVERITY_MEDIUM,
+                  "Unsigned 32-bit shim (Fedora ships one) is MEDIUM");
+
+    len = sign_pe(b, sizeof(b));
+    b[0x250] ^= 0x01;
+    ASSERT_INT_EQ(rule_severity("EFI/BOOT/BOOTX64.EFI", b, len, "UEFI_AUTHENTICODE_HASH_MISMATCH"), SEVERITY_CRITICAL,
+                  "Patched signed .efi loader is CRITICAL");
+    ASSERT_INT_EQ(rule_severity("EFI/Dell/BIOS/BIOS_CUR.rcv", b, len, "UEFI_AUTHENTICODE_HASH_MISMATCH"), SEVERITY_MEDIUM,
+                  "Dell .rcv recovery capsule failing the hash is MEDIUM");
+    TEST_PASS("test_real_hardware_false_positives");
 }
 
 int main(void) {
@@ -478,6 +526,7 @@ int main(void) {
     test_unsigned_needs_efi_subsystem();
     test_nx_compat();
     test_authenticode_signature();
+    test_real_hardware_false_positives();
     test_esp_scan_by_magic();
     test_esp_layout_and_sbat();
     test_shim_vendor_signer();
