@@ -21,6 +21,10 @@ typedef struct {
     char target_disk[128];
     char target_fs[32];
     char examiner[64];
+    char evidence_number[64];         /**< "" if not given */
+    char notes[256];                  /**< "" if not given */
+    char target_model[64];            /**< Disk model from sysfs; "" if unknown */
+    char target_serial[64];           /**< Disk serial from sysfs; "" if unknown */
     int mbr_threats_count;
     int kernel_threats_count;
     int uefi_threats_count;

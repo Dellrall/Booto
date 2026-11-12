@@ -90,6 +90,10 @@ static void print_help(const char *prog_name) {
     printf("                             with its SHA-256 in <image>.sha256 and bad blocks in <image>.log\n");
     printf("      --undelete <dir>       CLI, with -t on an NTFS partition: copy deleted files into <dir>\n");
     printf("                             read-only, as <record>_<name>.recovered; not part of the verdict\n");
+    printf("      --case-id <id>         With -p: report name and case ID (A-Z a-z 0-9 _ -; default CASE-<time>)\n");
+    printf("      --examiner <name>      With -p: examiner on the report (default $USER)\n");
+    printf("      --evidence-number <n>  With -p: exhibit or evidence tag on the report\n");
+    printf("      --notes <text>         With -p: free-text notes on the report\n");
     printf("  -V, --verbose              Enable verbose/debug logging\n\n");
     printf("CLI exit codes:\n");
     printf("  0  CLEAN       every engine that applies ran and found nothing\n");
@@ -121,9 +125,11 @@ static bool resolve_target(booto_context_t *ctx) {
     return found;
 }
 
-static void write_reports(const forensic_scan_report_t *rep, const char *dir) {
+static void write_reports(const booto_context_t *ctx, const forensic_scan_report_t *rep, const char *dir) {
     forensic_case_summary_t sum;
-    forensic_scan_fill_case_summary(rep, NULL, NULL, &sum);
+    forensic_scan_fill_case_summary(rep, ctx->case_id[0] ? ctx->case_id : NULL, ctx->examiner[0] ? ctx->examiner : NULL, &sum);
+    snprintf(sum.evidence_number, sizeof(sum.evidence_number), "%s", ctx->evidence_number);
+    snprintf(sum.notes, sizeof(sum.notes), "%s", ctx->notes);
 
     char path[512];
     booto_error_t e = case_report_generate_json(&sum, dir, path, sizeof(path));
@@ -361,7 +367,7 @@ static int run_cli(booto_context_t *ctx) {
     free(cur), free(old);
 
     if (ctx->expert_firmware) run_expert_firmware(ctx->persistence_dir);
-    if (ctx->persistence_dir[0]) write_reports(rep, ctx->persistence_dir);
+    if (ctx->persistence_dir[0]) write_reports(ctx, rep, ctx->persistence_dir);
 
     int code = rep->verdict == SCAN_VERDICT_CLEAN ? EXIT_CLEAN
              : rep->verdict == SCAN_VERDICT_THREATS ? EXIT_THREATS : EXIT_INCOMPLETE;
@@ -415,6 +421,10 @@ int main(int argc, char *argv[]) {
         {"volatility",      required_argument, 0, 'L'},
         {"acquire",         required_argument, 0, 'A'},
         {"undelete",        required_argument, 0, 'D'},
+        {"case-id",         required_argument, 0, 'I'},
+        {"examiner",        required_argument, 0, 'E'},
+        {"evidence-number", required_argument, 0, 'N'},
+        {"notes",           required_argument, 0, 'O'},
         {0, 0, 0, 0}
     };
 
@@ -490,6 +500,18 @@ int main(int argc, char *argv[]) {
                 break;
             case 'D':
                 snprintf(ctx.undelete_out, sizeof(ctx.undelete_out), "%s", optarg);
+                break;
+            case 'I':
+                snprintf(ctx.case_id, sizeof(ctx.case_id), "%s", optarg);
+                break;
+            case 'E':
+                snprintf(ctx.examiner, sizeof(ctx.examiner), "%s", optarg);
+                break;
+            case 'N':
+                snprintf(ctx.evidence_number, sizeof(ctx.evidence_number), "%s", optarg);
+                break;
+            case 'O':
+                snprintf(ctx.notes, sizeof(ctx.notes), "%s", optarg);
                 break;
             default:
                 print_help(argv[0]);
