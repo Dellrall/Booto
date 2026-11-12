@@ -205,6 +205,22 @@ writes, so the list can be matched against the NSRL or a known-good machine.
 The walk and name escaping are the same as for
 .BR \-\-bodyfile .
 .TP
+.BI \-\-volatility " file"
+CLI mode. Read
+.I file
+as Volatility 3 JSON output
+.RB ( "vol \-r json \-f" " \fImemory.lime\fR " linux.malware.hidden_modules ,
+and the other
+.B linux.malware.*
+plugins) from a memory image of the suspect host taken before it was shut
+down, and print its rows. Each row counts as a threat (exit status 1), except
+rows of
+.B check_syscall
+and
+.BR check_idt ,
+which count only when their handler symbol is UNKNOWN. A file that is not
+Volatility JSON leaves a clean scan incomplete (exit status 2).
+.TP
 .BR \-V ", " \-\-verbose
 Show debug messages.
 .SH TUI

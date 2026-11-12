@@ -15,6 +15,7 @@
 #include "persistence_mgr.h"
 #include "disk_mount.h"
 #include "forensic_scan.h"
+#include "rules_loader.h"
 #include "tui/tui_app.h"
 
 #include <getopt.h>
@@ -81,6 +82,8 @@ static void print_help(const char *prog_name) {
     printf("                             for a timeline with mactime(1)\n");
     printf("      --hashlist <file>      CLI: write SHA-256 of every executable file in the scanned root\n");
     printf("                             to <file> (sha256sum format), to check against NSRL\n");
+    printf("      --volatility <file>    CLI: add Volatility 3 JSON output (vol -r json linux.malware.*)\n");
+    printf("                             from the suspect's memory image; flagged rows are threats\n");
     printf("  -V, --verbose              Enable verbose/debug logging\n\n");
     printf("CLI exit codes:\n");
     printf("  0  CLEAN       every enabled engine ran and found nothing\n");
@@ -123,6 +126,32 @@ static void write_reports(const forensic_scan_report_t *rep, const char *dir) {
     e = case_report_generate_markdown(&sum, dir, path, sizeof(path));
     if (e == BOOTO_OK) printf("Markdown report: %s\n", path);
     else fprintf(stderr, "Failed to write Markdown report to %s (error %d)\n", dir, e);
+}
+
+#define VOL_MAX_BYTES (64u * 1024u * 1024u)
+#define VOL_SHOW 20
+
+/* Volatility 3 JSON from a memory image of the suspect host: flagged rows count as threats.
+ * Returns rows flagged, or -1 if the file is unreadable or not Volatility JSON. */
+static int ingest_volatility(const char *path) {
+    FILE *fp = fopen(path, "rb");
+    char *buf = fp ? malloc(VOL_MAX_BYTES + 1) : NULL;
+    size_t len = buf ? fread(buf, 1, VOL_MAX_BYTES + 1, fp) : 0;
+    bool bad = !buf || ferror(fp) || len > VOL_MAX_BYTES;
+    if (fp) fclose(fp);
+    volatility_row_t rows[VOL_SHOW];
+    int n = 0;
+    if (bad || rules_parse_volatility(buf, len, rows, VOL_SHOW, &n) != BOOTO_OK) {
+        free(buf);
+        fprintf(stderr, "Cannot read %s as Volatility 3 JSON (run vol with -r json)\n", path);
+        return -1;
+    }
+    free(buf);
+    printf("\nVolatility: %d suspicious row(s) in %s\n", n, path);
+    for (int i = 0; i < n && i < VOL_SHOW; i++) printf("  %s\n", rows[i].detail);
+    if (n > VOL_SHOW) printf("  ... %d more\n", n - VOL_SHOW);
+    if (n) printf("  Memory evidence: exit status is THREATS whatever the disk verdict above\n");
+    return n;
 }
 
 /* Host-machine checks like firmware_audit, so they are reported but never change the verdict. */
@@ -302,6 +331,11 @@ static int run_cli(booto_context_t *ctx) {
     int code = rep->verdict == SCAN_VERDICT_CLEAN ? EXIT_CLEAN
              : rep->verdict == SCAN_VERDICT_THREATS ? EXIT_THREATS : EXIT_INCOMPLETE;
     free(rep);
+    if (ctx->volatility_in[0]) {
+        int v = ingest_volatility(ctx->volatility_in);
+        if (v > 0) code = EXIT_THREATS;
+        else if (v < 0 && code == EXIT_CLEAN) code = EXIT_INCOMPLETE;
+    }
     return code;
 }
 
@@ -343,6 +377,7 @@ int main(int argc, char *argv[]) {
         {"compare",         required_argument, 0, 'C'},
         {"bodyfile",        required_argument, 0, 'F'},
         {"hashlist",        required_argument, 0, 'H'},
+        {"volatility",      required_argument, 0, 'L'},
         {0, 0, 0, 0}
     };
 
@@ -409,6 +444,9 @@ int main(int argc, char *argv[]) {
                 break;
             case 'H':
                 snprintf(ctx.hashlist_out, sizeof(ctx.hashlist_out), "%s", optarg);
+                break;
+            case 'L':
+                snprintf(ctx.volatility_in, sizeof(ctx.volatility_in), "%s", optarg);
                 break;
             default:
                 print_help(argv[0]);

@@ -245,9 +245,36 @@ static void test_repo_rules_match_builtin(void) {
     TEST_PASS("test_repo_rules_match_builtin");
 }
 
+static void test_volatility(void) {
+    TEST_START("test_volatility");
+    static const char json[] =
+        "[{\"Table Address\": 18446744071, \"Index\": 0, \"Handler Symbol\": \"sys_read\", \"__children\": []},\n"
+        " {\"Index\": 1, \"Handler Symbol\": \"UNKNOWN\", \"__children\": []},\n"
+        " {\"Address\": 1, \"Name\": \"diamorphine\\u001b[2J\", \"__children\": [\n"
+        "   {\"Name\": \"child\", \"Live\": true, \"Note\": null, \"__children\": []}]}]\n";
+    volatility_row_t rows[2];
+    int n = -1;
+    ASSERT_INT_EQ(rules_parse_volatility(json, sizeof(json) - 1, rows, 2, &n), BOOTO_OK, "Volatility JSON parsed");
+    ASSERT_INT_EQ(n, 3, "known syscall handler not flagged; UNKNOWN, module and child flagged");
+    ASSERT_STR_EQ(rows[0].detail, "Index=1, Handler Symbol=UNKNOWN", "UNKNOWN handler row");
+    ASSERT_STR_EQ(rows[1].detail, "Name=child, Live=true, Note=null", "children come before their parent");
+    ASSERT_INT_EQ(rules_parse_volatility("[]", 2, rows, 2, &n), BOOTO_OK, "empty output is clean");
+    ASSERT_INT_EQ(n, 0, "nothing flagged");
+    ASSERT_INT_EQ(rules_parse_volatility("Volatility 3 Framework", 22, rows, 2, &n), BOOTO_ERR_CORRUPT_DATA,
+                  "text renderer output rejected");
+    ASSERT_INT_EQ(rules_parse_volatility("[{\"a\": 1}] x", 13, rows, 2, &n), BOOTO_ERR_CORRUPT_DATA, "trailing junk");
+    /* The module row (third) is past max: counted, not stored; its escape byte would be '?'. */
+    volatility_row_t one[3];
+    ASSERT_INT_EQ(rules_parse_volatility(json, sizeof(json) - 1, one, 3, &n), BOOTO_OK, "parsed again");
+    ASSERT_TRUE(strchr(one[2].detail, 0x1b) == NULL && strstr(one[2].detail, "diamorphine?[2J") != NULL,
+                "control bytes replaced");
+    TEST_PASS("test_volatility");
+}
+
 int main(void) {
     printf("\n--- Running Rules Loader Tests ---\n");
     test_repo_rules_match_builtin(); /* first: the other tests swap in a throwaway key */
+    test_volatility();
     test_valid_signed_file();
     test_missing_signature();
     test_signature_mismatch();

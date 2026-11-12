@@ -859,3 +859,75 @@ void rules_reset_cache(void) {
     g_lkm_cache.loaded = false;
     g_mbr_cache.loaded = false;
 }
+
+/* ---- Volatility 3 JSON renderer output ------------------------------------------------- */
+
+typedef struct {
+    volatility_row_t *out;
+    int max, count, flagged;
+} vol_ctx_t;
+
+static bool vol_rows(jp_t *p, vol_ctx_t *c);
+
+static bool vol_row(jp_t *p, vol_ctx_t *c) {
+    if (!jp_enter(p, '{')) return false;
+    volatility_row_t row = { "" };
+    size_t n = 0;
+    bool first = true, handler = false, unknown = false;
+    char key[64];
+    int r;
+    while ((r = jp_member(p, &first, key, sizeof(key))) == 1) {
+        if (strcmp(key, "__children") == 0) {
+            if (!vol_rows(p, c)) return false;
+            continue;
+        }
+        char val[128] = "";
+        jp_ws(p);
+        size_t start = p->pos;
+        if (p->pos < p->len && p->s[p->pos] == '"') {
+            if (jp_str(p, val, sizeof(val)) < 0) return false;
+        } else {
+            if (!jp_skip(p)) return false;
+            size_t vlen = p->pos - start;   /* raw token: number, true/false/null */
+            if (vlen >= sizeof(val)) vlen = sizeof(val) - 1;
+            memcpy(val, p->s + start, vlen);
+            val[vlen] = '\0';
+        }
+        if (strcmp(key, "Handler Symbol") == 0) {
+            handler = true;
+            unknown = strcmp(val, "UNKNOWN") == 0;
+        }
+        if (n < sizeof(row.detail)) {
+            int w = snprintf(row.detail + n, sizeof(row.detail) - n, "%s%s=%s", n ? ", " : "", key, val);
+            if (w > 0) n += (size_t)w;
+        }
+    }
+    if (r != 0) return false;
+    if (handler && !unknown) return true;
+    for (char *s = row.detail; *s; s++)    /* hostile memory: no terminal escapes */
+        if ((unsigned char)*s < 0x20 || *s == 0x7f) *s = '?';
+    c->flagged++;
+    if (c->count < c->max) c->out[c->count++] = row;
+    return true;
+}
+
+static bool vol_rows(jp_t *p, vol_ctx_t *c) {
+    if (!jp_enter(p, '[')) return false;
+    bool first = true;
+    int r;
+    while ((r = jp_element(p, &first)) == 1)
+        if (!vol_row(p, c)) return false;
+    return r == 0;
+}
+
+booto_error_t rules_parse_volatility(const char *text, size_t len, volatility_row_t *out, int max, int *flagged) {
+    if (!text || !flagged || (max > 0 && !out)) return BOOTO_ERR_INVALID_ARG;
+    jp_t p = { text, len, 0, 0 };
+    vol_ctx_t c = { out, max, 0, 0 };
+    *flagged = 0;
+    if (!vol_rows(&p, &c)) return BOOTO_ERR_CORRUPT_DATA;
+    jp_ws(&p);
+    if (p.pos != p.len) return BOOTO_ERR_CORRUPT_DATA;
+    *flagged = c.flagged;
+    return BOOTO_OK;
+}

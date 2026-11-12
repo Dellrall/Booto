@@ -127,4 +127,18 @@ void rules_set_signing_key(const uint8_t pubkey[32]);
  * Loaded entries are validated, so their severity always maps to 0..4. */
 int rules_severity_level(const char *severity);
 
+/* One flagged row of Volatility 3 "-r json" output: "Column=value, ..." with control bytes as '?'. */
+typedef struct {
+    char detail[256];
+} volatility_row_t;
+
+/**
+ * @brief Parse Volatility 3 JSON renderer output (untrusted): an array of row objects whose
+ *        "__children" arrays hold more rows. A row with a "Handler Symbol" column (check_syscall,
+ *        check_idt) is flagged only when that symbol is "UNKNOWN"; any other row is flagged, since the
+ *        linux.malware.* plugins print only what they find. The first max rows go to out.
+ * @return BOOTO_OK with *flagged set; BOOTO_ERR_CORRUPT_DATA if text is not such JSON.
+ */
+booto_error_t rules_parse_volatility(const char *text, size_t len, volatility_row_t *out, int max, int *flagged);
+
 #endif /* BOOTO_RULES_LOADER_H */

@@ -15,6 +15,7 @@
 #include "firmware_auditor.h"
 #include "logger.h"
 #include "reg_hive.h"
+#include "rules_loader.h"
 #include "hive_fixture.h"
 
 #include <stdint.h>
@@ -371,6 +372,12 @@ static void target_tpm_log(const uint8_t *buf, size_t len) {
     (void)firmware_tpm_log_apps(buf, len, apps, 8);
 }
 
+static void target_volatility(const uint8_t *buf, size_t len) {
+    volatility_row_t rows[4];
+    int n;
+    (void)rules_parse_volatility((const char *)buf, len, rows, 4, &n);
+}
+
 static void target_ifd(const uint8_t *buf, size_t len) {
     (void)firmware_ifd_descriptor_writable(buf, len);
 }
@@ -510,6 +517,22 @@ static void test_fuzz_baseline_parser(void) {
     TEST_PASS("test_fuzz_baseline_parser");
 }
 
+static void test_fuzz_volatility(void) {
+    TEST_START("test_fuzz_volatility");
+    static const char json[] = "[{\"Index\": 7, \"Handler Symbol\": \"UNKNOWN\", \"__children\": "
+                               "[{\"Name\": \"x\\u00e9\", \"Live\": false, \"__children\": []}]}]";
+    size_t len = sizeof(json) - 1;
+    memcpy(g_seed_a, json, len);
+    volatility_row_t rows[4];
+    int n = 0;
+    ASSERT_INT_EQ(rules_parse_volatility(json, len, rows, 4, &n), BOOTO_OK, "Volatility seed parses");
+    ASSERT_INT_EQ(n, 2, "Volatility seed flags two rows");
+    static const fuzz_region_t hot[] = {{0, 16}, {40, 30}};
+    fuzz_seed_t seed = {g_seed_a, len, hot, 2};
+    ASSERT_TRUE(fuzz_run(target_volatility, &seed, 1, 0x2545F4914F6CDD1DULL), "Volatility fuzz run");
+    TEST_PASS("test_fuzz_volatility");
+}
+
 static void test_fuzz_ifd(void) {
     TEST_START("test_fuzz_ifd");
     uint8_t *b = g_seed_a;
@@ -586,6 +609,7 @@ int main(void) {
     test_fuzz_baseline_parser();
     test_fuzz_tpm_log();
     test_fuzz_ifd();
+    test_fuzz_volatility();
     test_fuzz_reg_hive();
     TEST_SUMMARY();
     return 0;
