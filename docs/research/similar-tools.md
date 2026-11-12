@@ -56,6 +56,8 @@ Also shipped since: a boot chain baseline (`baseline.h`), BitLocker volume detec
 
 Done from the per-section lists since: the FwHunt rules, bodyfile/mactime output (`--bodyfile`), and a guide to capturing memory with AVML (`docs/SETUP.md`). Since 1.10.0-beta: `--hashlist` (SHA-256 of executables), `--volatility` (Volatility 3 JSON into the verdict), NX_COMPAT, the flash descriptor lock (from the `-x` SPI dump), Intel ME/Boot Guard/debug lock, Intel FLOCKDN (SPIBAR read through `resource0`), boot-service variables, and AMD ROM Armor, Platform Secure Boot, PSP debug lock, RPMC and anti-rollback. Not done: Sinkclose (AMD gives no machine-readable fixed-version table) and EntrySign.
 
+Since 1.10.0-beta, from the live-forensics survey (UAC, Velociraptor, KAPE-style triage): account triage (`ACCT_*`: a second UID 0, empty passwords, sudoers `NOPASSWD: ALL`, zeroed wtmp, history linked to `/dev/null`), Windows persistence and ransomware traces (`WIN_*`), cleared or missing event logs (`WIN_EVTX_*`), BitLocker unlock with a password or recovery key (`F3`), and deleted-file recovery from the NTFS MFT (`--undelete`).
+
 Licence note (written while Booto was MIT; Booto is GPL-3.0-or-later since 2026-11-09, so GPL-3.0 and GPL-2.0-or-later code can now be reused, while GPL-2.0-only and AGPL code still cannot; check each project's exact terms before copying): CHIPSEC, rkhunter, unhide, Wazuh, LKRG, AIDE, Lynis, LiME (GPL), Velociraptor (AGPL) and Volatility 3 (non-MIT) are reference only. These can be used under their own licences: chkrootkit (BSD-2), UAC (Apache-2.0), AVML/sbctl (MIT), UEFITool (BSD-2), FwHunt rules (CC0) and `secureboot_objects` (BSD-2-Clause-Patent).
 
 ---

@@ -11,13 +11,13 @@ Booto is a C11 offline rootkit/bootkit scanner that runs from a Debian 12 live U
 
 ## Layout
 
-- `src/<engine>.c` + `include/<engine>.h`: one scan engine each (`mbr_auditor`, `uefi_analyzer`, `kernel_inspector`, `initramfs_auditor`, `windows_boot`, `yara_scan`, ...). `forensic_scan.c` runs them all and flattens findings; `main.c` is the CLI.
+- `src/<engine>.c` + `include/<engine>.h`: one scan engine each (`mbr_auditor`, `uefi_analyzer`, `kernel_inspector`, `initramfs_auditor`, `windows_boot`, `yara_scan`, `ntfs_undelete`, ...). `forensic_scan.c` runs them all and flattens findings; `main.c` is the CLI.
 - `src/tui/`: `terminal.c` (raw input, SGR mouse), `wm.c` + `pane.c` (window tree), `evdev_ptr.c` (console mouse), `tui_app.c` (screens).
 - `tests/test_<engine>.c` per engine, using the macros in `tests/test_framework.h`; `tests/zoo/` holds end-to-end infected images built by `scripts/gen_mock_disk.sh`.
 
 ## Findings
 
-- Each finding has a rule ID (`UEFI_*`, `LKM_*`, `MBR_*`, ...) and a `SEVERITY_*` from `include/booto.h`. `make test` runs `scripts/check_man.sh`, which fails when a rule ID or CLI option has no entry in `man/booto-checks.7` / `man/booto.1`; a new or re-graded rule updates the man page in the same commit.
+- Each finding has a rule ID (`UEFI_*`, `LKM_*`, `MBR_*`, `WIN_*`, `ACCT_*`, ...) and a `SEVERITY_*` from `include/booto.h`. `make test` runs `scripts/check_man.sh`, which fails when a rule ID or CLI option has no entry in `man/booto-checks.7` / `man/booto.1`; a new or re-graded rule updates the man page in the same commit.
 - False positives are fixed by narrowing the rule or lowering severity, keeping the finding visible: HIGH is for what a bootkit does, MEDIUM for what a legitimate setup also does (DKMS modules, unsigned later-stage EFI loaders, plain `curl` in dracut). Each fix gets a test asserting both the benign and the malicious case.
 
 ## Checks
