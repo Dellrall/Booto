@@ -68,6 +68,7 @@ typedef struct {
     char baseline_out[512];    /**< Write the boot chain hash list here (--baseline) */
     char baseline_in[512];     /**< Compare the boot chain with this hash list (--compare) */
     char bodyfile_out[512];    /**< Write a TSK bodyfile of the scanned root here (--bodyfile) */
+    char hashlist_out[512];    /**< Write SHA-256 of the root's executables here (--hashlist) */
 } booto_context_t;
 
 /**

@@ -124,6 +124,20 @@ static void test_bodyfile(void) {
     ASSERT_INT_EQ(pipes, 10, "eleven fields on one line");
     ASSERT_INT_EQ(bodyfile_write("/nonexistent-booto", out), BOOTO_ERR_IO, "missing root fails");
 
+    /* Hash list: executables only, sha256sum format, same name escaping. */
+    put("etc/plain", "y");
+    ASSERT_INT_EQ(hashlist_write(g_root, out), BOOTO_OK, "hash list written");
+    fp = fopen(out, "r");
+    n = fp ? fread(text, 1, sizeof(text) - 1, fp) : 0;
+    if (fp) fclose(fp);
+    text[n] = '\0';
+    ASSERT_TRUE(strstr(text, "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881  /etc/a\\x7cb\\x0ac\n") != NULL,
+                "executable hashed with escaped name");
+    ASSERT_TRUE(strstr(text, "plain") == NULL, "non-executable file left out");
+    char plain[512];
+    snprintf(plain, sizeof(plain), "%s/etc/plain", g_root);
+    unlink(plain);
+
     unlink(out);
     unlink(p);
     snprintf(p, sizeof(p), "%s/etc", g_root);
