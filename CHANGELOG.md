@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - The Windows engine note called drivers without an embedded signature "catalog-signed"; it now says "unsigned", since catalogs are not checked.
+- `--acquire` now fails, with no `.sha256`, when unreadable ranges were zero-filled but could not be written to `<image>.log`.
 
 ## [1.11.1-beta] - 2026-11-12
 
