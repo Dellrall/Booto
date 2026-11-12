@@ -18,6 +18,7 @@
 #include "rules_loader.h"
 #include "hive_fixture.h"
 #include "windows_boot.h"
+#include "ntfs_undelete.h"
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -415,6 +416,14 @@ static void target_evtx(const uint8_t *buf, size_t len) {
     (void)winboot_evtx_scan(g_evtx, 4096 + len, &n);
 }
 
+static void target_mft(const uint8_t *buf, size_t len) {
+    static uint8_t rec[1024];
+    if (len < sizeof(rec)) return;
+    memcpy(rec, buf, sizeof(rec));  // the parser rewrites fixups in place
+    ntfs_record_t r;
+    (void)ntfs_parse_record(rec, sizeof(rec), &r);
+}
+
 static uint8_t g_seed_a[FUZZ_MAX_LEN];
 static uint8_t g_seed_b[FUZZ_MAX_LEN];
 
@@ -634,6 +643,36 @@ static void test_fuzz_evtx(void) {
     TEST_PASS("test_fuzz_evtx");
 }
 
+static void test_fuzz_mft(void) {
+    TEST_START("test_fuzz_mft");
+    uint8_t *r = g_seed_a;
+    memset(r, 0, FUZZ_MAX_LEN);
+    memcpy(r, "FILE", 4);
+    r[4] = 0x30, r[6] = 3, r[0x14] = 0x38;
+    uint8_t *a = r + 0x38;  // $FILE_NAME then non-resident $DATA with a two-run list
+    a[0] = 0x30, a[4] = 0x68, a[0x10] = 0x4A, a[0x14] = 24;
+    a[24 + 0x40] = 4, a[24 + 0x41] = 1;
+    memcpy(a + 24 + 0x42, "a\0b\0c\0d\0", 8);
+    a += 0x68;
+    a[0] = 0x80, a[4] = 0x50, a[8] = 1, a[0x20] = 0x40, a[0x30] = 0x10;
+    memcpy(a + 0x40, "\x11\x02\x04\x21\x01\xf0\x00", 7);
+    memset(a + 0x50, 0xff, 4);
+    r[0x18] = (uint8_t)(0x38 + 0x68 + 0x50 + 8);
+    r[0x30] = 1, r[510] = 1, r[1022] = 1;
+    static uint8_t copy[1024];
+    memcpy(copy, r, sizeof(copy));
+    ntfs_record_t nr;
+    ASSERT_INT_EQ(ntfs_parse_record(copy, sizeof(copy), &nr), BOOTO_OK, "MFT seed parses");
+    ASSERT_TRUE(nr.nruns == 2 && nr.runs[0].lcn == 4 && nr.runs[1].lcn == 244 && nr.runs[1].len == 1,
+                "MFT seed reaches the runlist");
+    ASSERT_TRUE(strcmp(nr.name, "abcd") == 0, "MFT seed reaches the file name");
+
+    static const fuzz_region_t hot[] = {{0, 0x38}, {0x38, 0x68}, {0xA0, 0x58}};
+    fuzz_seed_t seed = {g_seed_a, 1024, hot, 3};
+    ASSERT_TRUE(fuzz_run(target_mft, &seed, 1, 0xC2B2AE3D27D4EB4FULL), "MFT fuzz run");
+    TEST_PASS("test_fuzz_mft");
+}
+
 int main(void) {
     logger_init(LOG_LEVEL_CRITICAL, NULL); // parsers log per call; keep 9k iterations quiet and fast
     printf("\n--- Running Deterministic Parser Mutation Fuzzer (%d iterations/parser) ---\n", FUZZ_ITERATIONS);
@@ -649,6 +688,7 @@ int main(void) {
     test_fuzz_volatility();
     test_fuzz_reg_hive();
     test_fuzz_evtx();
+    test_fuzz_mft();
     TEST_SUMMARY();
     return 0;
 }

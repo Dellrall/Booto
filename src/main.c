@@ -15,6 +15,7 @@
 #include "persistence_mgr.h"
 #include "disk_mount.h"
 #include "disk_image.h"
+#include "ntfs_undelete.h"
 #include "forensic_scan.h"
 #include "rules_loader.h"
 #include "tui/tui_app.h"
@@ -87,6 +88,8 @@ static void print_help(const char *prog_name) {
     printf("                             from the suspect's memory image; flagged rows are threats\n");
     printf("      --acquire <image>      CLI, with -t: first copy the raw device to <image> read-only,\n");
     printf("                             with its SHA-256 in <image>.sha256 and bad blocks in <image>.log\n");
+    printf("      --undelete <dir>       CLI, with -t on an NTFS partition: copy deleted files into <dir>\n");
+    printf("                             read-only, as <record>_<name>.recovered; not part of the verdict\n");
     printf("  -V, --verbose              Enable verbose/debug logging\n\n");
     printf("CLI exit codes:\n");
     printf("  0  CLEAN       every engine that applies ran and found nothing\n");
@@ -240,6 +243,16 @@ static int run_cli(booto_context_t *ctx) {
         if (img.bad_bytes) printf(", %llu unreadable bytes zero-filled (see %s.log)", (unsigned long long)img.bad_bytes,
                                   ctx->acquire_out);
         printf("\n");
+    }
+    if (ctx->undelete_out[0]) {  // raw MFT read, before any mount
+        ntfs_undelete_result_t ur;
+        booto_error_t ue = ctx->target_dev[0] ? ntfs_undelete(ctx->target_dev, ctx->undelete_out, &ur) : BOOTO_ERR_INVALID_ARG;
+        if (ue == BOOTO_OK)
+            printf("Undelete: %llu MFT records, %llu deleted files, %llu recovered to %s, %llu skipped\n",
+                   (unsigned long long)ur.records, (unsigned long long)ur.deleted, (unsigned long long)ur.recovered,
+                   ctx->undelete_out, (unsigned long long)ur.skipped);
+        else
+            fprintf(stderr, "Undelete failed (%d): needs -t <NTFS partition> and an existing folder off that device\n", ue);
     }
     if (!resolve_target(ctx)) {
         LOG_ERROR("No scan target: pass -t <dev> or -s <dir> (auto-discovery found no target partition)");
@@ -401,6 +414,7 @@ int main(int argc, char *argv[]) {
         {"hashlist",        required_argument, 0, 'H'},
         {"volatility",      required_argument, 0, 'L'},
         {"acquire",         required_argument, 0, 'A'},
+        {"undelete",        required_argument, 0, 'D'},
         {0, 0, 0, 0}
     };
 
@@ -473,6 +487,9 @@ int main(int argc, char *argv[]) {
                 break;
             case 'A':
                 snprintf(ctx.acquire_out, sizeof(ctx.acquire_out), "%s", optarg);
+                break;
+            case 'D':
+                snprintf(ctx.undelete_out, sizeof(ctx.undelete_out), "%s", optarg);
                 break;
             default:
                 print_help(argv[0]);

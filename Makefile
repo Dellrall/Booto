@@ -35,6 +35,7 @@ SOURCES = $(SRCDIR)/logger.c \
           $(SRCDIR)/windows_boot.c \
           $(SRCDIR)/baseline.c \
           $(SRCDIR)/disk_image.c \
+          $(SRCDIR)/ntfs_undelete.c \
           $(SRCDIR)/tui/terminal.c \
           $(SRCDIR)/tui/evdev_ptr.c \
           $(SRCDIR)/tui/wm.c \
