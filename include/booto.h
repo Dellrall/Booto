@@ -69,6 +69,7 @@ typedef struct {
     char baseline_in[512];     /**< Compare the boot chain with this hash list (--compare) */
     char bodyfile_out[512];    /**< Write a TSK bodyfile of the scanned root here (--bodyfile) */
     char hashlist_out[512];    /**< Write SHA-256 of the root's executables here (--hashlist) */
+    char volatility_in[512];   /**< Volatility 3 JSON output to add to the verdict (--volatility) */
 } booto_context_t;
 
 /**
