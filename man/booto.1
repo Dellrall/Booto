@@ -183,6 +183,8 @@ or
 since the baseline in
 .IR file .
 An OS or boot loader update explains most changes; anything else is worth a look.
+A baseline holds at most 2048 files; one at that cap is treated as incomplete,
+so "no change" then names only the files it recorded.
 The list does not change the verdict or the exit code.
 .TP
 .BI \-\-bodyfile " file"

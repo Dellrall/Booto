@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The Windows engine note called drivers without an embedded signature "catalog-signed"; it now says "unsigned", since catalogs are not checked.
 - `--acquire` now fails, with no `.sha256`, when unreadable ranges were zero-filled but could not be written to `<image>.log`.
 - `--volatility` results are now read before the case reports are written and recorded in them, so the report verdict matches the exit status.
+- `--compare` no longer prints a bare "no change" when either baseline hit the 2048-file cap; a reloaded baseline at the cap stays marked incomplete.
 
 ## [1.11.1-beta] - 2026-11-12
 

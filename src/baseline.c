@@ -189,6 +189,8 @@ booto_error_t baseline_parse(const char *text, size_t len, baseline_t *out) {
         memcpy(e->label, sep + 2, llen);
         e->label[llen] = '\0';
     }
+    // The writer stops at BASELINE_MAX, so a full file may have lost entries: never treat it as complete.
+    if (out->count == BASELINE_MAX) out->truncated = true;
     return BOOTO_OK;
 }
 
