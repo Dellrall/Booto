@@ -28,20 +28,14 @@
 
 #include "ms_roots.inc"
 
-/* The signer chains to a Microsoft root. Expiry is ignored: boot files outlive their signing certificates. */
-static bool signer_is_microsoft(PKCS7 *p7) {
-    static const unsigned char *const roots[] = { MicRooCerAut_2010_06_23_crt, MicRooCerAut2011_2011_03_22_crt,
-                                                  MicrosoftRootCert_crt, MicCorThiParMarRoo_2010_10_05_crt,
-                                                  MicRSADevicesRootCA2021_crt };
-    const unsigned int lens[] = { MicRooCerAut_2010_06_23_crt_len, MicRooCerAut2011_2011_03_22_crt_len,
-                                  MicrosoftRootCert_crt_len, MicCorThiParMarRoo_2010_10_05_crt_len,
-                                  MicRSADevicesRootCA2021_crt_len };
+/* The signer chains to one of the DER roots. Expiry is ignored: boot files outlive their signing certificates. */
+static bool signer_chains(PKCS7 *p7, const unsigned char *const *roots, const size_t *lens, size_t n) {
     STACK_OF(X509) *signers = PKCS7_get0_signers(p7, NULL, 0);
     X509_STORE *store = X509_STORE_new();
     X509_STORE_CTX *ctx = X509_STORE_CTX_new();
     bool ok = false;
     if (signers && sk_X509_num(signers) == 1 && store && ctx) {
-        for (size_t i = 0; i < sizeof(roots) / sizeof(roots[0]); i++) {
+        for (size_t i = 0; i < n; i++) {
             const unsigned char *p = roots[i];
             X509 *c = d2i_X509(NULL, &p, (long)lens[i]);
             if (c) X509_STORE_add_cert(store, c);
@@ -57,6 +51,16 @@ static bool signer_is_microsoft(PKCS7 *p7) {
     X509_STORE_free(store);
     sk_X509_free(signers);
     return ok;
+}
+
+static bool signer_is_microsoft(PKCS7 *p7) {
+    static const unsigned char *const roots[] = { MicRooCerAut_2010_06_23_crt, MicRooCerAut2011_2011_03_22_crt,
+                                                  MicrosoftRootCert_crt, MicCorThiParMarRoo_2010_10_05_crt,
+                                                  MicRSADevicesRootCA2021_crt };
+    const size_t lens[] = { MicRooCerAut_2010_06_23_crt_len, MicRooCerAut2011_2011_03_22_crt_len,
+                            MicrosoftRootCert_crt_len, MicCorThiParMarRoo_2010_10_05_crt_len,
+                            MicRSADevicesRootCA2021_crt_len };
+    return signer_chains(p7, roots, lens, sizeof(roots) / sizeof(roots[0]));
 }
 
 static bool oid_is(const ASN1_OBJECT *obj, const char *dotted) {
@@ -118,26 +122,39 @@ static authenticode_state_t check_p7(PKCS7 *p7, const pe_efi_info_t *info) {
     return state;
 }
 
-void authenticode_verify(const uint8_t *buf, size_t len, pe_efi_info_t *info) {
-    if (!buf || !info) return;
-    info->authenticode_state = AUTHENTICODE_NONE;
-    info->authenticode_microsoft = false;
-    if (!info->has_authenticode) return; // parser already bounds-checked the table against len
-    (void)len;
-
-    info->authenticode_state = AUTHENTICODE_INVALID;
-    if (info->cert_table_size < 8) return;
+/* The PKCS#7 in the first WIN_CERTIFICATE, or NULL. The parser already bounds-checked the table against len. */
+static PKCS7 *cert_table_p7(const uint8_t *buf, const pe_efi_info_t *info) {
+    if (!info->has_authenticode || info->cert_table_size < 8) return NULL;
     // shortcut: only the first WIN_CERTIFICATE is checked; dual-signed images carry the rest as nested signatures
     const uint8_t *wc = buf + info->cert_table_rva;
     uint32_t dw_len = (uint32_t)wc[0] | ((uint32_t)wc[1] << 8) | ((uint32_t)wc[2] << 16) | ((uint32_t)wc[3] << 24);
     uint16_t cert_type = (uint16_t)(wc[6] | (wc[7] << 8));
-    if (dw_len < 8 || dw_len > info->cert_table_size ||
-        cert_type != WIN_CERT_TYPE_PKCS_SIGNED_DATA) {
-        return;
-    }
-
+    if (dw_len < 8 || dw_len > info->cert_table_size || cert_type != WIN_CERT_TYPE_PKCS_SIGNED_DATA) return NULL;
     const unsigned char *der = wc + 8;
-    PKCS7 *p7 = d2i_PKCS7(NULL, &der, (long)(dw_len - 8));
+    return d2i_PKCS7(NULL, &der, (long)(dw_len - 8));
+}
+
+bool authenticode_chains_to(const uint8_t *buf, size_t len, const pe_efi_info_t *info, const uint8_t *ca_der,
+                            size_t ca_len) {
+    (void)len;
+    if (!buf || !info || !ca_der || info->authenticode_state != AUTHENTICODE_VALID) return false;
+    PKCS7 *p7 = cert_table_p7(buf, info);
+    const unsigned char *const roots[] = { ca_der };
+    bool ok = p7 && signer_chains(p7, roots, &ca_len, 1);
+    PKCS7_free(p7);
+    ERR_clear_error();
+    return ok;
+}
+
+void authenticode_verify(const uint8_t *buf, size_t len, pe_efi_info_t *info) {
+    if (!buf || !info) return;
+    info->authenticode_state = AUTHENTICODE_NONE;
+    info->authenticode_microsoft = false;
+    if (!info->has_authenticode) return;
+    (void)len;
+
+    info->authenticode_state = AUTHENTICODE_INVALID;
+    PKCS7 *p7 = cert_table_p7(buf, info);
     if (p7) info->authenticode_state = check_p7(p7, info);
     if (info->authenticode_state == AUTHENTICODE_VALID) info->authenticode_microsoft = signer_is_microsoft(p7);
     PKCS7_free(p7);

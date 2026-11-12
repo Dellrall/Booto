@@ -46,6 +46,8 @@ typedef struct {
     double exec_entropy;      // its entropy in bits/byte (set by uefi_parse_pe_file only)
     uint32_t sbat_ptr;        // .sbat section (shim/GRUB revocation metadata): file offset (0 = none)
     uint32_t sbat_size;       // and raw size
+    uint32_t vendor_cert_ptr; // shim's built-in distro CA (.vendor_cert, DER X.509): file offset (0 = none)
+    uint32_t vendor_cert_size;// and size
     char sbat_revoked[64];    // "<component>,<generation>" below the current SbatLevel, or "" (uefi_parse_pe_file)
     int yara_count;           // signed YARA rules the whole file matched (uefi_parse_pe_file only)
     yara_match_t yara[YARA_MAX_MATCHES];
@@ -92,6 +94,13 @@ booto_error_t uefi_parse_pe_buffer(const uint8_t *buf, size_t len, pe_efi_info_t
  * @param info Parsed info; authenticode_state is written.
  */
 void authenticode_verify(const uint8_t *buf, size_t len, pe_efi_info_t *info);
+
+/**
+ * @brief Whether a VALID image's signer chains to ca_der (a DER X.509 certificate, such as shim's vendor_cert).
+ *        Expiry is ignored, as for the Microsoft check.
+ */
+bool authenticode_chains_to(const uint8_t *buf, size_t len, const pe_efi_info_t *info, const uint8_t *ca_der,
+                            size_t ca_len);
 
 /**
  * @brief Inspect a single .efi binary for bootkits, DBX revocations, or missing signatures.
