@@ -167,6 +167,7 @@ bool forensic_scan_finding(const forensic_scan_report_t *r, int i, scan_finding_
     if (i < n) {
         const preload_finding_t *s = &r->preload.findings[i];
         f->engine = SCAN_MOD_PRELOAD;
+        f->severity = s->severity;
         snprintf(f->name, sizeof(f->name), "%s", s->threat_name);
         snprintf(f->where, sizeof(f->where), "%s", s->file_path);
         snprintf(f->rule, sizeof(f->rule), "%.60s -> %.95s", s->rule_id, s->target_library);
@@ -566,10 +567,12 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
     return BOOTO_OK;
 }
 
-/* Initramfs, preload and package findings carry no severity: each is confirmed tampering, so CRITICAL. */
+/* Initramfs and package findings carry no severity: each is confirmed tampering, so CRITICAL. */
 static booto_severity_t highest_severity(const forensic_scan_report_t *r) {
-    if (r->initramfs.threats_detected || r->preload.threats_detected || r->pkg.threats_detected) return SEVERITY_CRITICAL;
+    if (r->initramfs.threats_detected || r->pkg.threats_detected) return SEVERITY_CRITICAL;
     booto_severity_t max = SEVERITY_INFO;
+    for (int i = 0; i < r->preload.threats_detected && i < MAX_PRELOAD_THREATS; i++)
+        if (r->preload.findings[i].severity > max) max = r->preload.findings[i].severity;
     for (int i = 0; i < r->mbr.threats_detected; i++)
         if (r->mbr.findings[i].severity > max) max = r->mbr.findings[i].severity;
     for (int i = 0; i < r->uefi.bootkits_detected; i++)

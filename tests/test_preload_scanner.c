@@ -285,6 +285,26 @@ static void test_known_rootkit_files(void) {
     TEST_PASS("test_known_rootkit_files");
 }
 
+static void test_yara_installed_programs(void) {
+    TEST_START("test_yara_installed_programs");
+    make_root();
+    write_file("/usr/bin/ls", "\x7f" "ELF clean program");
+    write_file("/usr/bin/notes.txt", "diamorphine is only mentioned in a text file");
+    write_file("/tmp/.x/hidden", "\x7f" "ELF in a subfolder: diamorphine");
+    write_file("/tmp/kit", "\x7f" "ELF hooks by diamorphine");
+
+    preload_scan_result_t res;
+    booto_error_t err = preload_scan_rootfs(g_root, &res);
+    remove_tree();
+
+    ASSERT_INT_EQ(err, BOOTO_OK, "Scan must return BOOTO_OK");
+    ASSERT_INT_EQ(res.threats_detected, 1, "Only the rootkit ELF directly in a swept folder is reported");
+    ASSERT_STR_EQ(res.findings[0].rule_id, "BOOTO_YARA_LINUX_ROOTKIT_FAMILY", "Rule ID");
+    ASSERT_INT_EQ(res.findings[0].severity, SEVERITY_HIGH, "Severity comes from the rule");
+    ASSERT_TRUE(strstr(res.findings[0].file_path, "/tmp/kit") != NULL, "Path");
+    TEST_PASS("test_yara_installed_programs");
+}
+
 int main(void) {
     printf("\n--- Running LD_PRELOAD & PAM Interceptor Tests ---\n");
     test_ld_preload_detection();
@@ -297,6 +317,7 @@ int main(void) {
     test_merged_usr_not_doubled();
     test_persistence_sweep();
     test_known_rootkit_files();
+    test_yara_installed_programs();
     TEST_SUMMARY();
     return 0;
 }

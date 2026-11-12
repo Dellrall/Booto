@@ -23,6 +23,7 @@ typedef struct {
     char sha256[65];
     char rule_id[64];
     char description[256];
+    booto_severity_t severity; /* CRITICAL, except YARA matches, which carry their rule's severity */
 } preload_finding_t;
 
 typedef struct {
@@ -38,11 +39,12 @@ typedef struct {
  *        (PERSIST_SYSTEMD_EXEC), cron jobs and rc.local (PERSIST_CRON), shell profiles (PERSIST_SHELL_PROFILE)
  *        and authorized_keys forced commands (PERSIST_SSH_FORCED_COMMAND) that run temp/hidden-path programs
  *        or code fetched at run time (curl/wget/base64 piped into a shell), and known rootkit install
- *        paths from rootkit_file_iocs.json (IOC_*).
+ *        paths from rootkit_file_iocs.json (IOC_*), and the signed YARA rules over every ELF file directly in the
+ *        program, library and temp folders (bin, sbin, lib, usr/local, tmp, ...).
  * @param target_rootfs Path to mounted target rootfs (e.g. /tmp/booto_target_mnt).
  * @param result Output structure to record findings.
  * @return BOOTO_OK on success; BOOTO_ERR_IO if a present preload/environment file cannot be read,
- *         BOOTO_ERR_CORRUPT_DATA if it exceeds 1 MiB or the IOC rules fail their seal, other negative codes on failure.
+ *         BOOTO_ERR_CORRUPT_DATA if it exceeds 1 MiB or the IOC or YARA rules fail their seal, other negative codes on failure.
  */
 booto_error_t preload_scan_rootfs(const char *target_rootfs, preload_scan_result_t *result);
 
