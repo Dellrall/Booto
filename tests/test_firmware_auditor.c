@@ -933,6 +933,13 @@ static void test_spi_analyze(void) {
 
     uint8_t win[256] = { 0 };
     put_pe(win, 3);          /* Windows console binary hidden in an LZMA section */
+    /* ESPecter's patch code (FwHunt), wildcard bytes zeroed: the shipped rules must find it once inflated */
+    static const uint8_t especter[] = { 0x81, 0x3f, 0xff, 0x48, 0x83, 0x65, 0, 0, 0x81, 0x7f, 0x04, 0xd0, 0x00, 0x48,
+        0x83, 0, 0, 0x81, 0x7f, 0x08, 0x65, 0x40, 0x00, 0x83, 0, 0, 0x90, 0x90, 0xc6, 0x47, 0xeb, 0xb8, 0xc7, 0x47,
+        0xec, 0, 0, 0, 0, 0xc6, 0x47, 0xf0, 0xc3, 0x48, 0x31, 0xc0 };
+    memcpy(win + 160, especter, sizeof(especter));
+    setenv("BOOTO_RULES_DIR", "rules", 1);
+    rules_reset_cache();
     const char *const xz[] = { "xz", "--format=lzma", "-c", NULL };
     uint8_t *packed = NULL;
     size_t packed_len = 0;
@@ -957,6 +964,8 @@ static void test_spi_analyze(void) {
     ASSERT_INT_EQ(r.lzma_inflated, 1, "LZMA section inflated");
     ASSERT_INT_EQ(r.pe_images, 2, "Raw and inflated PE counted");
     ASSERT_INT_EQ(r.windows_pe, 1, "Only the Windows PE is flagged");
+    ASSERT_INT_EQ(r.yara_count, 1, "One YARA rule matched");
+    ASSERT_STR_EQ(r.yara[0].rule, "BOOTO_YARA_ESPECTER", "ESPecter found in the inflated section");
 
     /* A section whose size runs past the image, or a corrupt stream, is skipped in bounds (ASan checks). */
     sec[1] = 0x7f;
@@ -969,6 +978,8 @@ static void test_spi_analyze(void) {
     ASSERT_INT_EQ(firmware_spi_analyze(path, &r), BOOTO_OK, "Corrupt stream tolerated");
 
     ASSERT_INT_EQ(firmware_spi_analyze("/nonexistent/spi.bin", &r), BOOTO_ERR_IO, "Missing image reported");
+    unsetenv("BOOTO_RULES_DIR");
+    rules_reset_cache();
     remove_tree(g_root);
     TEST_PASS("test_spi_analyze");
 }

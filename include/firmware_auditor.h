@@ -9,6 +9,7 @@
 #define BOOTO_FIRMWARE_AUDITOR_H
 
 #include "booto.h"
+#include "yara_scan.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -118,11 +119,13 @@ typedef struct {
     int lzma_inflated;    /* of those, inflated by the sandboxed xz */
     int pe_images;        /* PE images, raw or inside inflated sections */
     int windows_pe;       /* PE images built for Windows (GUI/console subsystem): firmware never runs these */
+    int yara_count;       /* distinct YARA rules matched in the image or an inflated section */
+    yara_match_t yara[YARA_MAX_MATCHES];
 } fw_spi_report_t;
 
 /**
  * @brief Walk a dumped SPI image: count firmware volumes, inflate LZMA sections with the sandboxed
- *        `xz --format=lzma` and count PE images. A Windows PE inside firmware is how WPBT-style and
+ *        `xz --format=lzma`, count PE images and match the signed YARA rules against both. A Windows PE inside firmware is how WPBT-style and
  *        MosaicRegressor-style implants drop a payload into the OS (some vendor tools do this too).
  * @return BOOTO_OK; BOOTO_ERR_IO if the image cannot be read; BOOTO_ERR_INVALID_ARG on NULL.
  */
