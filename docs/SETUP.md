@@ -93,6 +93,20 @@ Alternative with any raw writer (`dd`, caligula, balenaEtcher, Rufus in **DD mod
    - **Yes (default):** anyone who finds the stick cannot read the reports. Write the passphrase down: reports cannot be recovered without it.
    - **No:** Booto mounts the report partition at start without asking, and anyone with the stick can read the reports.
 
+### Optional: capture memory before shutting down
+
+Shutting down erases RAM, and with it any rootkit that lives only in memory. If the suspect machine runs Linux and is still on, capture its memory first with [AVML](https://github.com/microsoft/avml) (MIT, a single static binary):
+
+1. On your own computer, download `avml` from its GitHub releases page and copy it to a second USB stick with more free space than the suspect's RAM.
+2. On the suspect machine, plug in that stick and run, as root, writing only to the stick, never the suspect's own disk:
+   ```bash
+   sudo /media/<you>/<stick>/avml /media/<you>/<stick>/memory.lime
+   sha256sum /media/<you>/<stick>/memory.lime > /media/<you>/<stick>/memory.lime.sha256
+   ```
+3. Analyse the capture later on your own computer with [Volatility 3](https://github.com/volatilityfoundation/volatility3), for example `vol -f memory.lime linux.malware.hidden_modules` and `vol -f memory.lime linux.malware.check_syscall`. Volatility needs a symbol table for the suspect's exact kernel.
+
+Running any program on a compromised machine lets the rootkit see it, so treat the capture as a lead, not proof. Booto itself does not read memory captures.
+
 ### Step 3: Boot the suspect machine
 
 1. Shut the machine down completely (not sleep or hibernate).
@@ -151,5 +165,5 @@ booto -c -t /dev/nvme0n1p2 -d                      # dry run: show the plan, tou
 ## 4. Limits
 
 - The package check trusts the package lists on the suspect disk; an attacker with root access can rewrite them.
-- Booto examines the disk only. It cannot see malware that lives only in the suspect machine's RAM, because that machine is powered off before Booto boots.
+- Booto examines the disk only. It cannot see malware that lives only in the suspect machine's RAM, because that machine is powered off before Booto boots; capture memory first if you need it (see the optional step above).
 - On an older or unrecognised Intel chipset, `booto -c -t <disk>` prints three commands whose output helps confirm the chipset; paste it in a [GitHub issue](https://github.com/Dellrall/Booto/issues).
