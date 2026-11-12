@@ -407,11 +407,11 @@ static void render_encrypted_modal(tui_app_state_t *app, int rows, int cols) {
     snprintf(line, sizeof(line), "%.40s is %s.", t ? t->name : "The target", luks ? "a locked LUKS volume" : "BitLocker-encrypted");
     put_clip(&x, my + 2, end, line, A_WARN);
     x = mx + 3;
-    put_clip(&x, my + 3, end, luks ? "Unlock it first. A scan of the locked volume sees only" : "Booto cannot unlock BitLocker. A scan sees only", A_TEXT);
+    put_clip(&x, my + 3, end, "Unlock it first. A scan of the locked volume sees only", A_TEXT);
     x = mx + 3;
     put_clip(&x, my + 4, end, "ciphertext and may not produce correct results.", A_TEXT);
     x = mx + 3;
-    if (luks) x = modal_key(x, my + 6, end, " F3 ", " Unlock", KEY_F3) + 3;
+    x = modal_key(x, my + 6, end, " F3 ", " Unlock", KEY_F3) + 3;
     x = modal_key(x, my + 6, end, " Enter ", " Scan anyway", KEY_ENTER) + 3;
     modal_key(x, my + 6, end, " Esc ", " Cancel", KEY_ESC);
 }
@@ -472,7 +472,7 @@ static void render_help_modal(int rows, int cols) {
 static void render_luks_modal(tui_app_state_t *app, int rows, int cols) {
     bool persist = app->luks_modal_for_persist;
     int mx, my, mw;
-    modal_frame(rows, cols, 60, 11, persist ? "Unlock report storage" : "Unlock LUKS volume (read-only)", &mx, &my, &mw);
+    modal_frame(rows, cols, 60, 11, persist ? "Unlock report storage" : "Unlock encrypted volume (read-only)", &mx, &my, &mw);
     int end = mx + mw - 2;
 
     int x = mx + 3;
@@ -492,6 +492,9 @@ static void render_luks_modal(tui_app_state_t *app, int rows, int cols) {
     if (app->luks_status_msg[0] != '\0') {
         x = mx + 3;
         put_clip(&x, my + 6, end, app->luks_status_msg, A_BAD);
+    } else if (!persist && app->luks_bitlocker) {
+        x = mx + 3;
+        put_clip(&x, my + 6, end, "BitLocker: its password or 48-digit recovery key", A_MUTED);
     }
 
     x = modal_key(mx + 3, my + 8, end, " Enter ", persist ? " Unlock" : " Unlock read-only", KEY_ENTER);
@@ -929,8 +932,8 @@ int tui_app_run(booto_context_t *ctx) {
                     app.luks_passphrase_len = 0;
                     if (err == BOOTO_OK) {
                         app.luks_unlocked = true;
-                        tui_app_append_log(&app, LOG_LEVEL_INFO, NULL, "Successfully unlocked target LUKS volume (READ-ONLY)");
-                        snprintf(app.status_msg, sizeof(app.status_msg), "LUKS target unlocked: /dev/mapper/booto_target_luks");
+                        tui_app_append_log(&app, LOG_LEVEL_INFO, NULL, "Unlocked the encrypted target volume (READ-ONLY)");
+                        snprintf(app.status_msg, sizeof(app.status_msg), "Target unlocked: /dev/mapper/booto_target_luks");
 
                         // Add the decrypted volume (or the LVM volumes inside it) with their real filesystem; target the first scannable one
                         char vols[8][128] = {"/dev/mapper/booto_target_luks"};
@@ -954,7 +957,8 @@ int tui_app_run(booto_context_t *ctx) {
                             snprintf(app.drives[idx].fs_type, sizeof(app.drives[idx].fs_type), "%s", fs);
                             snprintf(app.drives[idx].label, sizeof(app.drives[idx].label), "%s", label[0] ? label : "Decrypted Volume");
                             app.drives[idx].is_target = false;
-                            if (target < 0 && (strcmp(fs, "ext4") == 0 || strcmp(fs, "xfs") == 0 || strcmp(fs, "btrfs") == 0)) target = idx;
+                            if (target < 0 && (strcmp(fs, "ext4") == 0 || strcmp(fs, "xfs") == 0 || strcmp(fs, "btrfs") == 0 ||
+                                               strcmp(fs, "ntfs") == 0)) target = idx;
                         }
                         if (target >= 0) {
                             for (int d = 0; d < app.drive_count; d++) app.drives[d].is_target = (d == target);
@@ -1105,14 +1109,16 @@ int tui_app_run(booto_context_t *ctx) {
                 app.show_exit_modal = true;
                 app.exit_confirm = 0;
             } else if (event.type == KEY_F3 && atomic_load(&app.scan_active)) {
-                snprintf(app.status_msg, sizeof(app.status_msg), "LUKS unlock is disabled while a scan runs.");
+                snprintf(app.status_msg, sizeof(app.status_msg), "Unlocking is disabled while a scan runs.");
             } else if (event.type == KEY_F3 && app.luks_unlocked) {
-                snprintf(app.status_msg, sizeof(app.status_msg), "A LUKS volume is already unlocked at /dev/mapper/booto_target_luks.");
+                snprintf(app.status_msg, sizeof(app.status_msg), "A volume is already unlocked at /dev/mapper/booto_target_luks.");
             } else if (event.type == KEY_F3 && app.drive_count == 0) {
                 snprintf(app.status_msg, sizeof(app.status_msg), "No drives found to unlock.");
-            } else if (event.type == KEY_F3 && strcmp(app.drives[app.drive_cursor].fs_type, "crypto_LUKS") != 0) {
-                snprintf(app.status_msg, sizeof(app.status_msg), "%.200s is not an encrypted (LUKS) volume.", app.drives[app.drive_cursor].name);
+            } else if (event.type == KEY_F3 && strcmp(app.drives[app.drive_cursor].fs_type, "crypto_LUKS") != 0 &&
+                       strcmp(app.drives[app.drive_cursor].fs_type, "BitLocker") != 0) {
+                snprintf(app.status_msg, sizeof(app.status_msg), "%.200s is not an encrypted (LUKS or BitLocker) volume.", app.drives[app.drive_cursor].name);
             } else if (event.type == KEY_F3) {
+                app.luks_bitlocker = strcmp(app.drives[app.drive_cursor].fs_type, "BitLocker") == 0;
                 snprintf(app.luks_target_dev, sizeof(app.luks_target_dev), "%s", app.drives[app.drive_cursor].name);
                 app.luks_passphrase_len = 0;
                 app.luks_passphrase_input[0] = '\0';

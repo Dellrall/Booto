@@ -445,8 +445,10 @@ Runs when the target root holds
 .IR Windows/System32/ntoskrnl.exe ;
 the Linux engines skip such a root. NTFS is mounted read-only with
 .BR ntfs3 .
-A BitLocker volume cannot be read: it is listed as a target, every engine that needs the root
-reports "BitLocker volume: encrypted, not scanned", and the verdict is INCOMPLETE, never CLEAN.
+A locked BitLocker volume cannot be read: it is listed as a target, every engine that needs the root
+reports "BitLocker volume: locked, not scanned", and the verdict is INCOMPLETE, never CLEAN.
+Unlock it read-only with F3 in the TUI, using its password or 48-digit recovery key; the NTFS
+volume inside is then scanned like any other Windows root.
 The embedded Authenticode signature of
 .BR winload ,
 .BR winresume ,

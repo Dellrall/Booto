@@ -224,6 +224,7 @@ typedef struct {
     int inspect_scroll;                 // first line shown in the current tab
     int inspect_hint_y;                 // screen row of the Findings "Enter  Inspect" line, -1 when hidden
     bool luks_modal_for_persist;        // modal unlocks report storage instead of the scan target
+    bool luks_bitlocker;                // the target being unlocked is BitLocker (cryptsetup --type bitlk)
     char luks_target_dev[128];
     char luks_passphrase_input[128];
     int luks_passphrase_len;
