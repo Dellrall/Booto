@@ -125,11 +125,19 @@ static bool resolve_target(booto_context_t *ctx) {
     return found;
 }
 
-static void write_reports(const booto_context_t *ctx, const forensic_scan_report_t *rep, const char *dir) {
+/* vol: rows from ingest_volatility (-1 unreadable), ignored without --volatility. */
+static void write_reports(const booto_context_t *ctx, const forensic_scan_report_t *rep, const char *dir, int vol) {
     forensic_case_summary_t sum;
     forensic_scan_fill_case_summary(rep, ctx->case_id[0] ? ctx->case_id : NULL, ctx->examiner[0] ? ctx->examiner : NULL, &sum);
     snprintf(sum.evidence_number, sizeof(sum.evidence_number), "%s", ctx->evidence_number);
     snprintf(sum.notes, sizeof(sum.notes), "%s", ctx->notes);
+    if (ctx->volatility_in[0]) {
+        snprintf(sum.volatility_file, sizeof(sum.volatility_file), "%.127s", ctx->volatility_in);
+        sum.volatility_rows = vol;
+        // Same rule as the exit status: memory evidence of a threat wins, unreadable input is a coverage gap.
+        if (vol > 0) snprintf(sum.verdict, sizeof(sum.verdict), "THREATS");
+        else if (vol < 0 && strcmp(sum.verdict, "CLEAN") == 0) snprintf(sum.verdict, sizeof(sum.verdict), "INCOMPLETE");
+    }
 
     char path[512];
     booto_error_t e = case_report_generate_json(&sum, dir, path, sizeof(path));
@@ -367,16 +375,14 @@ static int run_cli(booto_context_t *ctx) {
     free(cur), free(old);
 
     if (ctx->expert_firmware) run_expert_firmware(ctx->persistence_dir);
-    if (ctx->persistence_dir[0]) write_reports(ctx, rep, ctx->persistence_dir);
+    int v = ctx->volatility_in[0] ? ingest_volatility(ctx->volatility_in) : 0;  // before the reports, which carry it
+    if (ctx->persistence_dir[0]) write_reports(ctx, rep, ctx->persistence_dir, v);
 
     int code = rep->verdict == SCAN_VERDICT_CLEAN ? EXIT_CLEAN
              : rep->verdict == SCAN_VERDICT_THREATS ? EXIT_THREATS : EXIT_INCOMPLETE;
     free(rep);
-    if (ctx->volatility_in[0]) {
-        int v = ingest_volatility(ctx->volatility_in);
-        if (v > 0) code = EXIT_THREATS;
-        else if (v < 0 && code == EXIT_CLEAN) code = EXIT_INCOMPLETE;
-    }
+    if (v > 0) code = EXIT_THREATS;
+    else if (v < 0 && code == EXIT_CLEAN) code = EXIT_INCOMPLETE;
     return code;
 }
 

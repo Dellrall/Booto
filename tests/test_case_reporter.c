@@ -164,6 +164,18 @@ static void test_host_firmware_section(void) {
     ASSERT_TRUE(strstr(buf, "## Host firmware") != NULL, "Markdown must have firmware section");
     ASSERT_TRUE(strstr(buf, "do not affect the disk verdict") != NULL, "Markdown must state scope");
     ASSERT_TRUE(strstr(buf, "| `fail` | `say \"hi\" a\\|b` |") != NULL, "Markdown must escape firmware detail");
+
+    snprintf(sum.case_id, sizeof(sum.case_id), "VOL-1");
+    snprintf(sum.volatility_file, sizeof(sum.volatility_file), "mem.json");
+    sum.volatility_rows = 3;
+    ASSERT_INT_EQ(case_report_generate_json(&sum, g_dir, path, sizeof(path)), BOOTO_OK, "JSON generation must succeed");
+    slurp(path, buf, sizeof(buf));
+    ASSERT_TRUE(strstr(buf, "\"volatility_file\":\"mem.json\",\"volatility_suspicious_rows\":3") != NULL,
+                "JSON must carry the Volatility evidence");
+    ASSERT_INT_EQ(case_report_generate_markdown(&sum, g_dir, path, sizeof(path)), BOOTO_OK, "Markdown generation must succeed");
+    slurp(path, buf, sizeof(buf));
+    ASSERT_TRUE(strstr(buf, "**Memory (Volatility 3):** `mem.json`, 3 suspicious row(s)") != NULL,
+                "Markdown must carry the Volatility evidence");
     TEST_PASS("test_host_firmware_section");
 }
 

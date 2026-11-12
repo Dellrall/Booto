@@ -40,6 +40,8 @@ typedef struct {
     firmware_report_t firmware;       /**< Machine running Booto; not part of the verdict */
     char head_before[65];             /**< SHA-256 of the target's first 1 MiB before the scan; "" if not hashed */
     char head_after[65];              /**< The same after the scan */
+    char volatility_file[128];        /**< --volatility input; "" if none */
+    int volatility_rows;              /**< Suspicious rows in it; -1 if unreadable */
 } forensic_case_summary_t;
 
 /**
