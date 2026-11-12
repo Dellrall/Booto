@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- The Windows engine note called drivers without an embedded signature "catalog-signed"; it now says "unsigned", since catalogs are not checked.
+
 ## [1.11.1-beta] - 2026-11-12
 
 ### Added
