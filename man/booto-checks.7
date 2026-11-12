@@ -260,6 +260,24 @@ A kernel module that names the getdents64 and kill syscalls and looks up
 hidden kernel symbols (kallsyms_lookup_name or a kprobe), the usual way a
 rootkit hides files and processes.
 .TP
+.BR BOOTO_YARA_LKM_NET_HIDE " (HIGH)"
+A kernel module that names tcp4_seq_show, the handler behind /proc/net/tcp,
+and looks up hidden kernel symbols (kallsyms_lookup_name, a kprobe or an
+ftrace hook), the usual way a rootkit hides network connections.
+.TP
+.BR BOOTO_YARA_BPFDOOR " (HIGH)"
+An ELF file holding two BPFDoor markers: its /dev/shm/kdmtmpflush,
+/var/run/haldrund.pid or /var/run/xinetd.lock files, its fake hald-addon-acpi
+process name, or its justtryit and justforfun passwords.
+.TP
+.BR BOOTO_YARA_PUMAKIT " (HIGH)"
+An ELF file naming the PUMAKIT rootkit's /usr/share/zov_f staging folder, or
+its zarya loader together with the .puma-config file.
+.TP
+.BR BOOTO_YARA_XORDDOS " (HIGH)"
+An ELF file holding BB2FA36AAA9541F0, the key XorDDoS encrypts its config
+with.
+.TP
 .BR BOOTO_YARA_BOOTKITTY " (CRITICAL)"
 A PE or ELF file naming Bootkitty, the first public UEFI bootkit aimed at
 Linux.

@@ -72,6 +72,60 @@ rule BOOTO_YARA_LKM_SYSCALL_HOOK
         uint32(0) == 0x464C457F and uint16(16) == 1 and $getdents and $kill and any of ($lookup*)
 }
 
+rule BOOTO_YARA_LKM_NET_HIDE
+{
+    meta:
+        severity = "HIGH"
+        description = "Kernel module looks up hidden kernel symbols and names tcp4_seq_show, the /proc/net/tcp handler rootkits hook to hide connections"
+    strings:
+        $tcp = "tcp4_seq_show"
+        $lookup1 = "kallsyms_lookup_name"
+        $lookup2 = "register_kprobe"
+        $lookup3 = "register_ftrace_function"
+    condition:
+        uint32(0) == 0x464C457F and uint16(16) == 1 and $tcp and any of ($lookup*)
+}
+
+rule BOOTO_YARA_BPFDOOR
+{
+    meta:
+        severity = "HIGH"
+        description = "BPFDoor backdoor: its lock and pid file paths, fake process name or magic passwords"
+    strings:
+        $f1 = "/dev/shm/kdmtmpflush"
+        $f2 = "/var/run/haldrund.pid"
+        $f3 = "/var/run/xinetd.lock"
+        $name = "hald-addon-acpi: listening on acpi kernel interface /proc/acpi/event"
+        $pw1 = "justtryit" fullword
+        $pw2 = "justforfun" fullword
+    condition:
+        uint32(0) == 0x464C457F and 2 of them
+}
+
+rule BOOTO_YARA_PUMAKIT
+{
+    meta:
+        severity = "HIGH"
+        description = "PUMAKIT Linux rootkit: its staging folder, or the zarya loader with the puma config"
+    strings:
+        $zov = "/usr/share/zov_f"
+        $zarya = "zarya" fullword
+        $puma = ".puma-config"
+    condition:
+        uint32(0) == 0x464C457F and ($zov or ($zarya and $puma))
+}
+
+rule BOOTO_YARA_XORDDOS
+{
+    meta:
+        severity = "HIGH"
+        description = "XorDDoS: the XOR key its rootkit-backed Linux trojan encrypts its config with"
+    strings:
+        $key = "BB2FA36AAA9541F0"
+    condition:
+        uint32(0) == 0x464C457F and $key
+}
+
 rule BOOTO_YARA_BOOTKITTY
 {
     meta:
