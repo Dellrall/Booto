@@ -42,6 +42,22 @@
 #define SMRR_VALID              (1ull << 11)
 #define MSR_AMD_HWCR            0xC0010015u
 #define HWCR_SMMLOCK            1ull
+#define MSR_IA32_DEBUG_INTERFACE 0xC80u
+#define DEBUG_IF_ENABLE         0x1u
+#define DEBUG_IF_LOCK           (1u << 30)
+/* Intel CSME host firmware status words (HFSTS1-6), as coreboot, intelmetool and fwupd decode them. */
+#define HFSTS1_MFG_MODE         (1u << 4)       /* manufacturing mode: flash and fuse locks may be open */
+#define HFSTS1_OP_MODE(v)       (((v) >> 16) & 0xFu)
+#define ME_OP_NORMAL            0u
+#define ME_OP_DEBUG             2u
+#define ME_OP_SOFT_DISABLE      3u
+#define ME_OP_SECOVER_JUMPER    4u
+#define ME_OP_SECOVER_MEI       5u
+#define HFSTS6_VERIFIED_BOOT    (1u << 9)
+#define HFSTS6_BG_DISABLE       (1u << 28)
+#define HFSTS6_FPF_SOC_LOCK     (1u << 30)      /* field-programmable fuses committed at end of manufacturing */
+#define ME_HFSTS6_FIRST         11u             /* HFSTS6 Boot Guard layout confirmed for CSME 11 to 17 */
+#define ME_HFSTS6_LAST          17u
 #define MSR_AMD_SMM_MASK        0xC0010113u
 #define SMM_MASK_TVALID         (1ull << 1)
 #define PCI_UNPRIV_CONFIG_LEN   64u     /* sysfs serves only the standard header to non-root */
@@ -132,6 +148,9 @@ static const char *const CHECK_NAMES[FW_CHECK_COUNT] = {
     "SMRAM range protected",
     "BIOS write protection",
     "Boot measurements (TPM)",
+    "Intel ME normal mode",
+    "Boot Guard verified boot",
+    "CPU debug interface locked",
 };
 
 typedef struct {
@@ -851,9 +870,168 @@ static long cpuinfo_number(const char *s, const char *key) {
     return -1;
 }
 
+/* A small sysfs text file under dir, NUL-terminated and cut to cap - 1 bytes. Returns 0 or an errno. */
+static int read_text(const char *dir, const char *name, char *out, size_t cap) {
+    char path[4096];
+    int w = snprintf(path, sizeof(path), "%s/%s", dir, name);
+    if (w < 0 || (size_t)w >= sizeof(path)) return ENAMETOOLONG;
+    uint8_t *buf;
+    size_t len;
+    int err = read_file(path, &buf, &len);
+    if (err) return err;
+    if (len >= cap) len = cap - 1;
+    memcpy(out, buf, len);
+    out[len] = '\0';
+    free(buf);
+    return 0;
+}
+
+typedef struct {
+    int err;              /* 0 or errno reading fw_status */
+    int nregs;            /* HFSTS words read, up to 6 */
+    uint32_t hfsts[6];
+    unsigned major;       /* fw_ver major version, 0 = unknown */
+    char ver[48];         /* "11.8.50.3425", "" if unknown */
+} me_status_t;
+
+/* mei sysfs: fw_status holds one 8-digit hex word per line, fw_ver "platform:major.minor.hotfix.build". */
+static me_status_t read_me(const char *mei_dir) {
+    me_status_t m;
+    memset(&m, 0, sizeof(m));
+    char text[256];
+    m.err = read_text(mei_dir, "fw_status", text, sizeof(text));
+    if (m.err) return m;
+    for (char *p = text, *end; m.nregs < 6; p = end) {
+        unsigned long v = strtoul(p, &end, 16);
+        if (end == p || v > 0xFFFFFFFFul) break;
+        m.hfsts[m.nregs++] = (uint32_t)v;
+    }
+    if (m.nregs == 0) m.err = EIO;
+    unsigned plat, a, b, c, d;
+    if (read_text(mei_dir, "fw_ver", text, sizeof(text)) == 0 &&
+        sscanf(text, "%u:%u.%u.%u.%u", &plat, &a, &b, &c, &d) == 5) {
+        m.major = a;
+        snprintf(m.ver, sizeof(m.ver), "%u.%u.%u.%u", a, b, c, d);
+    }
+    return m;
+}
+
+static void set_me_error(fw_check_t *c, int err) {
+    c->result = FW_RESULT_UNKNOWN;
+    if (err == ENOENT || err == ENOTDIR)
+        snprintf(c->detail, sizeof(c->detail), "No Intel ME interface: the mei_me driver is not loaded or the ME is hidden.");
+    else if (err == EACCES || err == EPERM)
+        snprintf(c->detail, sizeof(c->detail), "Needs root to read the Intel ME status.");
+    else if (err == EIO)
+        snprintf(c->detail, sizeof(c->detail), "Intel ME status is unreadable.");
+    else
+        snprintf(c->detail, sizeof(c->detail), "Could not read the Intel ME status: %s.", strerror(err));
+}
+
+static void check_me_state(fw_check_t *c, const me_status_t *m) {
+    if (m->err) {
+        set_me_error(c, m->err);
+        return;
+    }
+    char ver[64] = "";
+    if (m->ver[0]) snprintf(ver, sizeof(ver), " (ME %s)", m->ver);
+    uint32_t h1 = m->hfsts[0];
+    unsigned op = HFSTS1_OP_MODE(h1);
+    c->result = FW_RESULT_FAIL;
+    if (h1 & HFSTS1_MFG_MODE)
+        snprintf(c->detail, sizeof(c->detail), "ME is in manufacturing mode%s: firmware and fuse locks may still be open.", ver);
+    else if (op == ME_OP_SECOVER_JUMPER || op == ME_OP_SECOVER_MEI)
+        snprintf(c->detail, sizeof(c->detail), "ME security override is on%s: the ME flash region can be rewritten.", ver);
+    else if (op == ME_OP_DEBUG)
+        snprintf(c->detail, sizeof(c->detail), "ME runs in debug mode%s.", ver);
+    else if (op == ME_OP_SOFT_DISABLE || op == ME_OP_NORMAL) {
+        c->result = FW_RESULT_PASS;
+        snprintf(c->detail, sizeof(c->detail), op == ME_OP_NORMAL ? "ME runs in normal mode%s." : "ME is soft-disabled%s.", ver);
+    } else {
+        c->result = FW_RESULT_UNKNOWN;
+        snprintf(c->detail, sizeof(c->detail), "ME reports operation mode %u%s.", op, ver);
+    }
+}
+
+static void check_boot_guard(fw_check_t *c, const me_status_t *m) {
+    if (m->err) {
+        set_me_error(c, m->err);
+        return;
+    }
+    if (m->major < ME_HFSTS6_FIRST || m->major > ME_HFSTS6_LAST) {
+        c->result = FW_RESULT_UNKNOWN;
+        if (m->major)
+            snprintf(c->detail, sizeof(c->detail), "Boot Guard status not confirmed for ME version %u.", m->major);
+        else
+            snprintf(c->detail, sizeof(c->detail), "ME version unknown: Boot Guard status layout not confirmed.");
+        return;
+    }
+    if (m->nregs < 6) {
+        set_check(c, FW_RESULT_UNKNOWN, "ME does not report its Boot Guard status (HFSTS6).");
+        return;
+    }
+    uint32_t h6 = m->hfsts[5];
+    if ((h6 & HFSTS6_BG_DISABLE) || !(h6 & HFSTS6_VERIFIED_BOOT))
+        set_check(c, FW_RESULT_FAIL, "Boot Guard verified boot is off: modified firmware still boots.");
+    else if (!(h6 & HFSTS6_FPF_SOC_LOCK))
+        set_check(c, FW_RESULT_FAIL, "Boot Guard fuses are not locked: its key can still be replaced.");
+    else
+        set_check(c, FW_RESULT_PASS, "Boot Guard verifies the firmware and its fuses are locked.");
+}
+
+/* IA32_DEBUG_INTERFACE exists only with CPUID SDBG; enabled or unlocked lets a USB debug probe (DCI) take over the CPU. */
+static void check_intel_debug(fw_check_t *c, const char *msr_dir, bool sdbg) {
+    if (!sdbg) {
+        set_check(c, FW_RESULT_NA, "CPU has no silicon debug interface.");
+        return;
+    }
+    msr_scan_t en = msr_scan(msr_dir, MSR_IA32_DEBUG_INTERFACE, DEBUG_IF_ENABLE);
+    msr_scan_t lk = en.err ? en : msr_scan(msr_dir, MSR_IA32_DEBUG_INTERFACE, DEBUG_IF_LOCK);
+    if (lk.err) {
+        set_msr_error(c, lk.err, MSR_IA32_DEBUG_INTERFACE);
+    } else if (en.set) {
+        c->result = FW_RESULT_FAIL;
+        snprintf(c->detail, sizeof(c->detail), "CPU debug interface is enabled on %d of %d CPUs.", en.set, en.cpus);
+    } else if (lk.set != lk.cpus) {
+        c->result = FW_RESULT_FAIL;
+        snprintf(c->detail, sizeof(c->detail), "CPU debug interface is not locked on %d of %d CPUs: software can turn it on.",
+                 lk.cpus - lk.set, lk.cpus);
+    } else {
+        set_check(c, FW_RESULT_PASS, "CPU debug interface is off and locked.");
+    }
+}
+
+/* The ccp driver exposes the AMD security processor's fuse state per PCI device. */
+static void check_amd_debug(fw_check_t *c, const char *ccp_dir) {
+    DIR *d = opendir(ccp_dir);
+    if (!d) {
+        set_check(c, FW_RESULT_UNKNOWN, "AMD security processor driver (ccp) is not loaded.");
+        return;
+    }
+    int on = 0, off = 0;
+    struct dirent *de;
+    while ((de = readdir(d)) != NULL) {
+        if (de->d_name[0] == '.') continue;
+        char sub[4096], v[8];
+        int w = snprintf(sub, sizeof(sub), "%s/%s", ccp_dir, de->d_name);
+        if (w < 0 || (size_t)w >= sizeof(sub) || read_text(sub, "debug_lock_on", v, sizeof(v)) != 0) continue;
+        if (v[0] == '1') on++;
+        else if (v[0] == '0') off++;
+    }
+    closedir(d);
+    if (off)
+        set_check(c, FW_RESULT_FAIL, "AMD security processor debug is not locked (debug_lock_on is 0).");
+    else if (on)
+        set_check(c, FW_RESULT_PASS, "AMD security processor debug is locked.");
+    else
+        set_check(c, FW_RESULT_UNKNOWN, "This kernel does not report the AMD debug lock.");
+}
+
 static void check_silicon(fw_check_t *ck, bool *unconfirmed, const char *cpuinfo, const char *msr_dir,
-                          const char *pci_dir) {
-    fw_check_t *const silicon[3] = { &ck[FW_CHECK_SMM_LOCK], &ck[FW_CHECK_SMRAM_RANGE], &ck[FW_CHECK_BIOS_WP] };
+                          const char *pci_dir, const char *mei_dir, const char *ccp_dir) {
+    fw_check_t *const silicon[6] = { &ck[FW_CHECK_SMM_LOCK], &ck[FW_CHECK_SMRAM_RANGE], &ck[FW_CHECK_BIOS_WP],
+                                     &ck[FW_CHECK_ME_STATE], &ck[FW_CHECK_BOOT_GUARD], &ck[FW_CHECK_DEBUG_LOCK] };
+    const size_t ns = sizeof(silicon) / sizeof(silicon[0]);
     uint8_t *buf;
     size_t len;
     int err = read_file(cpuinfo, &buf, &len);
@@ -863,7 +1041,7 @@ static void check_silicon(fw_check_t *ck, bool *unconfirmed, const char *cpuinfo
         err = ENOMEM;
     }
     if (err) {
-        for (size_t i = 0; i < 3; i++) {
+        for (size_t i = 0; i < ns; i++) {
             silicon[i]->result = FW_RESULT_UNKNOWN;
             snprintf(silicon[i]->detail, sizeof(silicon[i]->detail), "Could not identify the CPU: %s.", strerror(err));
         }
@@ -873,26 +1051,34 @@ static void check_silicon(fw_check_t *ck, bool *unconfirmed, const char *cpuinfo
     cpu_vendor_t vendor = strstr(text, "GenuineIntel") ? CPU_INTEL
                         : strstr(text, "AuthenticAMD") ? CPU_AMD : CPU_OTHER;
     bool vm = strstr(text, " hypervisor") != NULL;
+    bool sdbg = strstr(text, " sdbg") != NULL;
     long family = cpuinfo_number(text, "cpu family"), model = cpuinfo_number(text, "model");
     free(text);
 
     if (vendor == CPU_OTHER) {
-        for (size_t i = 0; i < 3; i++) set_check(silicon[i], FW_RESULT_NA, "Not an Intel or AMD CPU.");
+        for (size_t i = 0; i < ns; i++) set_check(silicon[i], FW_RESULT_NA, "Not an Intel or AMD CPU.");
     } else if (vm) {
         /* Hypervisors emulate or zero these registers, so any answer would be fiction. */
-        for (size_t i = 0; i < 3; i++)
+        for (size_t i = 0; i < ns; i++)
             set_check(silicon[i], FW_RESULT_UNKNOWN, "Virtual machine: silicon registers are emulated.");
     } else if (vendor == CPU_INTEL) {
         bool smm = check_intel_smm_lock(silicon[0], pci_dir, family, model);
         check_intel_smrr(silicon[1], msr_dir);
         bool bwp = check_intel_bios_wp(silicon[2], pci_dir);
         *unconfirmed = smm || bwp;
+        me_status_t me = read_me(mei_dir);
+        check_me_state(silicon[3], &me);
+        check_boot_guard(silicon[4], &me);
+        check_intel_debug(silicon[5], msr_dir, sdbg);
     } else {
         check_msr_bit(silicon[0], msr_dir, MSR_AMD_HWCR, HWCR_SMMLOCK, "SMM is locked (HWCR.SmmLock).",
                       "SMM is not locked (HWCR.SmmLock)");
         check_msr_bit(silicon[1], msr_dir, MSR_AMD_SMM_MASK, SMM_MASK_TVALID, "TSEG protects SMRAM.",
                       "TSEG protection is off");
         set_check(silicon[2], FW_RESULT_NA, "Checked on Intel only: AMD flash protection needs MMIO.");
+        set_check(silicon[3], FW_RESULT_NA, "Intel only.");
+        set_check(silicon[4], FW_RESULT_NA, "Intel only: AMD Platform Secure Boot is not read yet.");
+        check_amd_debug(silicon[5], ccp_dir);
     }
 }
 
@@ -1084,6 +1270,8 @@ booto_error_t firmware_audit(const firmware_paths_t *paths, firmware_report_t *o
     const char *tpm = (paths && paths->tpm_dir) ? paths->tpm_dir : "/sys/class/tpm/tpm0";
     const char *tpm_log = (paths && paths->tpm_log_path) ? paths->tpm_log_path
                                                          : "/sys/kernel/security/tpm0/binary_bios_measurements";
+    const char *mei = (paths && paths->mei_dir) ? paths->mei_dir : "/sys/class/mei/mei0";
+    const char *ccp = (paths && paths->ccp_dir) ? paths->ccp_dir : "/sys/bus/pci/drivers/ccp";
 
     struct stat sb;
     out->uefi_boot = stat(efi, &sb) == 0 && S_ISDIR(sb.st_mode);
@@ -1120,7 +1308,7 @@ booto_error_t firmware_audit(const firmware_paths_t *paths, firmware_report_t *o
     }
     check_iommu(&ck[FW_CHECK_IOMMU], acpi);
     check_thunderbolt(&ck[FW_CHECK_THUNDERBOLT_DMA], tb);
-    check_silicon(ck, &out->chipset_unconfirmed, cpuinfo, msr, pci);
+    check_silicon(ck, &out->chipset_unconfirmed, cpuinfo, msr, pci, mei, ccp);
     check_tpm_log(&ck[FW_CHECK_TPM_LOG], tpm, tpm_log);
 
     for (int i = 0; i < FW_CHECK_COUNT; i++) {

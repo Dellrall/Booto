@@ -30,11 +30,11 @@ static const uint8_t T_X509[16] = {
 };
 
 static char g_root[64];
-static char g_efi[96], g_acpi[96], g_tb[96], g_cpuinfo[96], g_msr[96], g_pci[96], g_tpm[96], g_tpmlog[96];
+static char g_efi[96], g_acpi[96], g_tb[96], g_cpuinfo[96], g_msr[96], g_pci[96], g_tpm[96], g_tpmlog[96], g_mei[96], g_ccp[96];
 static firmware_paths_t g_paths;
 
 #define CPUINFO_INTEL "vendor_id\t: GenuineIntel\ncpu family\t: 6\nmodel name\t: Intel(R) Core(TM) i7-8550U\n" \
-                      "model\t\t: 142\nflags\t\t: fpu vme msr\n"
+                      "model\t\t: 142\nflags\t\t: fpu vme msr sdbg\n"
 #define CPUINFO_AMD   "vendor_id\t: AuthenticAMD\nflags\t\t: fpu vme msr\n"
 #define CPUINFO_VM    "vendor_id\t: GenuineIntel\nflags\t\t: fpu vme msr hypervisor\n"
 
@@ -65,6 +65,10 @@ static void make_root(bool efi, bool acpi, bool tb) {
     snprintf(g_tpmlog, sizeof(g_tpmlog), "%s/tpmlog", g_root);
     g_paths.tpm_dir = g_tpm;          /* absent unless a test builds it: "No TPM." */
     g_paths.tpm_log_path = g_tpmlog;
+    snprintf(g_mei, sizeof(g_mei), "%s/mei", g_root);
+    snprintf(g_ccp, sizeof(g_ccp), "%s/ccp", g_root);
+    g_paths.mei_dir = g_mei;          /* absent unless a test builds it */
+    g_paths.ccp_dir = g_ccp;
     /* Default: a CPU the silicon checks do not cover, so they report n/a. */
     write_file(g_cpuinfo, "vendor_id\t: OtherVendor\n", 24);
 }
@@ -236,6 +240,20 @@ static void write_pci(const char *bdf, uint16_t did, uint16_t class_code, size_t
     write_file(path, cfg, len);
 }
 
+/* mei sysfs: six HFSTS words, one per line, and fw_ver "platform:major.minor.hotfix.build". */
+static void write_mei(uint32_t hfsts1, uint32_t hfsts6, const char *ver) {
+    char text[128], path[160];
+    mkdir(g_mei, 0755);
+    int n = snprintf(text, sizeof(text), "%08X\n00000000\n00000000\n00000000\n00000000\n%08X\n", hfsts1, hfsts6);
+    snprintf(path, sizeof(path), "%s/fw_status", g_mei);
+    write_file(path, text, (size_t)n);
+    snprintf(path, sizeof(path), "%s/fw_ver", g_mei);
+    write_file(path, ver, strlen(ver));
+}
+
+#define HFSTS1_NORMAL 0x90000245u       /* op mode 0, manufacturing mode off */
+#define HFSTS6_BG_ON  0x40000200u       /* verified boot + FPF SoC lock */
+
 static void build_intel_silicon(bool d_lck, uint8_t bios_cntl) {
     write_cpuinfo(CPUINFO_INTEL);
     write_pci("0000:00:00.0", 0x5914, 0x0600, 256, 0x88, d_lck ? 0x1A : 0x0A);
@@ -368,9 +386,11 @@ static void build_good_machine(void) {
     write_tb_domain("1\n");
     build_intel_silicon(true, 0x2A);
     build_tpm(true);
+    write_mei(HFSTS1_NORMAL, HFSTS6_BG_ON, "0:11.8.50.3425\n");
     for (int cpu = 0; cpu < 2; cpu++) {
         write_msr(cpu, 0xFE, 1u << 11);
         write_msr(cpu, 0x1F3, 0xFF800800u);
+        write_msr(cpu, 0xC80, 1u << 30);
     }
 }
 
@@ -695,6 +715,79 @@ static void test_amd_silicon(void) {
     ASSERT_TRUE(strstr(r.checks[FW_CHECK_SMRAM_RANGE].detail, "1 of 2 CPUs") != NULL, "names the CPU count");
     ASSERT_INT_EQ(r.checks[FW_CHECK_BIOS_WP].result, FW_RESULT_NA, "BIOS_CNTL is Intel only");
     TEST_PASS("test_amd_silicon");
+}
+
+static void test_me_boot_guard_debug(void) {
+    TEST_START("test_me_boot_guard_debug");
+    firmware_report_t r;
+    make_root(false, false, false);
+    build_intel_silicon(true, 0x2A);
+
+    /* No mei driver: unknown, never a pass. */
+    firmware_audit(&g_paths, &r);
+    ASSERT_INT_EQ(r.checks[FW_CHECK_ME_STATE].result, FW_RESULT_UNKNOWN, "no mei is unknown");
+    ASSERT_INT_EQ(r.checks[FW_CHECK_BOOT_GUARD].result, FW_RESULT_UNKNOWN, "no mei: boot guard unknown");
+
+    write_mei(HFSTS1_NORMAL | (1u << 4), HFSTS6_BG_ON, "0:11.8.50.3425\n");
+    firmware_audit(&g_paths, &r);
+    ASSERT_INT_EQ(r.checks[FW_CHECK_ME_STATE].result, FW_RESULT_FAIL, "manufacturing mode fails");
+    ASSERT_TRUE(strstr(r.checks[FW_CHECK_ME_STATE].detail, "11.8.50.3425") != NULL, "names the ME version");
+
+    write_mei(0x90040245u, HFSTS6_BG_ON, "0:11.8.50.3425\n");
+    firmware_audit(&g_paths, &r);
+    ASSERT_INT_EQ(r.checks[FW_CHECK_ME_STATE].result, FW_RESULT_FAIL, "security override fails");
+
+    write_mei(0x90030245u, 0x40000200u | (1u << 28), "0:12.0.90.2072\n");
+    firmware_audit(&g_paths, &r);
+    ASSERT_INT_EQ(r.checks[FW_CHECK_ME_STATE].result, FW_RESULT_PASS, "soft-disabled ME passes");
+    ASSERT_INT_EQ(r.checks[FW_CHECK_BOOT_GUARD].result, FW_RESULT_FAIL, "BG disabled fails");
+
+    write_mei(HFSTS1_NORMAL, 0x00000200u, "0:16.1.25.1865\n");
+    firmware_audit(&g_paths, &r);
+    ASSERT_INT_EQ(r.checks[FW_CHECK_BOOT_GUARD].result, FW_RESULT_FAIL, "unlocked fuses fail");
+    ASSERT_TRUE(strstr(r.checks[FW_CHECK_BOOT_GUARD].detail, "fuses") != NULL, "names the fuses");
+
+    /* An unconfirmed HFSTS6 layout is unknown, whatever the bits say. */
+    write_mei(HFSTS1_NORMAL, HFSTS6_BG_ON, "0:18.0.5.2141\n");
+    firmware_audit(&g_paths, &r);
+    ASSERT_INT_EQ(r.checks[FW_CHECK_BOOT_GUARD].result, FW_RESULT_UNKNOWN, "ME 18 is unknown");
+
+    /* Debug interface: enabled on one CPU fails, unlocked fails, no SDBG is n/a. */
+    write_msr(0, 0xC80, (1u << 30) | 1u);
+    write_msr(1, 0xC80, 1u << 30);
+    firmware_audit(&g_paths, &r);
+    ASSERT_INT_EQ(r.checks[FW_CHECK_DEBUG_LOCK].result, FW_RESULT_FAIL, "enabled debug fails");
+    ASSERT_TRUE(strstr(r.checks[FW_CHECK_DEBUG_LOCK].detail, "1 of 2 CPUs") != NULL, "names the CPU count");
+    write_msr(0, 0xC80, 0);
+    firmware_audit(&g_paths, &r);
+    ASSERT_INT_EQ(r.checks[FW_CHECK_DEBUG_LOCK].result, FW_RESULT_FAIL, "unlocked debug fails");
+    write_msr(0, 0xC80, 1u << 30);
+    firmware_audit(&g_paths, &r);
+    ASSERT_INT_EQ(r.checks[FW_CHECK_DEBUG_LOCK].result, FW_RESULT_PASS, "off and locked passes");
+    write_cpuinfo("vendor_id\t: GenuineIntel\ncpu family\t: 6\nmodel\t\t: 142\nflags\t\t: fpu msr\n");
+    firmware_audit(&g_paths, &r);
+    ASSERT_INT_EQ(r.checks[FW_CHECK_DEBUG_LOCK].result, FW_RESULT_NA, "no SDBG is n/a");
+    remove_tree(g_root);
+
+    /* AMD: the ccp driver reports the PSP debug lock. */
+    make_root(false, false, false);
+    write_cpuinfo(CPUINFO_AMD);
+    firmware_audit(&g_paths, &r);
+    ASSERT_INT_EQ(r.checks[FW_CHECK_DEBUG_LOCK].result, FW_RESULT_UNKNOWN, "no ccp is unknown");
+    ASSERT_INT_EQ(r.checks[FW_CHECK_ME_STATE].result, FW_RESULT_NA, "ME is Intel only");
+    char path[192];
+    mkdir(g_ccp, 0755);
+    snprintf(path, sizeof(path), "%s/0000:05:00.2", g_ccp);
+    mkdir(path, 0755);
+    snprintf(path, sizeof(path), "%s/0000:05:00.2/debug_lock_on", g_ccp);
+    write_file(path, "0\n", 2);
+    firmware_audit(&g_paths, &r);
+    ASSERT_INT_EQ(r.checks[FW_CHECK_DEBUG_LOCK].result, FW_RESULT_FAIL, "PSP debug unlocked fails");
+    write_file(path, "1\n", 2);
+    firmware_audit(&g_paths, &r);
+    ASSERT_INT_EQ(r.checks[FW_CHECK_DEBUG_LOCK].result, FW_RESULT_PASS, "PSP debug locked passes");
+    remove_tree(g_root);
+    TEST_PASS("test_me_boot_guard_debug");
 }
 
 static void test_silicon_unreadable(void) {
@@ -1025,6 +1118,7 @@ int main(void) {
     test_garbage_siglists();
     test_intel_silicon_unlocked();
     test_amd_silicon();
+    test_me_boot_guard_debug();
     test_silicon_unreadable();
     test_legacy_chipsets();
     test_tpm_log();
