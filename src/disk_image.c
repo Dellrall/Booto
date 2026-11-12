@@ -27,7 +27,9 @@ static bool write_all(int fd, const uint8_t *buf, size_t len) {
 }
 
 // Fills buf[0..len) from offset; a failed read retries per 4 KiB block and zero-fills what stays unreadable.
-static void read_chunk(int fd, uint8_t *buf, size_t len, off_t off, FILE **log, const char *dst, uint64_t *bad) {
+// *log_bad is set when an unreadable range could not be written to the log.
+static void read_chunk(int fd, uint8_t *buf, size_t len, off_t off, FILE **log, const char *dst, uint64_t *bad,
+                       bool *log_bad) {
     ssize_t n = pread(fd, buf, len, off);
     if (n == (ssize_t)len) return;
     for (size_t pos = 0; pos < len; pos += IMG_BLOCK) {
@@ -41,7 +43,7 @@ static void read_chunk(int fd, uint8_t *buf, size_t len, off_t off, FILE **log, 
             *log = fopen(path, "w");
             if (*log) fprintf(*log, "# unreadable ranges, zero-filled in the image: offset length (bytes)\n");
         }
-        if (*log) fprintf(*log, "%lld %zu\n", (long long)(off + (off_t)pos), blk);
+        if (!*log || fprintf(*log, "%lld %zu\n", (long long)(off + (off_t)pos), blk) < 0) *log_bad = true;
     }
 }
 
@@ -61,10 +63,10 @@ booto_error_t disk_image_acquire(const char *src, const char *dst, disk_image_re
     sha256_ctx_t sha;
     sha256_init(&sha);
     FILE *log = NULL;
-    bool ok = true;
+    bool ok = true, log_bad = false;
     for (off_t off = 0; ok && off < size; off += IMG_CHUNK) {
         size_t len = (uint64_t)(size - off) < IMG_CHUNK ? (size_t)(size - off) : IMG_CHUNK;
-        read_chunk(in, buf, len, off, &log, dst, &res->bad_bytes);
+        read_chunk(in, buf, len, off, &log, dst, &res->bad_bytes, &log_bad);
         sha256_update(&sha, buf, len);
         ok = write_all(out, buf, len);
         res->bytes += len;
@@ -72,10 +74,11 @@ booto_error_t disk_image_acquire(const char *src, const char *dst, disk_image_re
     }
     free(buf);
     close(in);
-    if (log) fclose(log);
+    if (log && (ferror(log) | fclose(log))) log_bad = true;
     ok = fsync(out) == 0 && ok;
     ok = close(out) == 0 && ok;
-    if (!ok) return BOOTO_ERR_IO;  // partial image kept for the examiner, but no .sha256 vouches for it
+    // Zero-filled ranges the log does not name are indistinguishable from evidence, so the image fails too.
+    if (!ok || log_bad) return BOOTO_ERR_IO;  // partial image kept for the examiner, but no .sha256 vouches for it
 
     uint8_t digest[32];
     sha256_final(&sha, digest);
