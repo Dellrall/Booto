@@ -17,6 +17,7 @@
 #include "reg_hive.h"
 #include "rules_loader.h"
 #include "hive_fixture.h"
+#include "windows_boot.h"
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -403,6 +404,17 @@ static void target_hive(const uint8_t *buf, size_t len) {
     if (reg_hive_open(g_hive, 0x1000 + len, &h) == BOOTO_OK) hive_walk(&h, reg_hive_root(&h), 0);
 }
 
+/* EVTX: file header and chunk tail fixed; mutations hit the chunk header and first records. */
+static uint8_t g_evtx[4096 + 65536];
+
+static void target_evtx(const uint8_t *buf, size_t len) {
+    memset(g_evtx + 4096, 0, FUZZ_MAX_LEN);
+    memcpy(g_evtx + 4096, buf, len);
+    uint64_t n;
+    (void)winboot_evtx_scan(g_evtx, sizeof(g_evtx), &n);
+    (void)winboot_evtx_scan(g_evtx, 4096 + len, &n);
+}
+
 static uint8_t g_seed_a[FUZZ_MAX_LEN];
 static uint8_t g_seed_b[FUZZ_MAX_LEN];
 
@@ -599,6 +611,29 @@ static void test_fuzz_reg_hive(void) {
     TEST_PASS("test_fuzz_reg_hive");
 }
 
+static void test_fuzz_evtx(void) {
+    TEST_START("test_fuzz_evtx");
+    memset(g_evtx, 0, sizeof(g_evtx));
+    memcpy(g_evtx, "ElfFile", 8);
+    memset(g_seed_a, 0, FUZZ_MAX_LEN);
+    memcpy(g_seed_a, "ElfChnk", 8);
+    uint64_t first = 1, last = 40;
+    memcpy(g_seed_a + 24, &first, 8);
+    memcpy(g_seed_a + 32, &last, 8);
+    memcpy(g_seed_a + 512, "**\0\0", 4);
+    static const char name[] = "LogFileCleared";
+    for (size_t i = 0; i < sizeof(name) - 1; i++) g_seed_a[700 + 2 * i] = (uint8_t)name[i];
+    memcpy(g_evtx + 4096, g_seed_a, FUZZ_MAX_LEN);
+    uint64_t n = 0;
+    ASSERT_INT_EQ(winboot_evtx_scan(g_evtx, sizeof(g_evtx), &n), 1, "EVTX seed holds a clear event");
+    ASSERT_TRUE(n == 40, "EVTX seed counts its records");
+
+    static const fuzz_region_t hot[] = {{0, 64}, {512, 8}, {700, 28}};
+    fuzz_seed_t seed = {g_seed_a, FUZZ_MAX_LEN, hot, 3};
+    ASSERT_TRUE(fuzz_run(target_evtx, &seed, 1, 0x9E3779B97F4A7C15ULL), "EVTX fuzz run");
+    TEST_PASS("test_fuzz_evtx");
+}
+
 int main(void) {
     logger_init(LOG_LEVEL_CRITICAL, NULL); // parsers log per call; keep 9k iterations quiet and fast
     printf("\n--- Running Deterministic Parser Mutation Fuzzer (%d iterations/parser) ---\n", FUZZ_ITERATIONS);
@@ -613,6 +648,7 @@ int main(void) {
     test_fuzz_ifd();
     test_fuzz_volatility();
     test_fuzz_reg_hive();
+    test_fuzz_evtx();
     TEST_SUMMARY();
     return 0;
 }

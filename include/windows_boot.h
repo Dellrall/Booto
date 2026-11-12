@@ -47,6 +47,9 @@ booto_error_t winboot_check_bcd(const char *esp, winboot_scan_result_t *res);
  * log; BOOTO_ERR_CORRUPT_DATA: malformed log. */
 booto_error_t winboot_measured_has(const char *root, const char *authenticode_hex, bool *found, char *log_name,
                                    size_t n);
+/* EVTX buffer: number of chunks holding a log-clear event (1102/104), -1 when it is not an EVTX file.
+ * *records gets the event count summed over valid chunks. */
+int winboot_evtx_scan(const uint8_t *buf, size_t len, uint64_t *records);
 void winboot_each_core_file(const char *root, void (*fn)(const char *path, void *user), void *user);
 
 #ifdef __cplusplus

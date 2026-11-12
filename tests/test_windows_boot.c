@@ -316,6 +316,61 @@ static void test_ransomware(void) {
     TEST_PASS("test_ransomware");
 }
 
+/* EVTX file: header plus one chunk with record ids 1..n; with_clear embeds the LogFileCleared element name. */
+static size_t build_evtx(uint8_t *b, uint64_t n, bool with_clear) {
+    memset(b, 0, 4096 + 65536);
+    memcpy(b, "ElfFile", 8);
+    uint8_t *c = b + 4096;
+    memcpy(c, "ElfChnk", 8);
+    uint64_t first = 1;
+    memcpy(c + 24, &first, 8);
+    memcpy(c + 32, &n, 8);
+    memcpy(c + 512, "**\0\0", 4);
+    if (with_clear) {
+        static const char name[] = "LogFileCleared";
+        for (size_t i = 0; i < sizeof(name) - 1; i++) c[700 + 2 * i] = (uint8_t)name[i];
+    }
+    return 4096 + 65536;
+}
+
+static void test_evtx(void) {
+    TEST_START("test_evtx");
+    uint8_t *b = calloc(1, 4096 + 65536);
+    uint64_t n = 0;
+    size_t len = build_evtx(b, 40, false);
+    ASSERT_INT_EQ(winboot_evtx_scan(b, len, &n), 0, "Normal log has no clear event");
+    ASSERT_TRUE(n == 40, "Records counted from the chunk header");
+    ASSERT_INT_EQ(winboot_evtx_scan(b, 100, &n), -1, "Truncated file is not EVTX");
+
+    winboot_scan_result_t *r = calloc(1, sizeof(*r));
+    mk("WINDOWS/system32/winevt");
+    mk("WINDOWS/system32/winevt/Logs");
+    put("WINDOWS/system32/winevt/Logs/Security.evtx", b, len);
+    put("WINDOWS/system32/winevt/Logs/System.evtx", b, len);
+    ASSERT_INT_EQ(winboot_scan_rootfs(g_root, r), BOOTO_OK, "Scan runs");
+    ASSERT_TRUE(!has_rule(r, "WIN_EVTX_LOG_CLEARED", "") && !has_rule(r, "WIN_EVTX_LOG_MISSING", ""),
+                "Intact logs are not flagged");
+
+    len = build_evtx(b, 1, true);
+    put("WINDOWS/system32/winevt/Logs/Security.evtx", b, len);
+    ASSERT_INT_EQ(winboot_scan_rootfs(g_root, r), BOOTO_OK, "Scan runs");
+    ASSERT_TRUE(has_rule(r, "WIN_EVTX_LOG_CLEARED", "1102"), "Security log clear flagged");
+    ASSERT_TRUE(!has_rule(r, "WIN_EVTX_LOG_CLEARED", "104"), "System log left alone");
+
+    char p[600];
+    snprintf(p, sizeof(p), "%s/WINDOWS/system32/winevt/Logs/Security.evtx", g_root);
+    unlink(p);
+    ASSERT_INT_EQ(winboot_scan_rootfs(g_root, r), BOOTO_OK, "Scan runs");
+    ASSERT_TRUE(has_rule(r, "WIN_EVTX_LOG_MISSING", "missing"), "Deleted Security log flagged");
+    snprintf(p, sizeof(p), "%s/WINDOWS/system32/winevt/Logs/System.evtx", g_root);
+    unlink(p);
+    snprintf(p, sizeof(p), "%s/WINDOWS/system32/winevt/Logs", g_root);
+    rmdir(p);
+    free(r);
+    free(b);
+    TEST_PASS("test_evtx");
+}
+
 int main(void) {
     printf("\n--- Running Windows Boot Engine Tests ---\n");
     if (!mkdtemp(g_root)) {
@@ -328,6 +383,7 @@ int main(void) {
     test_measured_boot();
     test_boot_start();
     test_bcd();
+    test_evtx();
     test_persistence();
     test_ransomware();
     char cmd[128];
