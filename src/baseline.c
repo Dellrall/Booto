@@ -72,6 +72,66 @@ void baseline_add_device(baseline_t *b, const char *label, const char *dev, size
     baseline_add_hash(b, label, sha256_head_hex(dev, bytes, hex) ? hex : UNREADABLE);
 }
 
+/* TSK mode string: "r/rrwxr-xr-x". */
+static void mode_str(mode_t m, char out[13]) {
+    char t = S_ISDIR(m) ? 'd' : S_ISLNK(m) ? 'l' : S_ISCHR(m) ? 'c' : S_ISBLK(m) ? 'b'
+           : S_ISFIFO(m) ? 'p' : S_ISSOCK(m) ? 's' : 'r';
+    static const char rwx[] = "rwxrwxrwx";
+    out[0] = t, out[1] = '/', out[2] = t == 'r' ? 'r' : t;
+    for (int i = 0; i < 9; i++) out[3 + i] = (m & (1u << (8 - i))) ? rwx[i] : '-';
+    if (m & S_ISUID) out[5] = (m & S_IXUSR) ? 's' : 'S';
+    if (m & S_ISGID) out[8] = (m & S_IXGRP) ? 's' : 'S';
+    if (m & S_ISVTX) out[11] = (m & S_IXOTH) ? 't' : 'T';
+    out[12] = '\0';
+}
+
+/* Target file names are hostile: one entry must stay one line with eleven fields. */
+static void put_name(FILE *fp, const char *s) {
+    for (const unsigned char *p = (const unsigned char *)s; *p; p++) {
+        if (*p < 0x20 || *p == 0x7f || *p == '|' || *p == '\\') fprintf(fp, "\\x%02x", *p);
+        else fputc(*p, fp);
+    }
+}
+
+static void body_walk(FILE *fp, const char *root, size_t rlen, dev_t dev, int depth) {
+    DIR *d = opendir(root);
+    if (!d) return;
+    struct dirent *de;
+    while ((de = readdir(d)) != NULL) {
+        if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0) continue;
+        char path[4096];
+        int w = snprintf(path, sizeof(path), "%s/%s", root, de->d_name);
+        if (w < 0 || (size_t)w >= sizeof(path)) continue;
+        struct stat st;
+        if (lstat(path, &st) != 0) continue;
+        char m[13];
+        mode_str(st.st_mode, m);
+        fputs("0|", fp);
+        put_name(fp, path + rlen);
+        /* shortcut: crtime is 0, statx btime would fill it; upgrade when a reviewer needs birth times */
+        fprintf(fp, "|%llu|%s|%u|%u|%lld|%lld|%lld|%lld|0\n", (unsigned long long)st.st_ino, m,
+                (unsigned)st.st_uid, (unsigned)st.st_gid, (long long)st.st_size, (long long)st.st_atime,
+                (long long)st.st_mtime, (long long)st.st_ctime);
+        if (S_ISDIR(st.st_mode) && st.st_dev == dev && depth < TREE_MAX_DEPTH)
+            body_walk(fp, path, rlen, dev, depth + 1);
+    }
+    closedir(d);
+}
+
+booto_error_t bodyfile_write(const char *root, const char *path) {
+    if (!root || !path) return BOOTO_ERR_INVALID_ARG;
+    struct stat st;
+    if (lstat(root, &st) != 0 || !S_ISDIR(st.st_mode)) return BOOTO_ERR_IO;
+    FILE *fp = fopen(path, "w");
+    if (!fp) return BOOTO_ERR_IO;
+    size_t rlen = strlen(root);
+    while (rlen > 1 && root[rlen - 1] == '/') rlen--;
+    if (rlen == 1) rlen = 0;            /* root "/" keeps its leading slash */
+    body_walk(fp, root, rlen, st.st_dev, 0);
+    bool ok = !ferror(fp);
+    return (fclose(fp) == 0 && ok) ? BOOTO_OK : BOOTO_ERR_IO;
+}
+
 booto_error_t baseline_write(const baseline_t *b, const char *path) {
     if (!b || !path) return BOOTO_ERR_INVALID_ARG;
     FILE *fp = fopen(path, "w");

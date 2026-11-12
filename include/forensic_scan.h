@@ -47,6 +47,7 @@ typedef struct {
     winboot_scan_result_t winboot;
     int total_threats;
     scan_verdict_t verdict;
+    bool bodyfile_written;      /* forensic_scan_set_bodyfile path holds the target timeline */
     bool firmware_ran;          /* device mode only; describes this machine, never the verdict */
     firmware_report_t firmware;
     int quarantined;            /* files exported to quarantine_zip; -1 when the archive could not be finished */
@@ -76,6 +77,8 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
 /* b non-NULL: later scans also hash the boot chain into b (first 1 MiB of the device, <root>/boot, an auto-found
  * ESP, Windows core files) before unmounting. NULL turns it off. Not thread-safe; set it before the scan. */
 void forensic_scan_set_baseline(baseline_t *b);
+/* Next scans also write a TSK bodyfile of the target root to path (NULL: none). */
+void forensic_scan_set_bodyfile(const char *path);
 const char *forensic_scan_module_name(scan_module_id_t id);
 const char *forensic_scan_status_str(scan_status_t s);
 const char *forensic_scan_verdict_str(scan_verdict_t v);

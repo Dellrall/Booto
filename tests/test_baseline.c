@@ -91,12 +91,53 @@ static void test_parse_rejects_bad_lines(void) {
     TEST_PASS("test_parse_rejects_bad_lines");
 }
 
+static void test_bodyfile(void) {
+    TEST_START("test_bodyfile");
+    char p[512], out[600];
+    snprintf(p, sizeof(p), "%s/etc", g_root);
+    mkdir(p, 0755);
+    put("etc/a|b\nc", "x");
+    snprintf(p, sizeof(p), "%s/etc/a|b\nc", g_root);
+    chmod(p, 04755);
+    snprintf(out, sizeof(out), "%s.body", g_root);
+
+    forensic_scan_report_t *r = calloc(1, sizeof(*r));
+    ASSERT_TRUE(r != NULL, "alloc");
+    if (!r) return;
+    forensic_scan_set_bodyfile(out);
+    forensic_scan_run(NULL, g_root, NULL, NULL, NULL, NULL, r);
+    forensic_scan_set_bodyfile(NULL);
+    ASSERT_TRUE(r->bodyfile_written, "scan wrote the bodyfile");
+    free(r);
+
+    char text[2048] = "";
+    FILE *fp = fopen(out, "r");
+    size_t n = fp ? fread(text, 1, sizeof(text) - 1, fp) : 0;
+    if (fp) fclose(fp);
+    text[n] = '\0';
+    ASSERT_TRUE(strstr(text, "0|/etc|") != NULL, "directory is /-rooted");
+    const char *line = strstr(text, "0|/etc/a\\x7cb\\x0ac|");
+    ASSERT_TRUE(line != NULL, "pipe and newline escaped");
+    ASSERT_TRUE(line && strstr(line, "|r/rrwsr-xr-x|") != NULL, "setuid shown in mode");
+    int pipes = 0;
+    for (const char *s = line; s && *s && *s != '\n'; s++) pipes += *s == '|';
+    ASSERT_INT_EQ(pipes, 10, "eleven fields on one line");
+    ASSERT_INT_EQ(bodyfile_write("/nonexistent-booto", out), BOOTO_ERR_IO, "missing root fails");
+
+    unlink(out);
+    unlink(p);
+    snprintf(p, sizeof(p), "%s/etc", g_root);
+    rmdir(p);
+    TEST_PASS("test_bodyfile");
+}
+
 int main(void) {
     logger_init(LOG_LEVEL_CRITICAL, NULL);
     printf("\n--- Running Boot Chain Baseline Tests ---\n");
     if (!mkdtemp(g_root)) return 1;
     test_scan_records_and_compares();
     test_parse_rejects_bad_lines();
+    test_bodyfile();
     rmdir(g_root);
     TEST_SUMMARY();
     return 0;
