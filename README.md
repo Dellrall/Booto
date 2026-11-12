@@ -42,6 +42,7 @@ Built with **C11**, Booto runs from a trusted Debian Live USB environment so the
 ## Quick Start & Build Instructions
 
 Full requirements and step-by-step USB setup, boot and scan instructions: [docs/SETUP.md](docs/SETUP.md).
+What a verdict covers and what Booto cannot check: [docs/FAQ.md](docs/FAQ.md).
 
 Each release ISO carries a GitHub build provenance attestation. To check that a downloaded ISO was built by this repository's CI and not altered: `gh attestation verify booto-<version>-amd64.iso --repo Dellrall/Booto`.
 

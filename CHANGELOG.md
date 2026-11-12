@@ -21,6 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Windows persistence triage on the system volume: Winlogon Shell/Userinit hijacks, IFEO debuggers (CRITICAL on accessibility programs), AppInit_DLLs, Run/RunOnce values and auto-start services that run a script host or a user-writable path, the sticky keys swap, and programs in Startup folders (`WIN_*` rules in `booto-checks(7)`).
 - Ransomware signs on Windows volumes: 10 or more documents renamed to `<name>.<type>.<ext>` in a user folder (`WIN_RANSOM_ENCRYPTED`), a ransom note naming a `.onion` site (`WIN_RANSOM_NOTE`), and BCD automatic recovery turned off (`WIN_RANSOM_RECOVERY_OFF`).
 
+### Fixed
+- An engine that was skipped (disabled, no raw device, unsupported package database) now makes the verdict INCOMPLETE instead of CLEAN; an engine that does not apply to the target (Windows engine on Linux, no initramfs, no ESP) shows `N/A` and leaves the verdict alone.
+- A CLEAN verdict now says it does not clear the firmware, in the CLI, the TUI and `booto(1)`.
+- `setup_usb.sh` checks the target's model, size and serial again right before wiping, and stops if the disk at that path changed after you confirmed it.
+
+### Documentation
+- `docs/FAQ.md` answers review questions Booto cannot fix in code: what CLEAN covers, Authenticode and catalog-signed driver limits, packed-EFI heuristics, read-only guarantees, the USB installer and how detection was tested.
+
 ## [1.10.0-beta] - 2026-11-12
 
 ### Added
