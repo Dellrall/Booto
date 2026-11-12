@@ -69,7 +69,7 @@ typedef struct {
     const char *tpm_dir;       /* holds pcr-sha256/<n> */
     const char *tpm_log_path;  /* TCG PC Client binary event log */
     const char *mei_dir;       /* Intel ME: fw_status, fw_ver */
-    const char *ccp_dir;       /* AMD security processor driver: <bdf>/debug_lock_on */
+    const char *ccp_dir;       /* AMD security processor driver: <bdf>/{debug_lock_on,fused_part,rom_armor_enforced} */
 } firmware_paths_t;
 
 /**

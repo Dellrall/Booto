@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- On AMD, the firmware audit now reads ROM Armor (`rom_armor_enforced`) as BIOS write protection and Platform Secure Boot (`fused_part`) as verified boot, from the ccp driver; both were reported N/A before.
+
 ## [1.10.0-beta] - 2026-11-12
 
 ### Added
