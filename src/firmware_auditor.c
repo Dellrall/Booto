@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #if defined(__x86_64__) || defined(__i386__)
@@ -71,6 +72,9 @@
 #define BC_BIOSWE               0x01u
 #define BC_BLE                  0x02u
 #define BC_SMM_BWP              0x20u
+#define SPI_HSFS_OFFSET         0x04u   /* SPIBAR (BAR0 of 00:1f.5) hardware sequencing flash status */
+#define HSFS_FLOCKDN            0x8000u
+#define EFI_VAR_RUNTIME_ACCESS  0x04u
 
 /* MSR numbers are file offsets into /dev/cpu/N/msr; AMD ones exceed 2^31. */
 _Static_assert(sizeof(off_t) >= 8, "off_t must hold 64-bit MSR offsets");
@@ -142,6 +146,7 @@ static const char *const CHECK_NAMES[FW_CHECK_COUNT] = {
     "2023 Microsoft CA in db",
     "Shim MOK keys known",
     "No pending BootNext",
+    "Boot-time variables hidden",
     "IOMMU described (DMAR/IVRS)",
     "Thunderbolt DMA protection",
     "SMM locked",
@@ -151,6 +156,9 @@ static const char *const CHECK_NAMES[FW_CHECK_COUNT] = {
     "Intel ME normal mode",
     "Boot Guard verified boot",
     "CPU debug interface locked",
+    "SPI flash config locked",
+    "Flash replay protection",
+    "Firmware rollback protection",
 };
 
 typedef struct {
@@ -579,6 +587,51 @@ static void check_boot_entry(fw_check_t *c, const char *dir) {
     free(next.buf);
 }
 
+/* efivarfs lists only runtime variables; one without RUNTIME_ACCESS means the firmware leaks boot-time state. */
+static void check_bs_vars(fw_check_t *c, const char *dir) {
+    DIR *d = opendir(dir);
+    if (!d) {
+        c->result = FW_RESULT_UNKNOWN;
+        snprintf(c->detail, sizeof(c->detail), "Could not list UEFI variables: %s.", strerror(errno));
+        return;
+    }
+    int n = 0, bad = 0;
+    char first[64] = "";
+    struct dirent *de;
+    while ((de = readdir(d)) != NULL) {
+        if (de->d_name[0] == '.') continue;
+        char path[4096];
+        uint8_t attr[4];
+        int w = snprintf(path, sizeof(path), "%s/%s", dir, de->d_name);
+        if (w < 0 || (size_t)w >= sizeof(path)) continue;
+        int fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+        if (fd < 0) continue;
+        ssize_t r = read(fd, attr, sizeof(attr));
+        close(fd);
+        if (r != (ssize_t)sizeof(attr)) continue;
+        n++;
+        if (rd_le32(attr) & EFI_VAR_RUNTIME_ACCESS) continue;
+        if (bad++ == 0) {
+            size_t i = 0;
+            for (; i < sizeof(first) - 1 && de->d_name[i]; i++)   /* names come from the firmware: printable only */
+                first[i] = (de->d_name[i] >= 0x20 && de->d_name[i] < 0x7f) ? de->d_name[i] : '?';
+            first[i] = '\0';
+        }
+    }
+    closedir(d);
+    if (bad) {
+        c->result = FW_RESULT_FAIL;
+        snprintf(c->detail, sizeof(c->detail),
+                 "%d boot-time UEFI variable%s readable after boot (first: %.40s): firmware leaks them.",
+                 bad, bad == 1 ? " is" : "s are", first);
+    } else if (n) {
+        c->result = FW_RESULT_PASS;
+        snprintf(c->detail, sizeof(c->detail), "All %d readable UEFI variables are runtime variables.", n);
+    } else {
+        set_check(c, FW_RESULT_UNKNOWN, "No UEFI variable could be read.");
+    }
+}
+
 static void check_iommu(fw_check_t *c, const char *acpi_dir) {
     static const char *const tables[2] = { "DMAR", "IVRS" };
     static const char *const labels[2] = { "Intel VT-d (DMAR)", "AMD-Vi (IVRS)" };
@@ -858,6 +911,43 @@ static bool check_intel_bios_wp(fw_check_t *c, const char *pci_dir) {
     return legacy != NULL;
 }
 
+/* FLOCKDN in SPIBAR HSFS: once set, the SPI protected ranges and access permissions cannot change until reset.
+ * Read only: the BAR is mapped PROT_READ and one status register is loaded. */
+static void check_intel_flockdn(fw_check_t *c, const char *pci_dir) {
+    size_t len;
+    uint8_t *cfg = read_intel_pci(c, pci_dir, "0000:00:1f.5", PCI_CLASS_SPI,
+                                  "SPI controller hidden by firmware, or a chipset older than the 100 Series.", &len);
+    if (!cfg) return;
+    free(cfg);
+    char path[4096];
+    int w = snprintf(path, sizeof(path), "%s/0000:00:1f.5/resource0", pci_dir);
+    int fd = (w < 0 || (size_t)w >= sizeof(path)) ? -1 : open(path, O_RDONLY | O_CLOEXEC);
+    struct stat st;
+    void *m = MAP_FAILED;
+    int err = fd < 0 ? errno : 0;
+    if (fd >= 0) {
+        if (fstat(fd, &st) != 0) err = errno;
+        else if (st.st_size < (off_t)(SPI_HSFS_OFFSET + 2)) err = EINVAL;
+        else if ((m = mmap(NULL, SPI_HSFS_OFFSET + 2, PROT_READ, MAP_SHARED, fd, 0)) == MAP_FAILED) err = errno;
+        close(fd);
+    }
+    if (err == EPERM || err == EACCES) {
+        set_check(c, FW_RESULT_UNKNOWN, "Needs root, and no kernel lockdown, to read the SPI controller.");
+        return;
+    }
+    if (err) {
+        c->result = FW_RESULT_UNKNOWN;
+        snprintf(c->detail, sizeof(c->detail), "Could not map the SPI controller registers: %s.", strerror(err));
+        return;
+    }
+    uint16_t hsfs = *(volatile const uint16_t *)((const uint8_t *)m + SPI_HSFS_OFFSET);
+    munmap(m, SPI_HSFS_OFFSET + 2);
+    if (hsfs & HSFS_FLOCKDN)
+        set_check(c, FW_RESULT_PASS, "SPI flash protections are locked down (HSFS.FLOCKDN).");
+    else
+        set_check(c, FW_RESULT_FAIL, "SPI flash protections are not locked (HSFS.FLOCKDN clear): the OS can lift them.");
+}
+
 /* Value of the first "key<blanks>: N" line, or -1; skips longer keys such as "model name". */
 static long cpuinfo_number(const char *s, const char *key) {
     size_t klen = strlen(key);
@@ -1033,8 +1123,9 @@ static void check_ccp_flag(fw_check_t *c, const char *ccp_dir, const char *attr,
 
 static void check_silicon(fw_check_t *ck, bool *unconfirmed, const char *cpuinfo, const char *msr_dir,
                           const char *pci_dir, const char *mei_dir, const char *ccp_dir) {
-    fw_check_t *const silicon[6] = { &ck[FW_CHECK_SMM_LOCK], &ck[FW_CHECK_SMRAM_RANGE], &ck[FW_CHECK_BIOS_WP],
-                                     &ck[FW_CHECK_ME_STATE], &ck[FW_CHECK_BOOT_GUARD], &ck[FW_CHECK_DEBUG_LOCK] };
+    fw_check_t *const silicon[9] = { &ck[FW_CHECK_SMM_LOCK], &ck[FW_CHECK_SMRAM_RANGE], &ck[FW_CHECK_BIOS_WP],
+                                     &ck[FW_CHECK_ME_STATE], &ck[FW_CHECK_BOOT_GUARD], &ck[FW_CHECK_DEBUG_LOCK],
+                                     &ck[FW_CHECK_FLASH_LOCK], &ck[FW_CHECK_FLASH_REPLAY], &ck[FW_CHECK_ROLLBACK] };
     const size_t ns = sizeof(silicon) / sizeof(silicon[0]);
     uint8_t *buf;
     size_t len;
@@ -1074,6 +1165,9 @@ static void check_silicon(fw_check_t *ck, bool *unconfirmed, const char *cpuinfo
         check_me_state(silicon[3], &me);
         check_boot_guard(silicon[4], &me);
         check_intel_debug(silicon[5], msr_dir, sdbg);
+        check_intel_flockdn(silicon[6], pci_dir);
+        set_check(silicon[7], FW_RESULT_NA, "AMD only: Intel does not report flash replay protection to the OS.");
+        set_check(silicon[8], FW_RESULT_NA, "AMD only: Intel does not report rollback protection to the OS.");
     } else {
         check_msr_bit(silicon[0], msr_dir, MSR_AMD_HWCR, HWCR_SMMLOCK, "SMM is locked (HWCR.SmmLock).",
                       "SMM is not locked (HWCR.SmmLock)");
@@ -1086,6 +1180,11 @@ static void check_silicon(fw_check_t *ck, bool *unconfirmed, const char *cpuinfo
                        "AMD Platform Secure Boot is not fused: firmware is not verified");
         check_ccp_flag(silicon[5], ccp_dir, "debug_lock_on", "AMD security processor debug is locked.",
                        "AMD security processor debug is not locked");
+        set_check(silicon[6], FW_RESULT_NA, "Intel only: AMD guards the flash with ROM Armor.");
+        check_ccp_flag(silicon[7], ccp_dir, "rpmc_production_enabled", "Replay-protected flash (RPMC) is enabled.",
+                       "Replay-protected flash (RPMC) is off: an old flash image can be replayed");
+        check_ccp_flag(silicon[8], ccp_dir, "anti_rollback_status", "AMD firmware anti-rollback is on.",
+                       "AMD firmware anti-rollback is off: older, vulnerable firmware can be flashed");
     }
 }
 
@@ -1284,7 +1383,7 @@ booto_error_t firmware_audit(const firmware_paths_t *paths, firmware_report_t *o
     out->uefi_boot = stat(efi, &sb) == 0 && S_ISDIR(sb.st_mode);
     fw_check_t *ck = out->checks;
     if (!out->uefi_boot) {
-        for (int i = FW_CHECK_SECURE_BOOT; i <= FW_CHECK_BOOT_ENTRY; i++)
+        for (int i = FW_CHECK_SECURE_BOOT; i <= FW_CHECK_BS_VARS; i++)
             set_check(&ck[i], FW_RESULT_NA, "Booted in BIOS mode: no UEFI variables.");
     } else {
         check_flag_var(&ck[FW_CHECK_SECURE_BOOT], efi, "SecureBoot", 1, "Secure Boot is enabled.",
@@ -1307,6 +1406,7 @@ booto_error_t firmware_audit(const firmware_paths_t *paths, firmware_report_t *o
         check_mok(&ck[FW_CHECK_MOK], &mok);
         free(mok.buf);
         check_boot_entry(&ck[FW_CHECK_BOOT_ENTRY], efi);
+        check_bs_vars(&ck[FW_CHECK_BS_VARS], efi);
 
         free(pk.buf);
         free(kek.buf);

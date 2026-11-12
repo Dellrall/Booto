@@ -26,6 +26,7 @@ typedef enum {
     FW_CHECK_DB_2023,          /* "2023 Microsoft CA in db" */
     FW_CHECK_MOK,              /* "Shim MOK keys known" */
     FW_CHECK_BOOT_ENTRY,       /* "No pending BootNext" */
+    FW_CHECK_BS_VARS,          /* "Boot-time variables hidden" */
     FW_CHECK_IOMMU,            /* "IOMMU described (DMAR/IVRS)" */
     FW_CHECK_THUNDERBOLT_DMA,  /* "Thunderbolt DMA protection" */
     FW_CHECK_SMM_LOCK,         /* "SMM locked" */
@@ -35,6 +36,9 @@ typedef enum {
     FW_CHECK_ME_STATE,         /* "Intel ME normal mode" */
     FW_CHECK_BOOT_GUARD,       /* "Boot Guard verified boot" */
     FW_CHECK_DEBUG_LOCK,       /* "CPU debug interface locked" */
+    FW_CHECK_FLASH_LOCK,       /* "SPI flash config locked" */
+    FW_CHECK_FLASH_REPLAY,     /* "Flash replay protection" */
+    FW_CHECK_ROLLBACK,         /* "Firmware rollback protection" */
     FW_CHECK_COUNT
 } fw_check_id_t;
 
@@ -69,7 +73,7 @@ typedef struct {
     const char *tpm_dir;       /* holds pcr-sha256/<n> */
     const char *tpm_log_path;  /* TCG PC Client binary event log */
     const char *mei_dir;       /* Intel ME: fw_status, fw_ver */
-    const char *ccp_dir;       /* AMD security processor driver: <bdf>/{debug_lock_on,fused_part,rom_armor_enforced} */
+    const char *ccp_dir;       /* AMD security processor driver: <bdf>/{debug_lock_on,fused_part,rom_armor_enforced,...} */
 } firmware_paths_t;
 
 /**

@@ -514,6 +514,11 @@ trusted without a signature are reported.
 .B No pending BootNext
 No one-time boot entry is waiting to run.
 .TP
+.B Boot-time variables hidden
+Every variable efivarfs lists has the RUNTIME_ACCESS attribute. A boot-time
+only variable still readable after boot means the firmware leaks pre-OS state
+to the OS (fwupd Uefi.BootserviceVars).
+.TP
 .B IOMMU described (DMAR/IVRS)
 The firmware describes an IOMMU, so DMA attacks can be blocked. Needs root.
 .TP
@@ -548,6 +553,19 @@ locked, or a USB debug probe (DCI) can take over the CPU. On AMD, the ccp
 driver's
 .I debug_lock_on
 must be 1.
+.TP
+.B SPI flash config locked
+Intel only: the SPI controller's HSFS.FLOCKDN bit must be set, so the OS cannot
+lift the flash protected ranges until reset. Read from BAR0 of 00:1f.5
+(mapped read-only); needs root and no kernel lockdown, else unknown.
+.TP
+.BR "Flash replay protection" ", " "Firmware rollback protection"
+AMD only: the ccp driver's
+.I rpmc_production_enabled
+and
+.I anti_rollback_status
+must be 1, so an old flash image cannot be replayed and older firmware cannot
+be flashed. Intel reports neither to the OS (N/A).
 .PP
 With
 .BR \-x ,

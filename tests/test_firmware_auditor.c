@@ -258,6 +258,11 @@ static void build_intel_silicon(bool d_lck, uint8_t bios_cntl) {
     write_cpuinfo(CPUINFO_INTEL);
     write_pci("0000:00:00.0", 0x5914, 0x0600, 256, 0x88, d_lck ? 0x1A : 0x0A);
     write_pci("0000:00:1f.5", 0x9D24, 0x0C80, 256, 0xDC, bios_cntl);
+    uint8_t spibar[8] = {0};
+    spibar[5] = d_lck ? 0x80 : 0x00;   /* HSFS.FLOCKDN follows the SMM lock in these fixtures */
+    char path[192];
+    snprintf(path, sizeof(path), "%s/0000:00:1f.5/resource0", g_pci);
+    write_file(path, spibar, sizeof(spibar));
 }
 
 /* ---- TPM event log fixture (crypto-agile: SHA-1 + SHA-256 banks) ---- */
@@ -404,7 +409,8 @@ static void test_good_machine(void) {
     ASSERT_INT_EQ(err, BOOTO_OK, "audit returns OK");
     ASSERT_TRUE(r.uefi_boot, "efivars dir means UEFI boot");
     for (int i = 0; i < FW_CHECK_COUNT; i++)
-        ASSERT_INT_EQ(r.checks[i].result, FW_RESULT_PASS, firmware_check_name((fw_check_id_t)i));
+        ASSERT_INT_EQ(r.checks[i].result, i == FW_CHECK_FLASH_REPLAY || i == FW_CHECK_ROLLBACK ? FW_RESULT_NA : FW_RESULT_PASS,
+                      firmware_check_name((fw_check_id_t)i));
     ASSERT_INT_EQ(r.fail_count, 0, "no failures");
     ASSERT_INT_EQ(r.unknown_count, 0, "no unknowns");
     ASSERT_TRUE(strstr(r.checks[FW_CHECK_PLATFORM_KEY].detail, "Contoso PK") != NULL, "PK CN in detail");
@@ -536,6 +542,25 @@ static void test_insecure_keys(void) {
     ASSERT_TRUE(strstr(r.checks[FW_CHECK_IOMMU].detail, "not set") != NULL, "opt-in flag clear");
     ASSERT_INT_EQ(r.fail_count, 4, "four failures");
     TEST_PASS("test_insecure_keys");
+}
+
+static void test_bs_vars(void) {
+    TEST_START("test_bs_vars");
+    make_root(true, false, false);
+    static const uint8_t data[5] = { 0x03, 0, 0, 0, 0x01 };   /* NV + BS, no RUNTIME_ACCESS */
+    write_u16_var("BootOrder", 1);
+    char path[256];
+    snprintf(path, sizeof(path), "%s/Leak\x1bKey-%s", g_efi, GLOBAL_GUID);
+    write_file(path, data, sizeof(data));
+    firmware_report_t r;
+    firmware_audit(&g_paths, &r);
+    ASSERT_INT_EQ(r.checks[FW_CHECK_BS_VARS].result, FW_RESULT_FAIL, "boot-time-only variable fails");
+    ASSERT_TRUE(strstr(r.checks[FW_CHECK_BS_VARS].detail, "Leak?Key") != NULL, "names it, escape sanitised");
+    unlink(path);
+    firmware_audit(&g_paths, &r);
+    remove_tree(g_root);
+    ASSERT_INT_EQ(r.checks[FW_CHECK_BS_VARS].result, FW_RESULT_PASS, "runtime variables pass");
+    TEST_PASS("test_bs_vars");
 }
 
 static void test_bios_boot(void) {
@@ -681,6 +706,7 @@ static void test_intel_silicon_unlocked(void) {
     ASSERT_INT_EQ(r.checks[FW_CHECK_BIOS_WP].result, FW_RESULT_FAIL, "BLE without SMM_BWP fails");
     ASSERT_TRUE(strstr(r.checks[FW_CHECK_BIOS_WP].detail, "BIOS lock on, SMM write protection off") != NULL,
                 "names the missing bit");
+    ASSERT_INT_EQ(r.checks[FW_CHECK_FLASH_LOCK].result, FW_RESULT_FAIL, "FLOCKDN clear fails");
 
     /* Both locks on but BIOSWE still set: the flash is writable now. */
     build_intel_silicon(false, 0x23);
@@ -794,6 +820,15 @@ static void test_me_boot_guard_debug(void) {
     firmware_audit(&g_paths, &r);
     ASSERT_INT_EQ(r.checks[FW_CHECK_BIOS_WP].result, FW_RESULT_FAIL, "ROM Armor off fails");
     ASSERT_INT_EQ(r.checks[FW_CHECK_BOOT_GUARD].result, FW_RESULT_PASS, "PSB fused passes");
+    ASSERT_INT_EQ(r.checks[FW_CHECK_FLASH_LOCK].result, FW_RESULT_NA, "FLOCKDN is Intel only");
+    ASSERT_INT_EQ(r.checks[FW_CHECK_ROLLBACK].result, FW_RESULT_UNKNOWN, "no anti_rollback_status is unknown");
+    snprintf(path, sizeof(path), "%s/0000:05:00.2/rpmc_production_enabled", g_ccp);
+    write_file(path, "0\n", 2);
+    snprintf(path, sizeof(path), "%s/0000:05:00.2/anti_rollback_status", g_ccp);
+    write_file(path, "1\n", 2);
+    firmware_audit(&g_paths, &r);
+    ASSERT_INT_EQ(r.checks[FW_CHECK_FLASH_REPLAY].result, FW_RESULT_FAIL, "RPMC off fails");
+    ASSERT_INT_EQ(r.checks[FW_CHECK_ROLLBACK].result, FW_RESULT_PASS, "anti-rollback on passes");
     remove_tree(g_root);
     TEST_PASS("test_me_boot_guard_debug");
 }
@@ -810,6 +845,7 @@ static void test_silicon_unreadable(void) {
     ASSERT_INT_EQ(r.checks[FW_CHECK_SMRAM_RANGE].result, FW_RESULT_UNKNOWN, "missing msr device is unknown");
     ASSERT_TRUE(strstr(r.checks[FW_CHECK_SMRAM_RANGE].detail, "msr kernel module") != NULL, "names the module");
     ASSERT_INT_EQ(r.checks[FW_CHECK_BIOS_WP].result, FW_RESULT_UNKNOWN, "hidden SPI controller is unknown");
+    ASSERT_INT_EQ(r.checks[FW_CHECK_FLASH_LOCK].result, FW_RESULT_UNKNOWN, "hidden SPI controller: FLOCKDN unknown");
 
     /* Fully readable registers inside a VM are still emulated: unknown, not pass. */
     build_intel_silicon(true, 0x2A);
@@ -1148,6 +1184,7 @@ int main(void) {
     test_ivrs_and_tb_off();
     test_garbage_siglists();
     test_intel_silicon_unlocked();
+    test_bs_vars();
     test_amd_silicon();
     test_me_boot_guard_debug();
     test_silicon_unreadable();
