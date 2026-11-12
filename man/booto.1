@@ -241,6 +241,39 @@ are skipped and counted. ext4, XFS and btrfs are not supported.
 The result is printed and is not part of the verdict.
 Write to the report partition or another disk, never to the device being read.
 .TP
+.BI \-\-case\-id " id"
+With
+.BR \-p :
+the case ID, also the report file name
+.RI ( case_ id .json ).
+Only ASCII letters, digits,
+.B \-
+and
+.B _
+are allowed, up to 50; anything else and no report is written.
+Default:
+.BI CASE\- YYYYMMDD \- HHMMSS
+in UTC.
+.TP
+.BI \-\-examiner " name"
+With
+.BR \-p :
+the examiner named on the report. Default:
+.BR $USER .
+.TP
+.BI \-\-evidence\-number " n"
+With
+.BR \-p :
+the exhibit or evidence tag of the scanned disk, written on the report.
+.TP
+.BI \-\-notes " text"
+With
+.BR \-p :
+free-text notes written on the report, up to 255 bytes.
+The report also records the disk model and serial number that sysfs gives for
+.BR \-t ,
+next to the SHA-256 of its first 1 MiB before and after the scan.
+.TP
 .BI \-\-hashlist " file"
 CLI mode. Write the SHA-256 of every regular file with an execute bit under
 the scanned root to

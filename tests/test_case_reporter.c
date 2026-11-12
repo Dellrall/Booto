@@ -113,15 +113,22 @@ static void test_json_and_markdown_escaping(void) {
     forensic_case_summary_t sum;
     fill_summary(&sum, "ESC-1");
     snprintf(sum.examiner, sizeof(sum.examiner), "a\"b\\c\nd|e`f");
+    snprintf(sum.evidence_number, sizeof(sum.evidence_number), "EX-07");
+    snprintf(sum.notes, sizeof(sum.notes), "seized|laptop");
+    snprintf(sum.target_serial, sizeof(sum.target_serial), "S4EVNX0N");
 
     char path[512], buf[4096];
     ASSERT_INT_EQ(case_report_generate_json(&sum, g_dir, path, sizeof(path)), BOOTO_OK, "JSON generation must succeed");
     slurp(path, buf, sizeof(buf));
     ASSERT_TRUE(strstr(buf, "\"examiner\":\"a\\\"b\\\\c\\nd|e`f\"") != NULL, "JSON must escape quote, backslash and newline");
+    ASSERT_TRUE(strstr(buf, "\"evidence_number\":\"EX-07\",\"notes\":\"seized|laptop\"") != NULL, "JSON carries evidence number and notes");
+    ASSERT_TRUE(strstr(buf, "\"target_serial\":\"S4EVNX0N\"") != NULL, "JSON carries the disk serial");
 
     ASSERT_INT_EQ(case_report_generate_markdown(&sum, g_dir, path, sizeof(path)), BOOTO_OK, "Markdown generation must succeed");
     slurp(path, buf, sizeof(buf));
     ASSERT_TRUE(strstr(buf, "`a\"b\\c d\\|e'f`") != NULL, "Markdown cell must neutralise newline, pipe and backtick");
+    ASSERT_TRUE(strstr(buf, "**Evidence number:** `EX-07`") != NULL && strstr(buf, "serial `S4EVNX0N`") != NULL,
+                "Markdown carries evidence number and serial");
     TEST_PASS("test_json_and_markdown_escaping");
 }
 

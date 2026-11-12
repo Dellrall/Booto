@@ -609,6 +609,30 @@ static booto_severity_t highest_severity(const forensic_scan_report_t *r) {
     return max;
 }
 
+/* Read a sysfs attribute of the disk behind /dev/<name>: a partition's own dir has no device/, its parent's has.
+ * skip drops the 4-byte header of a SCSI VPD page 0x80. Keeps printable ASCII only, trimmed. */
+static void disk_attr(const char *dev, const char *attr, size_t skip, char *out, size_t size) {
+    out[0] = '\0';
+    const char *name = strrchr(dev, '/');
+    name = name ? name + 1 : dev;
+    if (!name[0] || strchr(name, '.')) return;
+    char path[256], buf[128];
+    FILE *fp = NULL;
+    for (int up = 0; up < 2 && !fp; up++) {
+        snprintf(path, sizeof(path), "/sys/class/block/%.64s/%sdevice/%s", name, up ? "../" : "", attr);
+        fp = fopen(path, "rb");
+    }
+    if (!fp) return;
+    size_t n = fread(buf, 1, sizeof(buf), fp);
+    fclose(fp);
+    size_t o = 0;
+    for (size_t i = skip; i < n && o + 1 < size; i++)
+        if (buf[i] > 0x20 && buf[i] < 0x7f) out[o++] = buf[i];
+        else if (buf[i] == ' ' && o > 0) out[o++] = ' ';
+    while (o > 0 && out[o - 1] == ' ') o--;
+    out[o] = '\0';
+}
+
 void forensic_scan_fill_case_summary(const forensic_scan_report_t *r, const char *case_id, const char *examiner,
                                      forensic_case_summary_t *sum) {
     if (!r || !sum) return;
@@ -623,6 +647,11 @@ void forensic_scan_fill_case_summary(const forensic_scan_report_t *r, const char
     snprintf(sum->examiner, sizeof(sum->examiner), "%.63s", (examiner && examiner[0]) ? examiner : "unknown");
     snprintf(sum->target_disk, sizeof(sum->target_disk), "%.127s", r->target_dev[0] ? r->target_dev : r->scan_root);
     snprintf(sum->target_fs, sizeof(sum->target_fs), "unknown");
+    if (r->target_dev[0]) {
+        disk_attr(r->target_dev, "model", 0, sum->target_model, sizeof(sum->target_model));
+        disk_attr(r->target_dev, "serial", 0, sum->target_serial, sizeof(sum->target_serial));  // NVMe
+        if (!sum->target_serial[0]) disk_attr(r->target_dev, "vpd_pg80", 4, sum->target_serial, sizeof(sum->target_serial));
+    }
 
     if (have_time) strftime(sum->timestamp, sizeof(sum->timestamp), "%Y-%m-%d %H:%M:%S UTC", &tm_utc);
 

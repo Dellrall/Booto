@@ -72,6 +72,10 @@ typedef struct {
     char volatility_in[512];   /**< Volatility 3 JSON output to add to the verdict (--volatility) */
     char acquire_out[512];     /**< Raw image of -t written here before the scan (--acquire) */
     char undelete_out[512];    /**< Deleted NTFS files of -t recovered into this folder (--undelete) */
+    char case_id[64];          /**< Report name and case ID (--case-id); "" = CASE-<UTC time> */
+    char examiner[64];         /**< --examiner; "" = $USER */
+    char evidence_number[64];  /**< Exhibit or evidence tag on the report (--evidence-number) */
+    char notes[256];           /**< Free text on the report (--notes) */
 } booto_context_t;
 
 /**

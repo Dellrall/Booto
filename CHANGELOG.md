@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Case reports carry `--case-id`, `--examiner`, `--evidence-number` and `--notes` (CLI, with `-p`), plus the disk model and serial number read from sysfs for `-t`.
+
 ## [1.11.0-beta] - 2026-11-12
 
 ### Added

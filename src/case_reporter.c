@@ -202,7 +202,11 @@ booto_error_t case_report_generate_json(const forensic_case_summary_t *summary,
     fputs("\"case_id\":", fp); json_put_string(fp, summary->case_id);
     fputs(",\"timestamp\":", fp); json_put_string(fp, summary->timestamp);
     fputs(",\"examiner\":", fp); json_put_string(fp, summary->examiner);
+    fputs(",\"evidence_number\":", fp); json_put_string(fp, summary->evidence_number);
+    fputs(",\"notes\":", fp); json_put_string(fp, summary->notes);
     fputs(",\"target_disk\":", fp); json_put_string(fp, summary->target_disk);
+    fputs(",\"target_model\":", fp); json_put_string(fp, summary->target_model);
+    fputs(",\"target_serial\":", fp); json_put_string(fp, summary->target_serial);
     fputs(",\"target_fs\":", fp); json_put_string(fp, summary->target_fs);
     fputs(",\"target_first_mib_sha256_before\":", fp); json_put_string(fp, summary->head_before);
     fputs(",\"target_first_mib_sha256_after\":", fp); json_put_string(fp, summary->head_after);
@@ -287,6 +291,13 @@ booto_error_t case_report_generate_markdown(const forensic_case_summary_t *summa
     fputs("**Verdict:** ", fp); md_put_cell(fp, summary->verdict);
     fprintf(fp, ", **threats:** %d (", summary->total_threats); md_put_cell(fp, summary->highest_severity);
     fputs("), **target:** ", fp); md_put_cell(fp, summary->target_disk);
+    if (summary->target_model[0] || summary->target_serial[0]) {
+        fputs(" (model ", fp); md_put_cell(fp, summary->target_model[0] ? summary->target_model : "unknown");
+        fputs(", serial ", fp); md_put_cell(fp, summary->target_serial[0] ? summary->target_serial : "unknown");
+        fputc(')', fp);
+    }
+    if (summary->evidence_number[0]) { fputs("\n\n**Evidence number:** ", fp); md_put_cell(fp, summary->evidence_number); }
+    if (summary->notes[0]) { fputs("\n\n**Notes:** ", fp); md_put_cell(fp, summary->notes); }
     if (summary->head_before[0])
         fprintf(fp, "\n\n**First 1 MiB of the target, SHA-256:** before `%s`, after `%s` (%s)", summary->head_before,
                 summary->head_after[0] ? summary->head_after : "unreadable",
