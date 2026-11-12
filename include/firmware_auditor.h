@@ -127,7 +127,15 @@ typedef struct {
     int windows_pe;       /* PE images built for Windows (GUI/console subsystem): firmware never runs these */
     int yara_count;       /* distinct YARA rules matched in the image or an inflated section */
     yara_match_t yara[YARA_MAX_MATCHES];
+    int descriptor_writable; /* firmware_ifd_descriptor_writable() of the image */
 } fw_spi_report_t;
+
+/**
+ * @brief Read the Intel flash descriptor's BIOS master (FLMSTR1) of a SPI image (untrusted bytes).
+ * @return 1 if the host CPU may rewrite the descriptor region (fwupd Spi.Descriptor fails), 0 if it may not,
+ *         -1 if there is no descriptor or its layout is not recognised.
+ */
+int firmware_ifd_descriptor_writable(const uint8_t *d, size_t len);
 
 /**
  * @brief Walk a dumped SPI image: count firmware volumes, inflate LZMA sections with the sandboxed

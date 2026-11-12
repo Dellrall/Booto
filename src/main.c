@@ -174,6 +174,11 @@ static void run_expert_firmware(const char *dir) {
             if (spi.windows_pe)
                 printf("  SUSPICIOUS (medium): %d Windows executable(s) inside the firmware; implants drop OS payloads "
                        "this way (some vendor tools do too)\n", spi.windows_pe);
+            if (spi.descriptor_writable == 1)
+                printf("  Flash descriptor is writable by the host CPU: malware can unlock the ME region "
+                       "(fwupd Spi.Descriptor)\n");
+            else if (spi.descriptor_writable == 0)
+                printf("  Flash descriptor is read-only to the host CPU\n");
             for (int i = 0; i < spi.yara_count; i++)
                 printf("  %s (%s): %s\n", spi.yara[i].rule, booto_severity_str(spi.yara[i].severity),
                        spi.yara[i].description);

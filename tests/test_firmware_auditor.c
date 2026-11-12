@@ -1078,6 +1078,29 @@ static void test_spi_analyze(void) {
     write_file(path, img, sizeof(img));
     ASSERT_INT_EQ(firmware_spi_analyze(path, &r), BOOTO_OK, "Corrupt stream tolerated");
 
+    ASSERT_INT_EQ(r.descriptor_writable, -1, "No flash descriptor is unknown");
+
+    /* Intel flash descriptor: BIOS master write access to region 0 (the descriptor). */
+    memset(img, 0xff, 4096);
+    img[0x10] = 0x5A; img[0x11] = 0xA5; img[0x12] = 0xF0; img[0x13] = 0x0F;
+    img[0x14] = 0x03; img[0x15] = img[0x16] = img[0x17] = 0;
+    img[0x18] = 0x08; img[0x19] = img[0x1a] = img[0x1b] = 0;
+    memset(img + 0x30, 0, 4);                         /* IFD v1: 20 MHz read clock */
+    memset(img + 0x80, 0, 4);
+    img[0x83] = 0x0B;                                 /* write bits 24-31: descriptor, BIOS, ME */
+    ASSERT_INT_EQ(firmware_ifd_descriptor_writable(img, sizeof(img)), 1, "IFD v1 writable descriptor");
+    img[0x83] = 0x0A;
+    ASSERT_INT_EQ(firmware_ifd_descriptor_writable(img, sizeof(img)), 0, "IFD v1 locked descriptor");
+    img[0x83] = 0;
+    img[0x32] = 0x0C;                                 /* IFD v2: 17 MHz read clock */
+    img[0x82] = 0x10;                                 /* write bit 20: descriptor */
+    ASSERT_INT_EQ(firmware_ifd_descriptor_writable(img, sizeof(img)), 1, "IFD v2 writable descriptor");
+    img[0x82] = 0x20;
+    ASSERT_INT_EQ(firmware_ifd_descriptor_writable(img, sizeof(img)), 0, "IFD v2 locked descriptor");
+    img[0x32] = 0x04;
+    ASSERT_INT_EQ(firmware_ifd_descriptor_writable(img, sizeof(img)), -1, "Unknown descriptor layout");
+    ASSERT_INT_EQ(firmware_ifd_descriptor_writable(img, 100), -1, "Short image");
+
     ASSERT_INT_EQ(firmware_spi_analyze("/nonexistent/spi.bin", &r), BOOTO_ERR_IO, "Missing image reported");
     unsetenv("BOOTO_RULES_DIR");
     rules_reset_cache();
