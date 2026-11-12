@@ -505,7 +505,7 @@ static void render_persistence_pane(wm_node_t *n, bool focused, tui_app_state_t 
         {" F3 ", "Unlock a LUKS target"},
         {" F4 ", "Unlock report storage on the boot USB (none: create it)"},
         {" F6 ", "Export case report (JSON + Markdown, SHA-256 checksum)"},
-        {" F7 ", "Toggle quarantine: flagged files to an encrypted ZIP"},
+        {" F7 ", "Toggle quarantine: flagged files to a password-locked ZIP"},
     };
     for (size_t i = 0; i < sizeof(HINTS) / sizeof(HINTS[0]); i++, y++) {
         int w = term_puts_clip(x0, y, iw, HINTS[i].key, A_KEYCAP);

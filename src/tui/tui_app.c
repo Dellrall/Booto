@@ -1178,7 +1178,7 @@ int tui_app_run(booto_context_t *ctx) {
             } else if (event.type == KEY_F7) {
                 app.quarantine = !app.quarantine;
                 snprintf(app.status_msg, sizeof(app.status_msg), "Quarantine %s for the next scan.",
-                         app.quarantine ? "on: flagged files go to an encrypted ZIP on report storage" : "off");
+                         app.quarantine ? "on: flagged files go to a password-locked ZIP on report storage" : "off");
             } else if (event.type == KEY_F6) {
                 if (atomic_load(&app.scan_active)) {
                     snprintf(app.status_msg, sizeof(app.status_msg), "Export is disabled while a scan runs.");
