@@ -35,6 +35,12 @@ void forensic_scan_set_baseline(baseline_t *b) {
     g_baseline = b;
 }
 
+static const char *g_bodyfile;   /* NULL: no timeline wanted */
+
+void forensic_scan_set_bodyfile(const char *path) {
+    g_bodyfile = path;
+}
+
 typedef struct { baseline_t *b; size_t root_len; } core_ctx_t;
 
 static void add_core(const char *path, void *user) {
@@ -536,6 +542,8 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
             if (windows) winboot_each_core_file(root, add_core, &c);
         }
     }
+
+    if (g_bodyfile && have_root) out->bodyfile_written = bodyfile_write(root, g_bodyfile) == BOOTO_OK;
 
     if (q) out->quarantined = quarantine_close(q, out->quarantine_zip, sizeof(out->quarantine_zip));
 

@@ -77,6 +77,8 @@ static void print_help(const char *prog_name) {
     printf("      --baseline <file>      CLI: also write the boot chain hashes (first 1 MiB, /boot, ESP,\n");
     printf("                             Windows core files) to <file>; run it on a known-good machine\n");
     printf("      --compare <file>       CLI: list what changed in the boot chain since that baseline\n");
+    printf("      --bodyfile <file>      CLI: write a Sleuth Kit bodyfile of the scanned root to <file>,\n");
+    printf("                             for a timeline with mactime(1)\n");
     printf("  -V, --verbose              Enable verbose/debug logging\n\n");
     printf("CLI exit codes:\n");
     printf("  0  CLEAN       every enabled engine ran and found nothing\n");
@@ -218,10 +220,12 @@ static int run_cli(booto_context_t *ctx) {
         }
     }
     forensic_scan_set_baseline(cur);
+    forensic_scan_set_bodyfile(ctx->bodyfile_out[0] ? ctx->bodyfile_out : NULL);
     booto_error_t e = forensic_scan_run(ctx->target_dev[0] ? ctx->target_dev : NULL,
                                         ctx->target_rootfs[0] ? ctx->target_rootfs : NULL,
                                         NULL, qdir[0] ? qdir : NULL, scan_progress, NULL, rep);
     forensic_scan_set_baseline(NULL);
+    forensic_scan_set_bodyfile(NULL);
     if (e != BOOTO_OK) {
         LOG_ERROR("Scan could not run (error %d)", e);
         free(rep), free(cur), free(old);
@@ -261,6 +265,13 @@ static int run_cli(booto_context_t *ctx) {
             printf("\nBaseline: %d boot file hash(es) written to %s\n", cur->count, ctx->baseline_out);
         else
             fprintf(stderr, "Failed to write baseline %s\n", ctx->baseline_out);
+    }
+    if (ctx->bodyfile_out[0]) {
+        if (rep->bodyfile_written)
+            printf("\nBodyfile: %s timeline written to %s (mactime -b %s)\n", rep->scan_root, ctx->bodyfile_out,
+                   ctx->bodyfile_out);
+        else
+            fprintf(stderr, "Failed to write bodyfile %s\n", ctx->bodyfile_out);
     }
     if (old) {
         printf("\nBoot chain since baseline %s\n", ctx->baseline_in);
@@ -315,6 +326,7 @@ int main(int argc, char *argv[]) {
         {"quarantine",      no_argument,       0, 'q'},
         {"baseline",        required_argument, 0, 'B'},
         {"compare",         required_argument, 0, 'C'},
+        {"bodyfile",        required_argument, 0, 'F'},
         {0, 0, 0, 0}
     };
 
@@ -375,6 +387,9 @@ int main(int argc, char *argv[]) {
                 break;
             case 'C':
                 snprintf(ctx.baseline_in, sizeof(ctx.baseline_in), "%s", optarg);
+                break;
+            case 'F':
+                snprintf(ctx.bodyfile_out, sizeof(ctx.bodyfile_out), "%s", optarg);
                 break;
             default:
                 print_help(argv[0]);

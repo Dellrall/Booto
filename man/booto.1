@@ -178,6 +178,21 @@ since the baseline in
 An OS or boot loader update explains most changes; anything else is worth a look.
 The list does not change the verdict or the exit code.
 .TP
+.BI \-\-bodyfile " file"
+CLI mode. Write a Sleuth Kit 3.x bodyfile of every entry under the scanned
+root to
+.IR file ,
+for a timeline with
+.BR mactime (1):
+.BR "mactime \-b " "\fIfile\fR"
+.BR \-d .
+Mounts are not crossed and symlinks are not followed. The MD5 and creation
+time fields are 0. Names with
+.BR | ,
+.B \e
+or control bytes are written as
+.BI \ex HH .
+.TP
 .BR \-V ", " \-\-verbose
 Show debug messages.
 .SH TUI
