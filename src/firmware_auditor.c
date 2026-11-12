@@ -1424,6 +1424,22 @@ static void spi_yara(const uint8_t *d, size_t len, fw_spi_report_t *out) {
     }
 }
 
+/* Intel flash descriptor: FLVALSIG at 0x10, FLMAP0/1 locate the component and master sections. */
+#define IFD_FLVALSIG 0x0FF0A55Au
+int firmware_ifd_descriptor_writable(const uint8_t *d, size_t len) {
+    if (!d || len < 0x1000 || rd_le32(d + 0x10) != IFD_FLVALSIG) return -1;
+    size_t fcba = (size_t)(rd_le32(d + 0x14) & 0xff) << 4;
+    size_t fmba = (size_t)(rd_le32(d + 0x18) & 0xff) << 4;
+    if (fcba + 4 > 0x1000 || fmba + 4 > 0x1000) return -1;
+    /* Read clock 20 MHz (0) = IFD v1, write bits 24-31; 17 MHz (6) = IFD v2 (Skylake+), write bits 20-31.
+     * Bit 0 of either field is region 0, the descriptor itself. Same heuristic flashrom uses. */
+    uint32_t freq = (rd_le32(d + fcba) >> 17) & 7u;
+    uint32_t flmstr1 = rd_le32(d + fmba);
+    if (freq == 0) return (flmstr1 >> 24) & 1u ? 1 : 0;
+    if (freq == 6) return (flmstr1 >> 20) & 1u ? 1 : 0;
+    return -1;
+}
+
 booto_error_t firmware_spi_analyze(const char *image_path, fw_spi_report_t *out) {
     if (!image_path || !out) return BOOTO_ERR_INVALID_ARG;
     memset(out, 0, sizeof(*out));
@@ -1437,6 +1453,7 @@ booto_error_t firmware_spi_analyze(const char *image_path, fw_spi_report_t *out)
         free(img);
         return BOOTO_ERR_IO;
     }
+    out->descriptor_writable = firmware_ifd_descriptor_writable(img, len);
     for (size_t i = 40; i + 4 <= len; i++)
         if (img[i] == '_' && memcmp(img + i, "_FVH", 4) == 0) out->volumes++;
     spi_count_pe(img, len, out);

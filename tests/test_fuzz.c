@@ -371,6 +371,10 @@ static void target_tpm_log(const uint8_t *buf, size_t len) {
     (void)firmware_tpm_log_apps(buf, len, apps, 8);
 }
 
+static void target_ifd(const uint8_t *buf, size_t len) {
+    (void)firmware_ifd_descriptor_writable(buf, len);
+}
+
 /* Mutations hit the cells; the base block is fixed so the root offset stays reachable. */
 static uint8_t g_hive[0x1000 + FUZZ_MAX_LEN];
 
@@ -506,6 +510,22 @@ static void test_fuzz_baseline_parser(void) {
     TEST_PASS("test_fuzz_baseline_parser");
 }
 
+static void test_fuzz_ifd(void) {
+    TEST_START("test_fuzz_ifd");
+    uint8_t *b = g_seed_a;
+    memset(b, 0xff, FUZZ_MAX_LEN);
+    b[0x10] = 0x5A; b[0x11] = 0xA5; b[0x12] = 0xF0; b[0x13] = 0x0F;   /* FLVALSIG */
+    b[0x14] = 0x03; b[0x15] = b[0x16] = b[0x17] = 0;                    /* FCBA 0x30 */
+    b[0x18] = 0x08; b[0x19] = b[0x1a] = b[0x1b] = 0;                    /* FMBA 0x80 */
+    b[0x30] = 0; b[0x31] = 0; b[0x32] = 0x0C; b[0x33] = 0;              /* IFD v2 read clock */
+    b[0x80] = 0; b[0x81] = 0; b[0x82] = 0x10; b[0x83] = 0;              /* BIOS may write region 0 */
+    ASSERT_INT_EQ(firmware_ifd_descriptor_writable(b, FUZZ_MAX_LEN), 1, "IFD seed is writable");
+    static const fuzz_region_t hot[] = {{0x10, 12}, {0x30, 4}, {0x80, 4}};
+    fuzz_seed_t seed = {g_seed_a, FUZZ_MAX_LEN, hot, 3};
+    ASSERT_TRUE(fuzz_run(target_ifd, &seed, 1, 0x5851F42D4C957F2DULL), "IFD fuzz run");
+    TEST_PASS("test_fuzz_ifd");
+}
+
 static void test_fuzz_tpm_log(void) {
     TEST_START("test_fuzz_tpm_log");
     uint8_t *b = g_seed_a;
@@ -565,6 +585,7 @@ int main(void) {
     test_fuzz_initramfs_parser();
     test_fuzz_baseline_parser();
     test_fuzz_tpm_log();
+    test_fuzz_ifd();
     test_fuzz_reg_hive();
     TEST_SUMMARY();
     return 0;

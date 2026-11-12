@@ -556,6 +556,9 @@ hidden code, and the SPI flash is dumped read-only with
 .BR flashrom (8)
 for offline analysis. The image is walked: LZMA sections are inflated by the
 sandboxed xz, and the image and each section are matched against the YARA
-rules above.
+rules above. On Intel, the flash descriptor's BIOS master entry (FLMSTR1) is
+read: a descriptor the host CPU may rewrite lets malware unlock the ME region
+(fwupd Spi.Descriptor). IFD v1 and v2 are recognised by their read clock;
+other layouts are not reported.
 .SH SEE ALSO
 .BR booto (1)
