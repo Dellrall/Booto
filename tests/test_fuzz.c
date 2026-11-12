@@ -207,7 +207,8 @@ static size_t build_elf(uint8_t *b) {
     return ELF_SHOFF + ELF_SHNUM * 64;
 }
 
-/* PE image: headers 0x200, .text@0x200 and .data@0x300 (0x100 each), WIN_CERTIFICATE@0x400 (0x80). */
+/* PE image: headers 0x200, .text@0x200 and shim's long-named .vendor_cert@0x300 (0x100 each), WIN_CERTIFICATE@0x400
+ * (0x80), then the COFF string table that names .vendor_cert. */
 static size_t build_pe(uint8_t *b, bool pe32_plus) {
     memset(b, 0, FUZZ_MAX_LEN);
     b[0] = 'M'; b[1] = 'Z'; b[0x3C] = 0x80;
@@ -230,19 +231,24 @@ static size_t build_pe(uint8_t *b, bool pe32_plus) {
     size_t sect = opt + (pe32_plus ? 0xF0 : 0xE0);
     for (size_t i = 0; i < 2; i++) {
         uint8_t *e = b + sect + i * 40;
-        memcpy(e, i ? ".data" : ".text", 5);
+        memcpy(e, i ? "/4" : ".text", i ? 2 : 5);
         put_le(e + 8, 0x100, 4);                       // VirtualSize
         put_le(e + 12, 0x1000 * (i + 1), 4);           // VirtualAddress
         put_le(e + 16, 0x100, 4);                      // SizeOfRawData
         put_le(e + 20, 0x200 + 0x100 * i, 4);          // PointerToRawData
     }
     for (size_t i = 0x200; i < 0x400; i++) b[i] = (uint8_t)i;
+    put_le(b + 0x300, 0x40, 4);                        // vendor_cert: authorized size
+    put_le(b + 0x308, 0x10, 4);                        // and offset
+    put_le(b + coff + 8, 0x480, 4);                    // PointerToSymbolTable, no symbols: string table here
+    put_le(b + 0x480, 17, 4);
+    memcpy(b + 0x484, ".vendor_cert", 13);
 
     put_le(b + 0x400, 0x80, 4);                        // dwLength
     put_le(b + 0x404, 0x0200, 2);                      // WIN_CERT_REVISION_2_0
     put_le(b + 0x406, 0x0002, 2);                      // WIN_CERT_TYPE_PKCS_SIGNED_DATA
     memset(b + 0x408, 0xC5, 0x78);
-    return 0x480;
+    return 0x491;
 }
 
 static size_t build_mbr(uint8_t *b) {
@@ -324,7 +330,9 @@ static void target_elf(const uint8_t *buf, size_t len) {
 
 static void target_pe(const uint8_t *buf, size_t len) {
     pe_efi_info_t info;
-    if (uefi_parse_pe_buffer(buf, len, &info) == BOOTO_OK) authenticode_verify(buf, len, &info);
+    if (uefi_parse_pe_buffer(buf, len, &info) != BOOTO_OK) return;
+    authenticode_verify(buf, len, &info);
+    if (info.vendor_cert_size) authenticode_chains_to(buf, len, &info, buf + info.vendor_cert_ptr, info.vendor_cert_size);
 }
 
 static void target_mbr(const uint8_t *buf, size_t len) {
@@ -406,11 +414,12 @@ static void test_fuzz_uefi_parser(void) {
     TEST_START("test_fuzz_uefi_parser");
     size_t len64 = build_pe(g_seed_a, true);
     size_t len32 = build_pe(g_seed_b, false);
-    static const fuzz_region_t hot[] = {{0x80, 0x180}, {0x400, 0x80}};
+    static const fuzz_region_t hot[] = {{0x80, 0x180}, {0x300, 0x10}, {0x400, 0x91}};
 
     pe_efi_info_t info;
     ASSERT_INT_EQ(uefi_parse_pe_buffer(g_seed_a, len64, &info), BOOTO_OK, "PE32+ seed parses");
     ASSERT_TRUE(info.is_pe32_plus && info.has_authenticode, "PE32+ seed reaches cert table");
+    ASSERT_TRUE(info.vendor_cert_ptr == 0x310 && info.vendor_cert_size == 0x40, "PE32+ seed names .vendor_cert");
     ASSERT_INT_EQ(uefi_parse_pe_buffer(g_seed_b, len32, &info), BOOTO_OK, "PE32 seed parses");
     ASSERT_TRUE(!info.is_pe32_plus && info.has_authenticode, "PE32 seed reaches cert table");
 

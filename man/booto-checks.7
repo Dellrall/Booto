@@ -184,7 +184,18 @@ A first-stage loader (a file named boot* or shim*) carries a valid signature
 that does not chain to a Microsoft root. The firmware of a stock machine
 trusts only Microsoft there. Expected only if the owner enrolled their own
 Secure Boot keys (sbctl, a self-signed systemd-boot). GRUB and kernels are
-signed by the distro and are not checked this way.
+signed by the distro and are judged by
+.B UEFI_LOADER_NOT_SHIM_VENDOR
+instead.
+.TP
+.BR UEFI_LOADER_NOT_SHIM_VENDOR " (MEDIUM)"
+A later-stage loader (GRUB, MokManager, a kernel) sits beside a shim and has
+a valid signature that does not chain to the distro CA built into that shim
+(its
+.B .vendor_cert
+section). Shim refuses such a loader unless the owner enrolled its key as a
+MOK, so it is a replaced GRUB or a self-signed build. Loaders with no shim in
+their folder are not checked this way.
 .TP
 .BR UEFI_SBAT_REVOKED " (MEDIUM)"
 The loader's SBAT generation is below the current revocation level: a

@@ -33,6 +33,21 @@ static bool in_bounds(size_t len, uint64_t off, uint64_t size) {
 
 typedef struct { uint32_t ptr; uint32_t size; } raw_section_t;
 
+// shim names its CA section ".vendor_cert", too long for the header: the name is "/<n>", an offset into the
+// COFF string table right after the symbol table.
+static bool section_is_vendor_cert(const uint8_t *buf, size_t len, size_t coff, const uint8_t *e) {
+    if (e[0] != '/') return false;
+    char num[8];
+    memcpy(num, e + 1, 7);
+    num[7] = '\0';
+    char *end;
+    unsigned long off = strtoul(num, &end, 10);
+    uint32_t symtab = rd32(buf + coff + 8);
+    static const char name[] = ".vendor_cert";
+    uint64_t at = (uint64_t)symtab + (uint64_t)rd32(buf + coff + 12) * 18 + off;
+    return end != num && symtab != 0 && in_bounds(len, at, sizeof(name)) && memcmp(buf + at, name, sizeof(name)) == 0;
+}
+
 static int cmp_section(const void *a, const void *b) {
     uint32_t x = ((const raw_section_t *)a)->ptr, y = ((const raw_section_t *)b)->ptr;
     return (x > y) - (x < y);
@@ -130,6 +145,14 @@ booto_error_t uefi_parse_pe_buffer(const uint8_t *buf, size_t len, pe_efi_info_t
             info->sbat_ptr = ptr;
             info->sbat_size = size;
         }
+        if (size >= 16 && section_is_vendor_cert(buf, len, coff, e)) {
+            // cert_table: authorized size, deauthorized size, authorized offset, deauthorized offset (section-relative)
+            uint32_t a_size = rd32(buf + ptr), a_off = rd32(buf + ptr + 8);
+            if (a_size && a_off <= size && a_size <= size - a_off) {
+                info->vendor_cert_ptr = ptr + a_off;
+                info->vendor_cert_size = a_size;
+            }
+        }
         secs[n].ptr = ptr;
         secs[n].size = size;
         n++;
@@ -201,9 +224,8 @@ static void sbat_check(const uint8_t *sbat, uint32_t size, char *out, size_t out
     }
 }
 
-booto_error_t uefi_parse_pe_file(const char *path, pe_efi_info_t *info) {
-    if (!path || !info) return BOOTO_ERR_INVALID_ARG;
-
+// Read a whole EFI binary (at most 64 MB) into a malloc'd buffer.
+static booto_error_t read_efi(const char *path, uint8_t **out, long *out_len) {
     FILE *fp = fopen_regular(path);
     if (!fp) return BOOTO_ERR_IO;
 
@@ -229,6 +251,17 @@ booto_error_t uefi_parse_pe_file(const char *path, pe_efi_info_t *info) {
         free(buf);
         return BOOTO_ERR_IO;
     }
+    *out = buf;
+    *out_len = fsize;
+    return BOOTO_OK;
+}
+
+booto_error_t uefi_parse_pe_file(const char *path, pe_efi_info_t *info) {
+    if (!path || !info) return BOOTO_ERR_INVALID_ARG;
+    uint8_t *buf = NULL;
+    long fsize = 0;
+    booto_error_t rd = read_efi(path, &buf, &fsize);
+    if (rd != BOOTO_OK) return rd;
 
     booto_error_t ret = uefi_parse_pe_buffer(buf, (size_t)fsize, info);
     if (ret == BOOTO_OK && info->exec_size) { // range already bounds-checked by the parser
@@ -270,6 +303,52 @@ static void add_uefi_threat(uefi_scan_result_t *result,
                  f->threat_name, f->file_path, f->rule_id, booto_severity_str(f->severity));
 }
 
+// A later-stage loader next to a shim (grubx64.efi, mmx64.efi, a kernel) must be signed by the distro CA built into
+// that shim, or shim refuses it unless the owner enrolled the key as a MOK. Shim's own signer is judged separately.
+// shortcut: the shim's deauthorized (vendor dbx) list is not checked, add it if a revoked distro build shows up.
+static void check_shim_vendor(const char *efi_path, const pe_efi_info_t *pe, uefi_scan_result_t *result) {
+    char dir[512];
+    snprintf(dir, sizeof(dir), "%s", efi_path);
+    char *slash = strrchr(dir, '/');
+    if (!slash) return;
+    *slash = '\0';
+    DIR *dp = opendir(dir);
+    if (!dp) return;
+    uint8_t *shim = NULL;
+    long shim_len = 0;
+    pe_efi_info_t sh;
+    struct dirent *de;
+    while (!shim && (de = readdir(dp)) != NULL) {
+        if (strcasecmp(de->d_name, "shimx64.efi") != 0 && strcasecmp(de->d_name, "shim.efi") != 0 &&
+            strcasecmp(de->d_name, "bootx64.efi") != 0) continue;
+        char path[800];
+        snprintf(path, sizeof(path), "%s/%s", dir, de->d_name);
+        if (read_efi(path, &shim, &shim_len) != BOOTO_OK) continue;
+        if (uefi_parse_pe_buffer(shim, (size_t)shim_len, &sh) != BOOTO_OK || !sh.vendor_cert_size) {
+            free(shim);
+            shim = NULL;
+        }
+    }
+    closedir(dp);
+    if (!shim) return; // no shim here: the loader is judged by db, which the firmware audit covers
+    uint8_t *img = NULL;
+    long img_len = 0;
+    pe_efi_info_t now; // parsed from this read: the file may have changed since pe was filled
+    bool valid = false;
+    if (read_efi(efi_path, &img, &img_len) == BOOTO_OK && uefi_parse_pe_buffer(img, (size_t)img_len, &now) == BOOTO_OK) {
+        authenticode_verify(img, (size_t)img_len, &now);
+        valid = now.authenticode_state == AUTHENTICODE_VALID;
+    }
+    if (valid && !authenticode_chains_to(img, (size_t)img_len, &now, shim + sh.vendor_cert_ptr, sh.vendor_cert_size)) {
+        add_uefi_threat(result, "Loader Not Signed By Its Shim's Distro", efi_path, pe->sha256,
+                        "UEFI_LOADER_NOT_SHIM_VENDOR", SEVERITY_MEDIUM,
+                        "Validly signed, but not by the distro CA built into the shim beside it: expected only if the "
+                        "owner signed it with an enrolled MOK key");
+    }
+    free(img);
+    free(shim);
+}
+
 booto_error_t uefi_inspect_efi_file(const char *efi_path, uefi_scan_result_t *result) {
     if (!efi_path || !result) return BOOTO_ERR_INVALID_ARG;
 
@@ -294,7 +373,7 @@ booto_error_t uefi_inspect_efi_file(const char *efi_path, uefi_scan_result_t *re
     }
 
     // First-stage loaders (BOOTX64.EFI, shim, bootmgfw) are what the firmware itself runs, and on a stock machine
-    // only Microsoft's keys are trusted there. Later stages (grub, kernels) are signed by the distro: not checked.
+    // only Microsoft's keys are trusted there. Later stages (grub, kernels) must chain to their shim's distro CA.
     const char *base = strrchr(efi_path, '/');
     base = base ? base + 1 : efi_path;
     bool first_stage = strncasecmp(base, "boot", 4) == 0 || strncasecmp(base, "shim", 4) == 0;
@@ -338,6 +417,8 @@ booto_error_t uefi_inspect_efi_file(const char *efi_path, uefi_scan_result_t *re
                         SEVERITY_HIGH,
                         "Validly signed, but not by a Microsoft key: expected only if the owner enrolled their own Secure Boot keys");
     }
+    if (pe.authenticode_state == AUTHENTICODE_VALID && !pe.authenticode_microsoft && !first_stage)
+        check_shim_vendor(efi_path, &pe, result);
 
     // 3. Heuristic: compressed or encrypted code (packer / loader stub). Normal x86-64 code is about 6 bits/byte.
     if (pe.exec_size >= UEFI_PACKED_MIN_BYTES && pe.exec_entropy >= UEFI_PACKED_ENTROPY_BITS) {

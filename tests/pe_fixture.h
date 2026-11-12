@@ -42,9 +42,23 @@ static size_t build_pe(uint8_t *b, size_t cap, bool pe32_plus, bool with_cert) {
     return 0x380;
 }
 
+/* A self-signed certificate for key, valid for an hour. */
+static X509 *fixture_cert(EVP_PKEY *key) {
+    X509 *cert = X509_new();
+    X509_set_version(cert, 2);
+    ASN1_INTEGER_set(X509_get_serialNumber(cert), 1);
+    X509_gmtime_adj(X509_getm_notBefore(cert), 0);
+    X509_gmtime_adj(X509_getm_notAfter(cert), 3600);
+    X509_NAME_add_entry_by_txt(X509_get_subject_name(cert), "CN", MBSTRING_ASC, (const unsigned char *)"Booto Test", -1, -1, 0);
+    X509_set_issuer_name(cert, X509_get_subject_name(cert));
+    X509_set_pubkey(cert, key);
+    X509_sign(cert, key, EVP_sha256());
+    return cert;
+}
+
 /* Sign build_pe's unsigned image the way signtool/sbsign does: SpcIndirectDataContent with the SHA-256
- * Authenticode digest, PKCS#7 SignedData by a throwaway self-signed key, appended as a WIN_CERTIFICATE. */
-static size_t sign_pe(uint8_t *b, size_t cap) {
+ * Authenticode digest, PKCS#7 SignedData by key/cert, appended as a WIN_CERTIFICATE. */
+static size_t sign_pe_with(uint8_t *b, size_t cap, EVP_PKEY *key, X509 *cert) {
     size_t len = build_pe(b, cap, true, false);
     pe_efi_info_t info;
     if (uefi_parse_pe_buffer(b, len, &info) != BOOTO_OK) return 0;
@@ -59,17 +73,6 @@ static size_t sign_pe(uint8_t *b, size_t cap) {
         sscanf(info.authenticode_sha256 + i * 2, "%2x", &v);
         idc[sizeof(idc) - 32 + (size_t)i] = (uint8_t)v;
     }
-
-    EVP_PKEY *key = EVP_RSA_gen(2048);
-    X509 *cert = X509_new();
-    X509_set_version(cert, 2);
-    ASN1_INTEGER_set(X509_get_serialNumber(cert), 1);
-    X509_gmtime_adj(X509_getm_notBefore(cert), 0);
-    X509_gmtime_adj(X509_getm_notAfter(cert), 3600);
-    X509_NAME_add_entry_by_txt(X509_get_subject_name(cert), "CN", MBSTRING_ASC, (const unsigned char *)"Booto Test", -1, -1, 0);
-    X509_set_issuer_name(cert, X509_get_subject_name(cert));
-    X509_set_pubkey(cert, key);
-    X509_sign(cert, key, EVP_sha256());
 
     PKCS7 *p7 = PKCS7_new(), *inner = PKCS7_new();
     PKCS7_set_type(p7, NID_pkcs7_signed);
@@ -105,9 +108,17 @@ static size_t sign_pe(uint8_t *b, size_t cap) {
     }
     OPENSSL_free(der);
     PKCS7_free(p7);
+    return table ? 0x300 + table : 0;
+}
+
+/* The same, by a throwaway self-signed key. */
+static size_t sign_pe(uint8_t *b, size_t cap) {
+    EVP_PKEY *key = EVP_RSA_gen(2048);
+    X509 *cert = fixture_cert(key);
+    size_t len = sign_pe_with(b, cap, key, cert);
     X509_free(cert);
     EVP_PKEY_free(key);
-    return table ? 0x300 + table : 0;
+    return len;
 }
 
 #endif

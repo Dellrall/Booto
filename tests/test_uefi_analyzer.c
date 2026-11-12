@@ -385,6 +385,61 @@ static void test_first_stage_signer(void) {
     TEST_PASS("test_first_stage_signer");
 }
 
+/* An unsigned shim: one 0x400-byte long-named .vendor_cert section (as "/4" in the COFF string table) holding ca. */
+static size_t build_shim(uint8_t *b, size_t cap, X509 *ca) {
+    if (cap < 0x611) return 0;
+    build_pe(b, cap, true, false);
+    unsigned char *der = NULL;
+    int n = i2d_X509(ca, &der);
+    if (n <= 0 || n > 0x3F0) { OPENSSL_free(der); return 0; }
+    size_t sect = 0x84 + 20 + 0xF0;
+    memset(b + 0x200, 0, 0x400);
+    memcpy(b + sect, "/4\0\0\0\0\0\0", 8);
+    b[sect + 17] = 0x04;                           // SizeOfRawData = 0x400
+    b[0x200] = (uint8_t)n; b[0x201] = (uint8_t)(n >> 8); // authorized size
+    b[0x208] = 0x10;                               // authorized offset
+    memcpy(b + 0x210, der, (size_t)n);
+    OPENSSL_free(der);
+    b[0x84 + 9] = 0x06;                            // PointerToSymbolTable = 0x600, no symbols
+    b[0x600] = 17;
+    memcpy(b + 0x604, ".vendor_cert", 13);
+    return 0x611;
+}
+
+static void test_shim_vendor_signer(void) {
+    TEST_START("test_shim_vendor_signer");
+    static uint8_t shim[0x1000], grub[0x1000], rogue[0x1000];
+    EVP_PKEY *distro = EVP_RSA_gen(2048), *other = EVP_RSA_gen(2048);
+    X509 *ca = fixture_cert(distro), *other_cert = fixture_cert(other);
+    size_t shim_len = build_shim(shim, sizeof(shim), ca);
+    size_t grub_len = sign_pe_with(grub, sizeof(grub), distro, ca);
+    size_t rogue_len = sign_pe_with(rogue, sizeof(rogue), other, other_cert);
+    X509_free(ca);
+    X509_free(other_cert);
+    EVP_PKEY_free(distro);
+    EVP_PKEY_free(other);
+    pe_efi_info_t info;
+    ASSERT_INT_EQ(uefi_parse_pe_buffer(shim, shim_len, &info), BOOTO_OK, "fixture shim parses");
+    ASSERT_TRUE(info.vendor_cert_ptr == 0x210 && info.vendor_cert_size > 0, ".vendor_cert found by its long name");
+
+    char dir[] = "/tmp/booto_vendor_XXXXXX", cmd[64];
+    ASSERT_TRUE(shim_len && grub_len && rogue_len && mkdtemp(dir) != NULL, "fixtures and mkdtemp");
+    write_pe(dir, "EFI/debian/shimx64.efi", shim, shim_len);
+    write_pe(dir, "EFI/debian/grubx64.efi", grub, grub_len);
+    write_pe(dir, "EFI/debian/mmx64.efi", rogue, rogue_len);
+    write_pe(dir, "EFI/other/grubx64.efi", rogue, rogue_len);  // no shim beside it: judged by db, not here
+    uefi_scan_result_t res;
+    memset(&res, 0, sizeof(res));
+    uefi_inspect_esp_directory(dir, &res);
+    snprintf(cmd, sizeof(cmd), "rm -rf '%s'", dir);
+    if (system(cmd) != 0) perror("rm");
+    ASSERT_INT_EQ(count_rule(&res, "UEFI_LOADER_NOT_SHIM_VENDOR"), 1, "Only the loader signed by a stranger key is flagged");
+    for (int i = 0; i < res.bootkits_detected; i++)
+        if (strcmp(res.findings[i].rule_id, "UEFI_LOADER_NOT_SHIM_VENDOR") == 0)
+            ASSERT_TRUE(strstr(res.findings[i].file_path, "debian/mmx64.efi") != NULL, "the rogue one beside the shim");
+    TEST_PASS("test_shim_vendor_signer");
+}
+
 int main(void) {
     printf("\n--- Running UEFI & ESP Bootkit Analyzer Tests ---\n");
     test_synthetic_pe32_plus_parser();
@@ -398,6 +453,7 @@ int main(void) {
     test_authenticode_signature();
     test_esp_scan_by_magic();
     test_esp_layout_and_sbat();
+    test_shim_vendor_signer();
     test_first_stage_signer();
     TEST_SUMMARY();
     return 0;
