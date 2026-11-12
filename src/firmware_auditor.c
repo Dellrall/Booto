@@ -1217,6 +1217,18 @@ static void spi_count_pe(const uint8_t *d, size_t len, fw_spi_report_t *out) {
     }
 }
 
+/* Add the rules buf matches to out, each rule once. */
+static void spi_yara(const uint8_t *d, size_t len, fw_spi_report_t *out) {
+    yara_match_t m[YARA_MAX_MATCHES];
+    int n = 0;
+    if (yara_scan_buffer(d, len, m, YARA_MAX_MATCHES, &n) != BOOTO_OK) return;
+    for (int i = 0; i < n && out->yara_count < YARA_MAX_MATCHES; i++) {
+        bool seen = false;
+        for (int j = 0; j < out->yara_count && !seen; j++) seen = strcmp(out->yara[j].rule, m[i].rule) == 0;
+        if (!seen) out->yara[out->yara_count++] = m[i];
+    }
+}
+
 booto_error_t firmware_spi_analyze(const char *image_path, fw_spi_report_t *out) {
     if (!image_path || !out) return BOOTO_ERR_INVALID_ARG;
     memset(out, 0, sizeof(*out));
@@ -1233,6 +1245,7 @@ booto_error_t firmware_spi_analyze(const char *image_path, fw_spi_report_t *out)
     for (size_t i = 40; i + 4 <= len; i++)
         if (img[i] == '_' && memcmp(img + i, "_FVH", 4) == 0) out->volumes++;
     spi_count_pe(img, len, out);
+    spi_yara(img, len, out);
     /* shortcut: one level of LZMA only; nested compressed volumes are not walked, add if real images need it */
     for (size_t i = 4; i + 20 <= len && out->lzma_sections < SPI_LZMA_MAX; i++) {
         if (img[i] != LZMA_GUID[0] || memcmp(img + i, LZMA_GUID, 16) != 0 || img[i - 1] != 0x02) continue;
@@ -1247,6 +1260,7 @@ booto_error_t firmware_spi_analyze(const char *image_path, fw_spi_report_t *out)
         if (disk_exec_capture(argv, sec + data_off, sec_len - data_off, &raw, &raw_len, SPI_INFLATE_CAP) == BOOTO_OK) {
             out->lzma_inflated++;
             spi_count_pe(raw, raw_len, out);
+            spi_yara(raw, raw_len, out);
         }
         free(raw);
     }

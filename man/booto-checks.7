@@ -247,6 +247,35 @@ rootkit hides files and processes.
 .BR BOOTO_YARA_BOOTKITTY " (CRITICAL)"
 A PE or ELF file naming Bootkitty, the first public UEFI bootkit aimed at
 Linux.
+.PP
+The next six rules are Binarly's FwHunt threat rules (CC0) ported to code
+and string patterns. They carry no file-header check, so they also match the
+SPI flash image that
+.B -x
+dumps and its inflated LZMA sections.
+.TP
+.BR BOOTO_YARA_BLACKLOTUS " (CRITICAL)"
+BlackLotus: its encoded strings (winload.efi path, VbsPolicyDisabled,
+BOOTMGR.XSL, OSLOADER.XSL) or its winload trampoline-hook code.
+.TP
+.BR BOOTO_YARA_ESPECTER " (CRITICAL)"
+ESPecter: EFI loader code that patches the Windows boot manager's integrity
+checks.
+.TP
+.BR BOOTO_YARA_COSMICSTRAND " (CRITICAL)"
+CosmicStrand: the HandleProtocol hook it plants in the CSMCORE firmware driver.
+.TP
+.BR BOOTO_YARA_MOONBOUNCE " (CRITICAL)"
+MoonBounce: CORE_DXE boot-service hooks together with its search for the
+kernel transfer routine.
+.TP
+.BR BOOTO_YARA_LOJAX " (CRITICAL)"
+LoJax: a SecDxe driver holding the NTFS driver name, rpcnetp.exe and
+autoche.exe, the files it drops onto the Windows disk.
+.TP
+.BR BOOTO_YARA_MOSAICREGRESSOR " (CRITICAL)"
+MosaicRegressor: the SmmInterfaceBase dropper code, or the SmmAccessSub
+payload (setupinf.log, IntelUpdate.exe and the Startup folder path).
 .SH INITRAMFS
 Each initramfs image is unpacked in memory and its scripts are searched.
 These findings are reported by title:
@@ -487,6 +516,8 @@ With
 UEFI variables over 4 KiB with near-random contents are reported as possible
 hidden code, and the SPI flash is dumped read-only with
 .BR flashrom (8)
-for offline analysis.
+for offline analysis. The image is walked: LZMA sections are inflated by the
+sandboxed xz, and the image and each section are matched against the YARA
+rules above.
 .SH SEE ALSO
 .BR booto (1)

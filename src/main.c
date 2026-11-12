@@ -170,6 +170,9 @@ static void run_expert_firmware(const char *dir) {
             if (spi.windows_pe)
                 printf("  SUSPICIOUS (medium): %d Windows executable(s) inside the firmware; implants drop OS payloads "
                        "this way (some vendor tools do too)\n", spi.windows_pe);
+            for (int i = 0; i < spi.yara_count; i++)
+                printf("  %s (%s): %s\n", spi.yara[i].rule, booto_severity_str(spi.yara[i].severity),
+                       spi.yara[i].description);
         }
     }
     else if (e == BOOTO_ERR_NOT_FOUND)
