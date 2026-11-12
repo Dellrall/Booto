@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - On AMD, the firmware audit now reads ROM Armor (`rom_armor_enforced`) as BIOS write protection and Platform Secure Boot (`fused_part`) as verified boot, from the ccp driver; both were reported N/A before.
 - `--acquire <image>` (with `-t`) copies the raw device to a new image file before the scan, read-only, hashing it as it reads: SHA-256 in `<image>.sha256`, unreadable blocks zero-filled and listed in `<image>.log`.
 - Case reports are Ed25519-signed (`<report>.sig`) with a per-stick key kept in `/persistence/keys`; `booto_report_key.pub` beside the reports verifies them with `openssl pkeyutl -verify -rawin`.
+- Windows persistence triage on the system volume: Winlogon Shell/Userinit hijacks, IFEO debuggers (CRITICAL on accessibility programs), AppInit_DLLs, Run/RunOnce values and auto-start services that run a script host or a user-writable path, the sticky keys swap, and programs in Startup folders (`WIN_*` rules in `booto-checks(7)`).
+- Ransomware signs on Windows volumes: 10 or more documents renamed to `<name>.<type>.<ext>` in a user folder (`WIN_RANSOM_ENCRYPTED`), a ransom note naming a `.onion` site (`WIN_RANSOM_NOTE`), and BCD automatic recovery turned off (`WIN_RANSOM_RECOVERY_OFF`).
 
 ## [1.10.0-beta] - 2026-11-12
 

@@ -206,9 +206,16 @@ bool forensic_scan_finding(const forensic_scan_report_t *r, int i, scan_finding_
         const winboot_finding_t *s = &r->winboot.findings[i];
         f->engine = SCAN_MOD_WINBOOT;
         f->severity = s->severity;
-        snprintf(f->name, sizeof(f->name), "Windows boot file");
+        snprintf(f->name, sizeof(f->name), "%s", !s->rule_id[0] ? "Windows boot file"
+                                                 : strstr(s->rule_id, "_RANSOM_") ? "Ransomware sign"
+                                                                                               : "Windows persistence");
         snprintf(f->where, sizeof(f->where), "%.299s", s->file_path);
-        snprintf(f->rule, sizeof(f->rule), "%s", s->reason);
+        if (s->rule_id[0]) {
+            snprintf(f->rule, sizeof(f->rule), "%s", s->rule_id);
+            snprintf(f->detail, sizeof(f->detail), "%s", s->reason);
+        } else {
+            snprintf(f->rule, sizeof(f->rule), "%s", s->reason);
+        }
         snprintf(f->hash, sizeof(f->hash), "%s", s->sha256);
         return true;
     }

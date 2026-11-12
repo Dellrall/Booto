@@ -17,6 +17,7 @@ typedef struct {
     char file_path[512];
     char sha256[65];              /* whole file; "" when it could not be read */
     char reason[96];
+    char rule_id[32];             /* WIN_* for persistence and ransomware findings; "" for boot chain findings */
     booto_severity_t severity;
 } winboot_finding_t;
 
