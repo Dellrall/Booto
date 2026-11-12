@@ -217,6 +217,30 @@ format; unreadable 4 KiB blocks are written as zeros and listed in
 Write the image to the report partition or another disk, never to the device being imaged.
 A failed copy makes the exit status INCOMPLETE.
 .TP
+.BI \-\-undelete " dir"
+CLI mode, with
+.B \-t
+naming an NTFS partition (an unlocked BitLocker volume works too).
+Before the scan, read the Master File Table from the raw device
+.RB ( O_RDONLY ,
+nothing is mounted) and copy each deleted file that still has an unnamed data
+stream into the existing folder
+.I dir
+as
+.IR record _ name .recovered,
+mode 0400, never overwriting a file already there.
+Names keep only ASCII letters, digits,
+.BR . ,
+.B \-
+and
+.BR _ .
+Clusters freed by a delete may since hold other data, so a recovered file can be
+partly or wholly wrong. Files over 64 MiB and files split by an
+.B $ATTRIBUTE_LIST
+are skipped and counted. ext4, XFS and btrfs are not supported.
+The result is printed and is not part of the verdict.
+Write to the report partition or another disk, never to the device being read.
+.TP
 .BI \-\-hashlist " file"
 CLI mode. Write the SHA-256 of every regular file with an execute bit under
 the scanned root to
