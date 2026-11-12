@@ -103,9 +103,10 @@ Shutting down erases RAM, and with it any rootkit that lives only in memory. If 
    sudo /media/<you>/<stick>/avml /media/<you>/<stick>/memory.lime
    sha256sum /media/<you>/<stick>/memory.lime > /media/<you>/<stick>/memory.lime.sha256
    ```
-3. Analyse the capture later on your own computer with [Volatility 3](https://github.com/volatilityfoundation/volatility3), for example `vol -f memory.lime linux.malware.hidden_modules` and `vol -f memory.lime linux.malware.check_syscall`. Volatility needs a symbol table for the suspect's exact kernel.
+3. Analyse the capture later on your own computer with [Volatility 3](https://github.com/volatilityfoundation/volatility3), for example `vol -r json -f memory.lime linux.malware.hidden_modules > hidden.json`. Volatility needs a symbol table for the suspect's exact kernel.
+4. Optional: copy `hidden.json` to the Booto stick and pass it to the disk scan with `booto -c --volatility hidden.json`. Booto prints each flagged row and sets the exit status to THREATS if there is one; it reads one JSON file per run.
 
-Running any program on a compromised machine lets the rootkit see it, so treat the capture as a lead, not proof. Booto itself does not read memory captures.
+Running any program on a compromised machine lets the rootkit see it, so treat the capture as a lead, not proof. Booto does not read the memory capture itself, only Volatility's JSON output.
 
 ### Step 3: Boot the suspect machine
 
