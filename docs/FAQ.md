@@ -7,7 +7,7 @@ Booto is beta software. Its detections have been tested on planted cases (`make 
 No known threat was found in the disk parts Booto checked, and every engine that applies to the target ran. It is not proof that the machine is clean.
 
 - Each engine reports `OK`, `ERROR`, `SKIPPED` or `N/A`.
-- `SKIPPED` means the engine could have run but did not: you turned it off, there was no raw device (directory scan, so no MBR check), or the package database is one Booto cannot read (RPM). A skipped engine makes the verdict `INCOMPLETE`.
+- `SKIPPED` means the engine could have run but did not: you turned it off, there was no raw device (directory scan, so no MBR check), or the package database is one Booto cannot read. RPM 4.16 and later (`rpmdb.sqlite`, Fedora 33+, RHEL 9) is read; the older Berkeley DB `Packages` file is not. A skipped engine makes the verdict `INCOMPLETE`.
 - `N/A` means the engine does not apply: the Windows engine on a Linux disk, the Linux engines on Windows, no initramfs, no EFI system partition. It does not change the verdict.
 - `ERROR` makes the verdict `INCOMPLETE`.
 

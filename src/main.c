@@ -75,7 +75,7 @@ static void print_help(const char *prog_name) {
     printf("  -u, --update-rules         Regenerate rule files (scripts/update_rules.sh)\n");
     printf("  -x, --expert-firmware      CLI, as root: also scan UEFI variables for hidden code and\n");
     printf("                             dump the SPI flash read-only with flashrom (slower; off by default)\n");
-    printf("  -q, --quarantine           CLI, with -p: copy flagged files into an encrypted ZIP (password\n");
+    printf("  -q, --quarantine           CLI, with -p: copy flagged files into a password-locked ZIP (password\n");
     printf("                             \"infected\") under <dir>/quarantine for analysis elsewhere\n");
     printf("      --baseline <file>      CLI: also write the boot chain hashes (first 1 MiB, /boot, ESP,\n");
     printf("                             Windows core files) to <file>; run it on a known-good machine\n");
@@ -402,7 +402,7 @@ static void print_dry_run(const booto_context_t *ctx) {
     for (int i = 0; i < SCAN_MOD_COUNT; i++) printf(" %s%s", forensic_scan_module_name((scan_module_id_t)i), i + 1 < SCAN_MOD_COUNT ? "," : "\n");
     printf("  Firmware      : Secure Boot keys, dbx and DMA protection of this machine (device mode only)\n");
     printf("  Expert fw     : %s\n", ctx->expert_firmware ? "NVRAM scan and read-only SPI flash dump (CLI, root)" : "off");
-    printf("  Quarantine    : %s\n", ctx->quarantine ? "flagged files to <report dir>/quarantine, encrypted ZIP" : "off");
+    printf("  Quarantine    : %s\n", ctx->quarantine ? "flagged files to <report dir>/quarantine, password-locked ZIP" : "off");
     printf("  Report dir    : %s\n", ctx->persistence_dir[0] ? ctx->persistence_dir : "(none)");
 }
 

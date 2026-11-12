@@ -156,8 +156,10 @@ CLI mode, with
 .BR \-p .
 Copy each flagged file into a ZIP under
 .IR dir/quarantine ,
-encrypted with the password
+locked with ZipCrypto and the password
 .BR infected .
+The password stops accidental opening and antivirus deletion; it gives no
+confidentiality.
 Each file is stored as
 .I <path>.malware
 so it cannot run by accident when the ZIP is opened elsewhere.
