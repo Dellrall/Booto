@@ -128,7 +128,7 @@ cbmc: version | $(BUILDDIR)
 		echo "--- CBMC: uefi_parse_pe_buffer on every $$n-byte input ---"; \
 		$(CBMC) tests/cbmc/pe_authenticode_harness.c src/uefi_analyzer.c $(INCLUDES) -D_DEFAULT_SOURCE \
 			-DPE_LEN=$$n --function harness $(CBMC_FLAGS) --unwind $$(( ($$n - 120) / 40 + 2 )) \
-			--unwindset uefi_parse_pe_buffer.2:33 > $(BUILDDIR)/cbmc_$$n.log 2>&1; rc=$$?; \
+			--unwindset uefi_parse_pe_buffer.2:33,memcmp.0:14 > $(BUILDDIR)/cbmc_$$n.log 2>&1; rc=$$?; \
 		grep -E '^\*\*|VERIFICATION|FAILURE|Out of memory' $(BUILDDIR)/cbmc_$$n.log; \
 		[ $$rc -eq 0 ] || exit 1; \
 	done
