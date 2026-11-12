@@ -54,7 +54,7 @@ Research date: 2026-11-03. Every claim below links its primary source. Three sur
 
 Also shipped since: a boot chain baseline (`baseline.h`), BitLocker volume detection (reported as encrypted, not scanned), LUKS unlock, LVM in LUKS (branch `fix/luks-lvm-fs`).
 
-Done from the per-section lists since: the FwHunt rules, bodyfile/mactime output (`--bodyfile`), and a guide to capturing memory with AVML (`docs/SETUP.md`). Ingesting Volatility output is still open.
+Done from the per-section lists since: the FwHunt rules, bodyfile/mactime output (`--bodyfile`), and a guide to capturing memory with AVML (`docs/SETUP.md`). Since 1.10.0-beta: `--hashlist` (SHA-256 of executables), `--volatility` (Volatility 3 JSON into the verdict), NX_COMPAT, the flash descriptor lock (from the `-x` SPI dump), Intel ME/Boot Guard/debug lock, and AMD ROM Armor, Platform Secure Boot and PSP debug lock. Not done: Sinkclose (AMD gives no machine-readable fixed-version table), FLOCKDN and RPMC (need SPIBAR MMIO), and BootserviceVars.
 
 Licence note (written while Booto was MIT; Booto is GPL-3.0-or-later since 2026-11-09, so GPL-3.0 and GPL-2.0-or-later code can now be reused, while GPL-2.0-only and AGPL code still cannot; check each project's exact terms before copying): CHIPSEC, rkhunter, unhide, Wazuh, LKRG, AIDE, Lynis, LiME (GPL), Velociraptor (AGPL) and Volatility 3 (non-MIT) are reference only. These can be used under their own licences: chkrootkit (BSD-2), UAC (Apache-2.0), AVML/sbctl (MIT), UEFITool (BSD-2), FwHunt rules (CC0) and `secureboot_objects` (BSD-2-Clause-Patent).
 
@@ -373,23 +373,23 @@ HSI level is the "needed to meet" level from https://fwupd.github.io/libfwupdplu
 | Uefi.Db (MsUefi/Production) | db holds Microsoft UEFI CA 2023 | "2023 Microsoft CA in db" | ✅ |
 | uefi-dbx plugin (device version, not an HSI ID) | dbx up to date (last-entry checksum vs LVFS); ESP binaries not blocked | "Revocation list (dbx)": every x64 hash in Microsoft's list present | ✅ |
 | Uefi.BootserviceVars (1) | Boot-service vars not readable at runtime | — | ❌ |
-| Uefi.MemoryProtection / NxCompat (3) | NX bootloader + firmware memory attributes | — | ❌ |
+| Uefi.MemoryProtection / NxCompat (3) | NX bootloader + firmware memory attributes | `UEFI_NO_NX_COMPAT` (LOW) on first-stage loaders; firmware memory attributes not read | ◐ |
 | Spi.Bioswe (1) | BIOS_CNTL.BIOSWE clear | Not read (only BLE/SMM_BWP) | ❌ |
 | Spi.Ble (1) | BIOS_CNTL.BLE set | "BIOS write protection" | ✅ (Intel) |
 | Spi.SmmBwp (1) | BIOS_CNTL.SMM_BWP set | "BIOS write protection" (also flags pre-5-series chipsets with no SMM_BWP; CVE-2014-8273) | ✅ (Intel) |
-| Spi.Descriptor (1) | Flash descriptor read-only | — | ❌ |
+| Spi.Descriptor (1) | Flash descriptor read-only | `-x`: FLMSTR1 read from the dumped SPI image (IFD v1/v2) | ✅ (expert) |
 | — (CHIPSEC `smm`) | Intel SMRAMC D_LCK | "SMM locked" | ➕ |
 | — (CHIPSEC `smrr`) | Intel SMRR valid | "SMRAM range protected" | ➕ |
 | Amd.SmmLocked (1) | HWCR.SmmLock + Sinkclose | "SMM locked" (HWCR.SmmLock); no Sinkclose check | ◐ |
 | — (CHIPSEC `smm_dma`-like) | AMD TSEG valid (SMM_MASK.TValid) | "SMRAM range protected" | ➕ |
-| Amd.SpiWriteProtection (2) / SpiReplayProtection (3) / RollbackProtection (4) / PlatformSecureBoot (2) / EntrySign (1) | PSP-reported AMD protections | AMD BIOS WP reported N/A ("needs MMIO") | ❌ |
+| Amd.SpiWriteProtection (2) / SpiReplayProtection (3) / RollbackProtection (4) / PlatformSecureBoot (2) / EntrySign (1) | PSP-reported AMD protections | ROM Armor as "BIOS write protection", `fused_part` as "Boot Guard verified boot" (ccp driver); replay, rollback and EntrySign not read | ◐ |
 | Iommu (2) | IOMMU present **and enabled** | "IOMMU described (DMAR/IVRS)": table present only | ◐ |
 | PrebootDma (3) | DMAR opt-in / IVRS pre-boot DMA | DMAR opt-in flag shown in detail text (Intel); not a pass/fail | ◐ |
 | — | Thunderbolt `iommu_dma_protection` | "Thunderbolt DMA protection" | ➕ |
-| IntelBootguard.{Enabled,Verified,Acm,Policy,Otp} (2–3) | BootGuard fuses/policy via MEI | — | ❌ |
-| Mei.ManufacturingMode / OverrideStrap / KeyManifest / Version (1) | CSME state from HFSTS | — | ❌ |
-| PlatformDebugEnabled (DCI) (1) / DebugLocked (2) / PlatformFused (1) | Debug interfaces locked | — | ❌ |
-| Tpm.Version20 / EmptyPcr (1) / ReconstructionPcr0 (2) | TPM 2.0, PCRs populated, event log consistent | — | ❌ |
+| IntelBootguard.{Enabled,Verified,Acm,Policy,Otp} (2–3) | BootGuard fuses/policy via MEI | "Boot Guard verified boot" (HFSTS6, CSME 11 to 17) | ✅ |
+| Mei.ManufacturingMode / OverrideStrap / KeyManifest / Version (1) | CSME state from HFSTS | "Intel ME normal mode" (HFSTS1); key manifest and version CVEs not checked | ◐ |
+| PlatformDebugEnabled (DCI) (1) / DebugLocked (2) / PlatformFused (1) | Debug interfaces locked | "CPU debug interface locked" (IA32_DEBUG_INTERFACE; AMD `debug_lock_on`) | ✅ |
+| Tpm.Version20 / EmptyPcr (1) / ReconstructionPcr0 (2) | TPM 2.0, PCRs populated, event log consistent | "Boot measurements (TPM)": event log replayed against PCR 0 to 7 | ✅ |
 | SupportedCpu (1) | Platform has HSI tests | `chipset_unconfirmed` flag | ◐ |
 | SuspendToRam / SuspendToIdle (3) | S3 disabled | — | ❌ (low value) |
 | EncryptedRam (4), Smap (4), Cet.* (3), IntelGds (2) | CPU hardening features | — | ❌ (low forensic value) |
