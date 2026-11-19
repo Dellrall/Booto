@@ -37,15 +37,14 @@ typedef struct { uint32_t ptr; uint32_t size; } raw_section_t;
 // COFF string table right after the symbol table.
 static bool section_is_vendor_cert(const uint8_t *buf, size_t len, size_t coff, const uint8_t *e) {
     if (e[0] != '/') return false;
-    char num[8];
-    memcpy(num, e + 1, 7);
-    num[7] = '\0';
-    char *end;
-    unsigned long off = strtoul(num, &end, 10);
+    // COFF long name "/<decimal offset>"; a digit loop, not strtoul, so CBMC can check it.
+    uint64_t off = 0;
+    size_t digits = 0;
+    while (digits < 7 && e[1 + digits] >= '0' && e[1 + digits] <= '9') off = off * 10 + (uint64_t)(e[1 + digits++] - '0');
     uint32_t symtab = rd32(buf + coff + 8);
     static const char name[] = ".vendor_cert";
     uint64_t at = (uint64_t)symtab + (uint64_t)rd32(buf + coff + 12) * 18 + off;
-    return end != num && symtab != 0 && in_bounds(len, at, sizeof(name)) && memcmp(buf + at, name, sizeof(name)) == 0;
+    return digits > 0 && symtab != 0 && in_bounds(len, at, sizeof(name)) && memcmp(buf + at, name, sizeof(name)) == 0;
 }
 
 static int cmp_section(const void *a, const void *b) {
