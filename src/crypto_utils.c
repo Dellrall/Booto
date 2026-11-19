@@ -157,6 +157,17 @@ FILE *fopen_regular(const char *path) {
     return fp;
 }
 
+FILE *fopen_output(const char *path, bool append) {
+    int fd = open(path, O_WRONLY | O_CREAT | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK | (append ? O_APPEND : 0), 0644);
+    if (fd < 0) return NULL;
+    struct stat st;
+    // Truncate only after the type check, so a planted device is never touched.
+    bool ok = fstat(fd, &st) == 0 && S_ISREG(st.st_mode) && (append || ftruncate(fd, 0) == 0);
+    FILE *fp = ok ? fdopen(fd, append ? "ab" : "wb") : NULL;
+    if (!fp) close(fd);
+    return fp;
+}
+
 bool sha256_file_hex(const char *file_path, char hex_out[65]) {
     if (!file_path || !hex_out) return false;
 

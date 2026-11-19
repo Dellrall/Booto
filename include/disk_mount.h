@@ -141,6 +141,14 @@ booto_error_t disk_ensure_private_dir(const char *path);
 booto_error_t disk_ensure_report_dir(const char *path);
 
 /**
+ * @brief Resolves rel inside the mounted target root as the target's own kernel would: ".." and absolute
+ *        symlinks stay in root instead of reaching the live system. Writes the real path to out.
+ * @param type S_IFREG or S_IFDIR the result must be (a FIFO or device is refused), or 0 for any.
+ * @return BOOTO_OK; BOOTO_ERR_NOT_FOUND when absent; BOOTO_ERR_CORRUPT_DATA for the wrong type; out is "" on error.
+ */
+booto_error_t disk_resolve_in_root(const char *root, const char *rel, unsigned int type, char *out, size_t n);
+
+/**
  * @brief Helper to format bytes into human-readable string (KB, MB, GB, TB).
  */
 const char *disk_format_size(uint64_t bytes, char *buf, size_t buf_size);

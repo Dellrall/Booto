@@ -17,6 +17,9 @@
 #include "elf_analyzer.h"
 
 #include <stdarg.h>
+/* gcc 15 headers map C23 va_start to __builtin_c23_va_start, which cbmc 6.6 lacks. */
+#undef va_start
+#define va_start(ap, last) __builtin_va_start(ap, last)
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>

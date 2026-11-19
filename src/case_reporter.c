@@ -133,14 +133,14 @@ static bool sign_report(const char *report_path) {
 
     char path[600];
     snprintf(path, sizeof(path), "%.500s.sig", report_path);
-    fp = ok ? fopen(path, "wb") : NULL;
+    fp = ok ? fopen_output(path, false) : NULL;
     ok = fp && fwrite(sig, 1, sizeof(sig), fp) == sizeof(sig);
     if (fp) ok = fclose(fp) == 0 && ok;
 
     const char *slash = strrchr(report_path, '/');
     snprintf(path, sizeof(path), "%.*s/booto_report_key.pub", slash ? (int)(slash - report_path) : 1,
              slash ? report_path : ".");
-    fp = ok ? fopen(path, "w") : NULL;
+    fp = ok ? fopen_output(path, false) : NULL;
     ok = fp && PEM_write_PUBKEY(fp, key) == 1;
     if (fp) ok = fclose(fp) == 0 && ok;
     EVP_PKEY_free(key);
@@ -159,7 +159,7 @@ booto_error_t case_report_sign_and_seal(const char *report_path, char sha256_sea
     char seal_file[512];
     snprintf(seal_file, sizeof(seal_file), "%.500s.sha256", report_path);
 
-    FILE *fp = fopen(seal_file, "w");
+    FILE *fp = fopen_output(seal_file, false);
     if (!fp) {
         LOG_ERROR("Failed to create seal file '%s'", seal_file);
         return BOOTO_ERR_IO;

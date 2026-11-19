@@ -47,6 +47,12 @@ void sha256_buffer_hex(const uint8_t *data, size_t len, char hex_out[65]);
 FILE *fopen_regular(const char *path);
 
 /**
+ * @brief Open an output file for writing ("wb") or appending ("ab") without following a symlink
+ *        or writing into a FIFO or device planted at that path.
+ */
+FILE *fopen_output(const char *path, bool append);
+
+/**
  * @brief Compute SHA-256 of a file path and return hex string (64 chars + null).
  */
 bool sha256_file_hex(const char *file_path, char hex_out[65]);

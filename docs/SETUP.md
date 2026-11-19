@@ -184,7 +184,7 @@ booto -c -t /dev/nvme0n1p3 --undelete /persistence/cases/recovered   # NTFS: cop
    ```bash
    openssl pkeyutl -verify -pubin -inkey booto_report_key.pub -rawin -in case_X.json -sigfile case_X.json.sig
    ```
-   It must print `Signature Verified Successfully`. Each stick makes its own Ed25519 key on first export and keeps the private half in `keys/` on the report partition, outside `cases/`; keep a copy of `booto_report_key.pub` from a known-good run, because anyone who can write the partition can also replace the key.
+   It must print `Signature Verified Successfully`. Each stick makes its own Ed25519 key on first export and keeps the private half in `keys/` on the report partition, outside `cases/`; keep a copy of `booto_report_key.pub` from a known-good run, because anyone who can write the partition can also replace the key. Record its fingerprint with `openssl pkey -pubin -in booto_report_key.pub -outform DER | sha256sum` and compare it on each case. On a partition made without a passphrase the private key sits unencrypted, so anyone who holds the stick can sign a forged report; a signature you trust needs the encrypted partition.
 
 ## 4. Limits
 

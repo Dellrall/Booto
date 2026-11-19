@@ -10,6 +10,7 @@
 #endif
 
 #include "logger.h"
+#include "crypto_utils.h"
 
 #include <execinfo.h>
 #include <fcntl.h>
@@ -64,7 +65,7 @@ int logger_init(log_level_t min_level, const char *log_file) {
         if (g_log_file) {
             fclose(g_log_file);
         }
-        g_log_file = fopen(log_file, "a");
+        g_log_file = fopen_output(log_file, true);
         if (!g_log_file) {
             fprintf(stderr, "Warning: Failed to open log file '%s'\n", log_file);
             rc = -1;
