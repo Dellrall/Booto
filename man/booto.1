@@ -129,6 +129,7 @@ The signing key is
 made on first use; its public half is written beside the reports as
 .IR booto_report_key.pub .
 Without that folder the report is sealed but not signed.
+On a report partition without a passphrase the key is stored unencrypted, so the signature only proves the report came from whoever held the stick.
 .TP
 .BR \-u ", " \-\-update\-rules
 Regenerate the rule files by running
