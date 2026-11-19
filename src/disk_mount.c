@@ -8,6 +8,7 @@
 #ifndef _DEFAULT_SOURCE
 #define _DEFAULT_SOURCE
 #endif
+#define _GNU_SOURCE /* O_PATH */
 
 #include "disk_mount.h"
 #include "logger.h"
@@ -20,6 +21,7 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <linux/fs.h>
+#include <linux/openat2.h>
 #include <poll.h>
 #include <signal.h>
 #include <stdio.h>
@@ -276,6 +278,32 @@ booto_error_t disk_ensure_private_dir(const char *path) {
 booto_error_t disk_ensure_report_dir(const char *path) {
     booto_error_t err = disk_ensure_private_dir(path);
     if (err == BOOTO_OK && chmod(path, 0755) != 0) err = BOOTO_ERR_IO;
+    return err;
+}
+
+booto_error_t disk_resolve_in_root(const char *root, const char *rel, unsigned int type, char *out, size_t n) {
+    if (!root || !rel || !out || n == 0) return BOOTO_ERR_INVALID_ARG;
+    out[0] = '\0';
+    int rootfd = open(root, O_PATH | O_DIRECTORY | O_CLOEXEC);
+    if (rootfd < 0) return errno == ENOENT ? BOOTO_ERR_NOT_FOUND : BOOTO_ERR_IO;
+    struct open_how how = {.flags = O_PATH | O_CLOEXEC, .resolve = RESOLVE_IN_ROOT | RESOLVE_NO_MAGICLINKS};
+    int fd = (int)syscall(SYS_openat2, rootfd, rel, &how, sizeof(how));
+    int open_errno = errno;
+    close(rootfd);
+    if (fd < 0) return open_errno == ENOENT || open_errno == ENOTDIR ? BOOTO_ERR_NOT_FOUND : BOOTO_ERR_IO;
+    booto_error_t err = BOOTO_OK;
+    struct stat st;
+    char link[64];
+    snprintf(link, sizeof(link), "/proc/self/fd/%d", fd);
+    if (fstat(fd, &st) != 0) err = BOOTO_ERR_IO;
+    else if (type && (st.st_mode & S_IFMT) != type) err = BOOTO_ERR_CORRUPT_DATA;
+    else {
+        ssize_t len = readlink(link, out, n);
+        if (len <= 0 || (size_t)len >= n) err = BOOTO_ERR_IO;
+        else out[len] = '\0';
+    }
+    close(fd);
+    if (err != BOOTO_OK) out[0] = '\0';
     return err;
 }
 

@@ -5,6 +5,7 @@
 #include "test_framework.h"
 #include "preload_scanner.h"
 
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -78,6 +79,33 @@ static void test_ld_preload_detection(void) {
     ASSERT_STR_EQ(res.findings[0].target_library, "/lib/x86_64-linux-gnu/libazazel.so", "Library path");
     ASSERT_STR_EQ(res.findings[0].rule_id, "PRELOAD_ACTIVE_HOOK", "Rule ID");
     TEST_PASS("test_ld_preload_detection");
+}
+
+// An absolute symlink resolves inside the target, as on the target itself; a FIFO is refused, not read (it would hang).
+static void test_ld_preload_symlink_and_fifo(void) {
+    TEST_START("test_ld_preload_symlink_and_fifo");
+    make_root();
+    write_file("/var/lib/hook/preload.conf", "/lib/libhide.so\n");
+    char p[160];
+    snprintf(p, sizeof(p), "%s/etc/ld.so.preload", g_root);
+    ASSERT_INT_EQ(symlink("/var/lib/hook/preload.conf", p), 0, "plant absolute symlink");
+
+    preload_scan_result_t res;
+    booto_error_t err = preload_scan_rootfs(g_root, &res);
+    ASSERT_INT_EQ(err, BOOTO_OK, "scan succeeds");
+    bool hook = false;
+    for (int i = 0; i < res.threats_detected; i++)
+        if (strcmp(res.findings[i].rule_id, "PRELOAD_ACTIVE_HOOK") == 0 &&
+            strcmp(res.findings[i].target_library, "/lib/libhide.so") == 0) hook = true;
+    ASSERT_TRUE(hook, "hook behind an absolute symlink is found");
+
+    snprintf(p, sizeof(p), "%s/etc/ld.so.preload", g_root);
+    unlink(p);
+    ASSERT_INT_EQ(mkfifo(p, 0644), 0, "plant FIFO");
+    err = preload_scan_rootfs(g_root, &res);
+    ASSERT_TRUE(err != BOOTO_OK, "FIFO preload is an error (engine incomplete), and the scan returns");
+    remove_tree();
+    TEST_PASS("test_ld_preload_symlink_and_fifo");
 }
 
 static void test_ld_preload_whitespace_tokens(void) {
@@ -378,6 +406,7 @@ static void test_full_table_keeps_severity(void) {
 int main(void) {
     printf("\n--- Running LD_PRELOAD & PAM Interceptor Tests ---\n");
     test_ld_preload_detection();
+    test_ld_preload_symlink_and_fifo();
     test_ld_preload_whitespace_tokens();
     test_ld_preload_long_line();
     test_environment_ld_preload();

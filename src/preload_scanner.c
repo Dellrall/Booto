@@ -11,6 +11,7 @@
 
 #include "preload_scanner.h"
 #include "crypto_utils.h"
+#include "disk_mount.h"
 #include "logger.h"
 #include "rules_loader.h"
 #include "yara_scan.h"
@@ -18,6 +19,7 @@
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -57,8 +59,12 @@ static void add_graded_threat(preload_scan_result_t *result, const char *file_pa
 
 #define PRELOAD_MAX_FILE_BYTES (1024u * 1024u)
 
-// Reads path fully into a NUL-terminated heap buffer; absent -> NOT_FOUND, oversized -> CORRUPT_DATA.
-static booto_error_t read_config_file(const char *path, char **out, size_t *out_len) {
+// Reads <rootfs><rel>, resolved inside rootfs, into a NUL-terminated heap buffer; absent -> NOT_FOUND,
+// not a regular file (a planted FIFO would hang the read) -> IO, oversized -> CORRUPT_DATA.
+static booto_error_t read_config_file(const char *rootfs, const char *rel, char **out, size_t *out_len) {
+    char path[PATH_MAX];
+    booto_error_t err = disk_resolve_in_root(rootfs, rel, S_IFREG, path, sizeof(path));
+    if (err != BOOTO_OK) return err == BOOTO_ERR_NOT_FOUND ? err : BOOTO_ERR_IO;
     FILE *fp = fopen(path, "rb");
     if (!fp) return errno == ENOENT ? BOOTO_ERR_NOT_FOUND : BOOTO_ERR_IO;
     char *buf = malloc(PRELOAD_MAX_FILE_BYTES + 1);
@@ -106,10 +112,10 @@ static void report_preload_tokens(const char *rootfs, const char *cfg_path, cons
         memcpy(lib, s + start, tok_len);
         lib[tok_len] = '\0';
 
-        char target_full[1024];
-        snprintf(target_full, sizeof(target_full), "%.700s%s%s", rootfs, lib[0] == '/' ? "" : "/", lib);
+        char target_full[PATH_MAX];
         char sha256[65] = "0000000000000000000000000000000000000000000000000000000000000000";
-        sha256_file_hex(target_full, sha256);
+        if (disk_resolve_in_root(rootfs, lib, S_IFREG, target_full, sizeof(target_full)) == BOOTO_OK)
+            sha256_file_hex(target_full, sha256);
 
         add_preload_threat(result, cfg_path, threat_name, lib, sha256, rule_id, description);
     }
@@ -121,7 +127,7 @@ static booto_error_t scan_ld_so_preload(const char *rootfs, preload_scan_result_
 
     char *buf = NULL;
     size_t len = 0;
-    booto_error_t err = read_config_file(preload_path, &buf, &len);
+    booto_error_t err = read_config_file(rootfs, "/etc/ld.so.preload", &buf, &len);
     if (err == BOOTO_ERR_NOT_FOUND) return BOOTO_OK;
     if (err != BOOTO_OK) {
         LOG_ERROR("Cannot read '%s' (err: %d); preload hooks not audited", preload_path, err);
@@ -143,7 +149,7 @@ static booto_error_t scan_environment(const char *rootfs, preload_scan_result_t 
 
     char *buf = NULL;
     size_t len = 0;
-    booto_error_t err = read_config_file(env_path, &buf, &len);
+    booto_error_t err = read_config_file(rootfs, "/etc/environment", &buf, &len);
     if (err == BOOTO_ERR_NOT_FOUND) return BOOTO_OK;
     if (err != BOOTO_OK) {
         LOG_ERROR("Cannot read '%s' (err: %d); LD_PRELOAD environment not audited", env_path, err);
@@ -208,7 +214,7 @@ typedef void (*conf_line_fn)(const char *rootfs, const char *file, const char *l
 // Feeds every non-comment line (leading space trimmed, newline cut) of each <rootfs><rel_dir>/*<suffix> file to fn.
 static void scan_conf_dir(const char *rootfs, const char *rel_dir, const char *suffix, conf_line_fn fn,
                           preload_scan_result_t *result) {
-    char conf_dir[512];
+    char conf_dir[512], real_dir[PATH_MAX];
     snprintf(conf_dir, sizeof(conf_dir), "%.400s%s", rootfs, rel_dir);
 
     // Merged-/usr roots symlink /lib to usr/lib; walking both would report every hook twice.
@@ -217,7 +223,9 @@ static void scan_conf_dir(const char *rootfs, const char *rel_dir, const char *s
     snprintf(lib, sizeof(lib), "%.400s/lib", rootfs);
     if (strncmp(rel_dir, "/lib/", 5) == 0 && lstat(lib, &st) == 0 && S_ISLNK(st.st_mode)) return;
 
-    DIR *dir = opendir(conf_dir);
+    // Resolved inside rootfs: an absolute symlink (/etc/cron.d -> /x) must not swap in the live system's folder.
+    if (disk_resolve_in_root(rootfs, rel_dir, S_IFDIR, real_dir, sizeof(real_dir)) != BOOTO_OK) return;
+    DIR *dir = opendir(real_dir);
     if (!dir) return;
 
     size_t suffix_len = strlen(suffix);
@@ -227,10 +235,12 @@ static void scan_conf_dir(const char *rootfs, const char *rel_dir, const char *s
         if (entry->d_name[0] == '.' && (name_len == 1 || strcmp(entry->d_name, "..") == 0)) continue;
         if (name_len < suffix_len || strcmp(entry->d_name + name_len - suffix_len, suffix) != 0) continue;
 
-        char full_file[1024];
+        char full_file[1024], rel_file[700], real_file[PATH_MAX];
         snprintf(full_file, sizeof(full_file), "%.500s/%.255s", conf_dir, entry->d_name);
+        snprintf(rel_file, sizeof(rel_file), "%.400s/%.255s", rel_dir, entry->d_name);
+        if (disk_resolve_in_root(rootfs, rel_file, S_IFREG, real_file, sizeof(real_file)) != BOOTO_OK) continue;
 
-        FILE *fp = fopen(full_file, "r");
+        FILE *fp = fopen(real_file, "r");
         if (!fp) continue;
 
         result->files_scanned++;
@@ -269,10 +279,10 @@ static const char *first_program(const char *s, char *out, size_t out_len) {
 
 static void report_program(const char *rootfs, const char *file, const char *program, const char *threat_name,
                            const char *rule_id, const char *description, preload_scan_result_t *result) {
-    char full[1024];
-    snprintf(full, sizeof(full), "%.700s%s%.300s", rootfs, program[0] == '/' ? "" : "/", program);
+    char full[PATH_MAX];
     char sha256[65] = "0000000000000000000000000000000000000000000000000000000000000000";
-    if (program[0]) sha256_file_hex(full, sha256);
+    if (program[0] && disk_resolve_in_root(rootfs, program, S_IFREG, full, sizeof(full)) == BOOTO_OK)
+        sha256_file_hex(full, sha256);
     add_preload_threat(result, file, threat_name, program, sha256, rule_id, description);
 }
 

@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- An absolute symlink on the scanned disk no longer hides what it points to: `/etc/ld.so.preload`, `/etc/environment`, the persistence folders (cron, systemd, udev, sudoers, profile, `authorized_keys`), the initramfs, `/lib/modules` and `/boot` now resolve inside the target as its own kernel would, instead of on the live system. A planted FIFO there is refused (the engine reports an error) instead of hanging the scan.
+
 ## [1.12.1-beta] - 2026-11-13
 
 ### Fixed
