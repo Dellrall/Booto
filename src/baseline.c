@@ -129,7 +129,7 @@ static booto_error_t tree_write(const char *root, const char *path, bool hashes)
     if (!root || !path) return BOOTO_ERR_INVALID_ARG;
     struct stat st;
     if (lstat(root, &st) != 0 || !S_ISDIR(st.st_mode)) return BOOTO_ERR_IO;
-    FILE *fp = fopen(path, "w");
+    FILE *fp = fopen_output(path, false);
     if (!fp) return BOOTO_ERR_IO;
     size_t rlen = strlen(root);
     while (rlen > 1 && root[rlen - 1] == '/') rlen--;
@@ -149,7 +149,7 @@ booto_error_t hashlist_write(const char *root, const char *path) {
 
 booto_error_t baseline_write(const baseline_t *b, const char *path) {
     if (!b || !path) return BOOTO_ERR_INVALID_ARG;
-    FILE *fp = fopen(path, "w");
+    FILE *fp = fopen_output(path, false);
     if (!fp) return BOOTO_ERR_IO;
     for (int i = 0; i < b->count; i++) fprintf(fp, "%s  %s\n", b->e[i].sha256, b->e[i].label);
     bool ok = !ferror(fp);

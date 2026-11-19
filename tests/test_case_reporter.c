@@ -248,6 +248,23 @@ static void test_existing_report_kept(void) {
     TEST_PASS("test_existing_report_kept");
 }
 
+static void test_planted_symlink_not_followed(void) {
+    TEST_START("test_planted_symlink_not_followed");
+    char victim[512], link[512], got[64];
+    snprintf(victim, sizeof(victim), "%s/victim", g_dir);
+    snprintf(link, sizeof(link), "%s/case_LINK-1.json.sha256", g_dir);
+    FILE *fp = fopen(victim, "w");
+    if (fp) fputs("keep", fp), fclose(fp);
+    ASSERT_TRUE(symlink(victim, link) == 0, "Symlink planted at the seal path");
+    forensic_case_summary_t sum;
+    fill_summary(&sum, "LINK-1");
+    char path[512];
+    ASSERT_INT_EQ(case_report_generate_json(&sum, g_dir, path, sizeof(path)), BOOTO_ERR_IO, "Seal through a symlink fails");
+    slurp(victim, got, sizeof(got));
+    ASSERT_STR_EQ(got, "keep", "Symlink target is not overwritten");
+    TEST_PASS("test_planted_symlink_not_followed");
+}
+
 int main(void) {
     printf("\n--- Running Forensic Case Reporter Tests ---\n");
     if (!mkdtemp(g_dir)) {
@@ -265,6 +282,7 @@ int main(void) {
     test_unsafe_case_id_rejected();
     test_unwritable_dir_fails();
     test_existing_report_kept();
+    test_planted_symlink_not_followed();
     char cmd[128];
     snprintf(cmd, sizeof(cmd), "rm -rf '%s'", g_dir);
     if (system(cmd) != 0) fprintf(stderr, "warning: cleanup of %s failed\n", g_dir);

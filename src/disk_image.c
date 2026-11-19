@@ -40,7 +40,7 @@ static void read_chunk(int fd, uint8_t *buf, size_t len, off_t off, FILE **log, 
         if (!*log) {
             char path[600];
             snprintf(path, sizeof(path), "%.500s.log", dst);
-            *log = fopen(path, "w");
+            *log = fopen_output(path, false);
             if (*log) fprintf(*log, "# unreadable ranges, zero-filled in the image: offset length (bytes)\n");
         }
         if (!*log || fprintf(*log, "%lld %zu\n", (long long)(off + (off_t)pos), blk) < 0) *log_bad = true;
@@ -85,7 +85,7 @@ booto_error_t disk_image_acquire(const char *src, const char *dst, disk_image_re
     for (int i = 0; i < 32; i++) snprintf(res->sha256 + i * 2, 3, "%02x", digest[i]);
     char path[600];
     snprintf(path, sizeof(path), "%.500s.sha256", dst);
-    FILE *fp = fopen(path, "w");
+    FILE *fp = fopen_output(path, false);
     const char *base = strrchr(dst, '/');
     ok = fp && fprintf(fp, "%s  %s\n", res->sha256, base ? base + 1 : dst) > 0;
     if (fp) ok = fclose(fp) == 0 && ok;
