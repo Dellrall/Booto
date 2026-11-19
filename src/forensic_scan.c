@@ -19,6 +19,7 @@
 
 #include <dirent.h>
 #include <inttypes.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
@@ -252,33 +253,31 @@ static bool begin(forensic_scan_report_t *r, scan_module_id_t id, const bool *en
     return true;
 }
 
-static bool is_regular_file(const char *path) {
-    struct stat st;
-    return stat(path, &st) == 0 && S_ISREG(st.st_mode);
+static bool is_target_file(const char *root, const char *rel, char *out, size_t out_size) {
+    return disk_resolve_in_root(root, rel, S_IFREG, out, out_size) == BOOTO_OK;
 }
 
-/* <root>/boot/initrd.img, <root>/initrd.img, else lexicographically greatest <root>/boot/initrd.img-*. */
+/* <root>/boot/initrd.img, <root>/initrd.img, else lexicographically greatest <root>/boot/initrd.img-*; each
+ * resolved inside root, so an absolute symlink cannot hand the live system's initrd to the audit. */
 static bool find_initramfs(const char *root, char *out, size_t out_size) {
-    snprintf(out, out_size, "%.256s/boot/initrd.img", root);
-    if (is_regular_file(out)) return true;
-    snprintf(out, out_size, "%.256s/initrd.img", root);
-    if (is_regular_file(out)) return true;
+    if (is_target_file(root, "/boot/initrd.img", out, out_size) || is_target_file(root, "/initrd.img", out, out_size))
+        return true;
 
-    char boot[300];
-    snprintf(boot, sizeof(boot), "%.256s/boot", root);
+    char boot[PATH_MAX], rel[300];
+    if (disk_resolve_in_root(root, "/boot", S_IFDIR, boot, sizeof(boot)) != BOOTO_OK) return false;
     DIR *d = opendir(boot);
     if (!d) return false;
     char best[256] = "";
     struct dirent *de;
     while ((de = readdir(d)) != NULL) {
         if (strncmp(de->d_name, "initrd.img-", 11) != 0 || strcmp(de->d_name, best) <= 0) continue;
-        snprintf(out, out_size, "%.256s/%.200s", boot, de->d_name);
-        if (is_regular_file(out)) snprintf(best, sizeof(best), "%.255s", de->d_name);
+        snprintf(rel, sizeof(rel), "/boot/%.200s", de->d_name);
+        if (is_target_file(root, rel, out, out_size)) snprintf(best, sizeof(best), "%.255s", de->d_name);
     }
     closedir(d);
     if (!best[0]) return false;
-    snprintf(out, out_size, "%.256s/%.200s", boot, best);
-    return true;
+    snprintf(rel, sizeof(rel), "/boot/%.200s", best);
+    return is_target_file(root, rel, out, out_size);
 }
 
 /* The first flagged file is captured for the Inspect view; the export is a no-op when quarantine is off.
@@ -488,7 +487,8 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
         } else if (windows) {
             set_status(out, SCAN_MOD_KERNEL, SCAN_STATUS_NA, BOOTO_OK, WIN_NOTE);
         } else {
-            snprintf(path, sizeof(path), "%.256s/lib/modules", root);
+            /* An absolute /lib -> /usr/lib symlink must not walk the live system's modules; absent -> empty walk. */
+            disk_resolve_in_root(root, "/lib/modules", S_IFDIR, path, sizeof(path));
             set_result(out, SCAN_MOD_KERNEL, kernel_inspect_directory(path, &out->kernel));
             for (int i = 0; i < out->kernel.threats_detected && i < MAX_KERNEL_THREATS; i++)
                 export_file(out, q, "kernel", root, out->kernel.findings[i].file_path, QUARANTINE_MAX_ITEM);
@@ -568,7 +568,7 @@ booto_error_t forensic_scan_run(const char *target_dev, const char *rootfs_dir, 
     if (g_baseline) {
         if (target_dev) baseline_add_device(g_baseline, "disk/first-1MiB", target_dev, MBR_EXPORT_BYTES);
         if (have_root) {
-            snprintf(path, sizeof(path), "%.256s/boot", root);
+            disk_resolve_in_root(root, "/boot", S_IFDIR, path, sizeof(path));
             baseline_add_tree(g_baseline, "root/boot", path);
             core_ctx_t c = { g_baseline, strlen(root) };
             if (windows) winboot_each_core_file(root, add_core, &c);

@@ -350,6 +350,49 @@ static void test_ensure_private_dir(void) {
     TEST_PASS("test_ensure_private_dir");
 }
 
+// Benign: Debian's relative /initrd.img symlink resolves. Malicious: absolute and ".." symlinks stay in the root
+// (never reach the live system), and a planted FIFO is refused.
+static void test_resolve_in_root(void) {
+    TEST_START("test_resolve_in_root");
+    char root[] = "/tmp/booto_resolve_XXXXXX";
+    ASSERT_TRUE(mkdtemp(root) != NULL, "mkdtemp");
+    char p[160], q[160], out[4096];
+    snprintf(p, sizeof(p), "%s/boot", root);
+    mkdir(p, 0755);
+    snprintf(p, sizeof(p), "%s/boot/initrd.img-6.1", root);
+    FILE *fp = fopen(p, "w");
+    if (fp) fclose(fp);
+    snprintf(q, sizeof(q), "%s/initrd.img", root);
+    bool fixtures = symlink("boot/initrd.img-6.1", q) == 0;
+    snprintf(q, sizeof(q), "%s/abs", root);
+    fixtures = fixtures && symlink("/boot/initrd.img-6.1", q) == 0;
+    snprintf(q, sizeof(q), "%s/up", root);
+    fixtures = fixtures && symlink("../../../../etc/hostname", q) == 0;
+    snprintf(q, sizeof(q), "%s/fifo", root);
+    fixtures = fixtures && mkfifo(q, 0644) == 0;
+
+    booto_error_t rel_err = disk_resolve_in_root(root, "/initrd.img", S_IFREG, out, sizeof(out));
+    bool rel_ok = rel_err == BOOTO_OK && strcmp(out, p) == 0;
+    booto_error_t abs_err = disk_resolve_in_root(root, "/abs", S_IFREG, out, sizeof(out));
+    bool abs_ok = abs_err == BOOTO_OK && strcmp(out, p) == 0;
+    booto_error_t up_err = disk_resolve_in_root(root, "/up", 0, out, sizeof(out));
+    booto_error_t fifo_err = disk_resolve_in_root(root, "/fifo", S_IFREG, out, sizeof(out));
+    booto_error_t dir_err = disk_resolve_in_root(root, "/boot", S_IFREG, out, sizeof(out));
+
+    char cmd[96];
+    snprintf(cmd, sizeof(cmd), "rm -rf '%s'", root);
+    if (system(cmd) != 0) perror("rm");
+
+    ASSERT_TRUE(fixtures, "Fixture setup");
+    ASSERT_TRUE(rel_ok, "Relative symlink resolves to the target's file");
+    ASSERT_TRUE(abs_ok, "Absolute symlink resolves inside the target root");
+    ASSERT_INT_EQ(up_err, BOOTO_ERR_NOT_FOUND, ".. cannot climb out to the live system's /etc/hostname");
+    ASSERT_INT_EQ(fifo_err, BOOTO_ERR_CORRUPT_DATA, "FIFO refused");
+    ASSERT_INT_EQ(dir_err, BOOTO_ERR_CORRUPT_DATA, "Wrong type refused");
+    ASSERT_TRUE(out[0] == '\0', "Output cleared on error");
+    TEST_PASS("test_resolve_in_root");
+}
+
 int main(void) {
     printf("\n--- Running Storage Discovery & Mount Tests ---\n");
     test_size_formatting();
@@ -361,6 +404,7 @@ int main(void) {
     test_exec_argv_stdin_verbatim();
     test_exec_argv_not_found();
     test_ensure_private_dir();
+    test_resolve_in_root();
     TEST_SUMMARY();
     return 0;
 }
